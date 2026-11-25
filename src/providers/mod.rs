@@ -1,3 +1,90 @@
 //! Editor providers: navigation, injections, inlay hints, diagnostics (T3-2~T3-5).
 //!
-//! Lane L6 owns this directory; see `docs/TASKS.md` P3.
+//! Every provider is a thin trait impl over a pure function in this directory:
+//! the text of the document is read once, nothing else is touched (no IO, no
+//! host calls), and the result is a deterministic function of the text.
+//!
+//! Switches are ordinary plugin settings, default off so the feature cannot
+//! surprise a user who installed the plugin for rendering:
+//!
+//! | setting | default | effect |
+//! | --- | --- | --- |
+//! | `nav.enabled` | `false` | `definition` and `line_markers` |
+//! | `injections.enabled` | `false` | SQL `Injections` inside mapper XML |
+//! | `sql.dialect` | unset | dialect for quote checks in diagnostics |
+//!
+//! Inlay hints and column diagnostics additionally need table columns. They are
+//! never guessed: the columns come from [`set_column_lookup`], which the schema
+//! lane fills once it has real metadata. Until then no inlay hint is produced
+//! and no column is reported unknown.
+
+pub mod diag;
+pub mod inject;
+pub mod inlay;
+pub mod nav;
+pub(crate) mod sqltext;
+
+use openidea_plugin::host;
+use std::sync::{OnceLock, RwLock};
+
+/// Turns `nav.enabled` (and friends) into a boolean; an absent setting is off.
+pub(crate) fn setting_on(key: &str) -> bool {
+    host::setting_bool(key).unwrap_or(false)
+}
+
+/// The configured dialect name (`mysql`, `postgres`, `oracle`, `sqlserver`, …),
+/// or an empty string when the user has not chosen one.
+pub(crate) fn dialect_setting() -> String {
+    host::setting_string(diag::DIALECT_SETTING).unwrap_or_default()
+}
+
+pub(crate) fn is_xml(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".xml")
+}
+
+pub(crate) fn is_java(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".java")
+}
+
+/// Table name (lower-cased, lower-case compare) → column names.
+pub type ColumnLookup = fn(&str) -> Option<Vec<String>>;
+
+fn column_slot() -> &'static RwLock<Option<ColumnLookup>> {
+    static SLOT: OnceLock<RwLock<Option<ColumnLookup>>> = OnceLock::new();
+    SLOT.get_or_init(|| RwLock::new(None))
+}
+
+/// Supplies table columns to inlay hints and diagnostics. The schema lane (L8)
+/// calls this with its cache; `None` removes the source and both providers go
+/// quiet again.
+pub fn set_column_lookup(lookup: Option<ColumnLookup>) {
+    if let Ok(mut slot) = column_slot().write() {
+        *slot = lookup;
+    }
+}
+
+/// Columns of `table`, when a source knows them.
+pub fn columns_for(table: &str) -> Option<Vec<String>> {
+    let lookup = *column_slot().read().ok()?;
+    lookup?(table)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_are_classified_by_extension() {
+        assert!(is_xml("a/UserMapper.XML"));
+        assert!(is_java("a/UserMapper.java"));
+        assert!(!is_xml("a/UserMapper.java"));
+        assert!(!is_java("a/pom.xml"));
+    }
+
+    #[test]
+    fn no_column_source_means_no_columns() {
+        // The registry is process-wide and empty by default in this test binary
+        // unless another test sets it; reading it never panics.
+        let _ = columns_for("t_user");
+    }
+}

@@ -388,10 +388,10 @@ fn utf8_len(first: u8) -> usize {
 fn find_action(line: &str) -> Option<(usize, usize)> {
     let mut best: Option<(usize, usize)> = None;
     for phrase in ACTION_PHRASES {
-        if let Some(index) = find_ci(line, phrase) {
-            if best.is_none_or(|(best_index, _)| index < best_index) {
-                best = Some((index, phrase.len()));
-            }
+        if let Some(index) = find_ci(line, phrase)
+            && best.is_none_or(|(best_index, _)| index < best_index)
+        {
+            best = Some((index, phrase.len()));
         }
     }
     best

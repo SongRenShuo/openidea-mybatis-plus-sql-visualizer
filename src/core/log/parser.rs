@@ -74,13 +74,12 @@ impl<'a> Emitter<'a> {
         if pending.duration_ms.is_none() {
             pending.duration_ms = self.current_duration;
         }
-        if pending.duration_ms.is_none() {
-            if let Some((duration, line_no)) = self.pending_duration {
-                if pending.line_no.saturating_sub(line_no) <= 3 {
-                    pending.duration_ms = Some(duration);
-                    self.pending_duration = None;
-                }
-            }
+        if pending.duration_ms.is_none()
+            && let Some((duration, line_no)) = self.pending_duration
+            && pending.line_no.saturating_sub(line_no) <= 3
+        {
+            pending.duration_ms = Some(duration);
+            self.pending_duration = None;
         }
         if pending.confidence != Confidence::Exact && pending.raw_line.is_none() {
             pending.raw_line = Some(pending.raw_sql.clone());

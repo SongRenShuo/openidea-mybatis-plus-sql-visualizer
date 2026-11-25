@@ -18,14 +18,6 @@ fn parse_with(lines: &[&str], opts: &ParseOptions) -> LogAnalysis {
     parse(&lines.join("\n"), opts)
 }
 
-fn entries_of(analysis: &LogAnalysis, family: Family) -> Vec<&LogEntry> {
-    analysis
-        .entries
-        .iter()
-        .filter(|entry| entry.family == family)
-        .collect()
-}
-
 // ---------------------------------------------------------------------------
 // MyBatis (reference MyBatisLogParserTest, 10 cases)
 // ---------------------------------------------------------------------------
@@ -491,10 +483,7 @@ fn dedupe_window_splits_groups() {
 
 #[test]
 fn n_plus_one_groups_same_template() {
-    let text = (0..6)
-        .map(|i| mybatis_pair(i))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let text = (0..6).map(mybatis_pair).collect::<Vec<_>>().join("\n");
     let opts = ParseOptions {
         n_plus_one_threshold: 5,
         ..ParseOptions::default()
@@ -509,10 +498,7 @@ fn n_plus_one_groups_same_template() {
 
 #[test]
 fn n_plus_one_below_threshold_is_empty() {
-    let text = (0..3)
-        .map(|i| mybatis_pair(i))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let text = (0..3).map(mybatis_pair).collect::<Vec<_>>().join("\n");
     let opts = ParseOptions {
         n_plus_one_threshold: 5,
         ..ParseOptions::default()
