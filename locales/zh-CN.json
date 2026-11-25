@@ -218,7 +218,7 @@
   "view.logs.help.search": "Ctrl+F：打开搜索行（可切换大小写/正则）",
   "view.logs.help.tab": "Ctrl+Tab / Ctrl+Shift+Tab：切换页签",
   "view.logs.help.dblclick": "双击行：把该行 SQL 送入「SQL 预览」工作台",
-  "view.logs.help.menu": "右键行：复制 SQL / 复制时间戳 / 导出 / 跳转 Java / 跳转 Mapper XML / 按方法聚焦 / 按请求聚焦 / 删除 / 屏蔽此方法",
+  "view.logs.help.menu": "右键行：复制 SQL / 复制时间戳 / 删除 / 屏蔽此方法 / 发送到 SQL→Java / 发送到 日志→SQL / 跳转源码 / 跳转 Mapper XML / 按方法聚焦 / 按请求聚焦 / 按模板聚焦 / 导出可见行集",
   "view.logs.help.scroll": "滚动列表：滚离底部即暂停跟随，滚回底部或点「滚动到底」恢复",
   "view.logs.help.sort": "「按耗时排序」：在时间正序与耗时降序间切换",
   "view.logs.help.blocked": "「屏蔽的方法」：查看已屏蔽的方法并全部恢复",

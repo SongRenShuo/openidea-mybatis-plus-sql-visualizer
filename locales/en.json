@@ -218,7 +218,7 @@
   "view.logs.help.search": "Ctrl+F: open the search row (case / regex toggles)",
   "view.logs.help.tab": "Ctrl+Tab / Ctrl+Shift+Tab: switch tabs",
   "view.logs.help.dblclick": "Double-click a row: send its SQL to the SQL Preview workbench",
-  "view.logs.help.menu": "Right-click a row: copy SQL / copy timestamp / export / jump to Java / jump to Mapper XML / focus by method / focus by request / delete / mute this method",
+  "view.logs.help.menu": "Right-click a row: copy SQL / copy timestamp / delete / mute / send to SQL→Java / send to Log→SQL / jump to source / jump to Mapper XML / focus by method / focus by request / focus by template / export visible rows",
   "view.logs.help.scroll": "Scroll the list: leaving the bottom pauses follow; scroll back or click Scroll to bottom to resume",
   "view.logs.help.sort": "Sort by duration: toggles between time order and duration order",
   "view.logs.help.blocked": "Blocked methods: view the muted methods and restore them all",

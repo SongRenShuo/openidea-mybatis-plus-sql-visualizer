@@ -213,8 +213,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "view.logs.help.menu",
-        "Right-click a row: copy SQL / copy timestamp / export / jump to Java / jump to Mapper XML / focus by method / focus by request / delete / mute this method",
-        "右键行：复制 SQL / 复制时间戳 / 导出 / 跳转 Java / 跳转 Mapper XML / 按方法聚焦 / 按请求聚焦 / 删除 / 屏蔽此方法",
+        "Right-click a row: copy SQL / copy timestamp / delete / mute / send to SQL→Java / send to Log→SQL / jump to source / jump to Mapper XML / focus by method / focus by request / focus by template / export visible rows",
+        "右键行：复制 SQL / 复制时间戳 / 删除 / 屏蔽此方法 / 发送到 SQL→Java / 发送到 日志→SQL / 跳转源码 / 跳转 Mapper XML / 按方法聚焦 / 按请求聚焦 / 按模板聚焦 / 导出可见行集",
     ),
     (
         "view.logs.help.scroll",
