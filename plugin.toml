@@ -28,7 +28,10 @@ required = ["project.read", "events"]
 # Refusing it degrades to text mode; every other feature still works.
 # net:127.0.0.1: connects as a client to the agent's loopback capture socket
 # (the sandbox has no raw sockets). Refusing it leaves the log-file path.
-optional = ["clipboard", "process:java", "net:127.0.0.1"]
+# editor.read: the `preview-sql` command reads the current editor's selection (or
+# the whole document) when it is invoked without arguments. Refusing it keeps the
+# argument forms working.
+optional = ["clipboard", "process:java", "net:127.0.0.1", "editor.read"]
 
 [[contributes.commands]]
 id = "render-xml"
@@ -101,6 +104,19 @@ category = "MyBatis SQL Visualizer"
 id = "index-stats"
 title = "MyBatis SQL: Index Stats"
 category = "MyBatis SQL Visualizer"
+
+# SQL preview (the plugin's main action): `<mapper.xml>#<id>`, a mapper file, a
+# bare path, inline SQL, or — with no argument — the current editor's selection or
+# whole document (`editor.read`, optional). Opens the preview tab on the right.
+[[contributes.commands]]
+id = "preview-sql"
+title = "MyBatis SQL: Preview SQL"
+category = "MyBatis SQL Visualizer"
+
+# The IntelliJ edition binds Alt+Shift+Q to its preview action; the same key here.
+[[contributes.keymaps]]
+command = "preview-sql"
+key = "Alt+Shift+Q"
 
 # Java agent (L7/L12): captures SQL from Application / Spring Boot / JAR
 # Application run configurations. Declaring it derives the high-risk java.agent
@@ -202,6 +218,12 @@ id = "resultmap"
 icon = "icons/marker-resultmap.svg"
 iconDark = "icons/marker-resultmap-dark.svg"
 
+# The gutter preview button's icon (L35a): declared here so the package ships and
+# validates it; the button itself is a `gutter-actions` entry.
+[[contributes.markerIcons]]
+id = "sql-preview"
+icon = "icons/sqlGutter.svg"
+
 [[contributes.fileIcons]]
 id = "mapper-xml"
 patterns = ["*Mapper.xml", "*mapper.xml"]
@@ -216,6 +238,12 @@ extensions = ["xml", "java"]
 [[contributes.providers]]
 kinds = ["definition", "line-markers"]
 languages = ["xml", "java"]
+
+# The preview button beside each mapper statement (L35a); its click runs
+# `preview-sql` with `<path>#<statementId>`.
+[[contributes.providers]]
+kinds = ["gutter-actions"]
+languages = ["xml"]
 
 # SQL highlighting inside mapper XML; off by default (`injections.enabled`).
 [[contributes.providers]]
