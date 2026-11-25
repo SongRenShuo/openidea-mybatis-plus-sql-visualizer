@@ -21,6 +21,7 @@ const SCHEMAS: &[&str] = &[
     include_str!("schemas/sqlv_history_search.schema.json"),
     include_str!("schemas/sqlv_schema_context.schema.json"),
     include_str!("schemas/sqlv_explain.schema.json"),
+    include_str!("schemas/sqlv_index_stats.schema.json"),
 ];
 
 fn call(tool: &str, args: Value) -> Value {
@@ -65,6 +66,7 @@ fn minimal_args(tool: &str) -> Value {
             "schema": { "tables": [{ "name": "user", "columns": [{ "name": "id", "type": "bigint" }] }] }
         }),
         "sqlv_explain" => json!({ "result": [{ "id": 1, "table": "user" }] }),
+        "sqlv_index_stats" => json!({}),
         other => panic!("no minimal arguments for {other}"),
     }
 }
@@ -75,8 +77,8 @@ fn minimal_args(tool: &str) -> Value {
 
 #[test]
 fn schemas_are_wellformed_self_contained_and_fit_the_name_budget() {
-    assert_eq!(TOOLS.len(), 11);
-    assert_eq!(SCHEMAS.len(), 11);
+    assert_eq!(TOOLS.len(), 12);
+    assert_eq!(SCHEMAS.len(), 12);
     for (spec, text) in TOOLS.iter().zip(SCHEMAS) {
         assert_eq!(spec.schema_path, expected_schema_path(spec.name));
         assert!(text.len() <= 256 << 10, "{} exceeds 256 KiB", spec.name);
@@ -99,7 +101,9 @@ fn schemas_are_wellformed_self_contained_and_fit_the_name_budget() {
         let properties = schema["properties"]
             .as_object()
             .unwrap_or_else(|| panic!("{} has an object properties map", spec.name));
-        assert!(!properties.is_empty(), "{}", spec.name);
+        // A tool may take no arguments at all (`sqlv_index_stats` reads the
+        // plugin's own process-wide indexes); an empty map is valid, and every
+        // property that does exist still needs a described type.
         for (property, definition) in properties {
             assert!(
                 definition["description"]
@@ -175,7 +179,7 @@ fn unknown_tool_is_a_structured_error() {
         response["error"]["detail"]["available"]
             .as_array()
             .map(Vec::len),
-        Some(11)
+        Some(12)
     );
 }
 

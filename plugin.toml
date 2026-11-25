@@ -289,3 +289,10 @@ description = "Format an EXPLAIN result supplied by the caller as a tree or tabl
 inputSchema = "src/mcp/schemas/sqlv_explain.schema.json"
 readOnly = true
 destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_index_stats"
+description = "Report what the plugin's own Java/XML indexes hold and what indexing them cost (documents, bytes, total and slowest document)."
+inputSchema = "src/mcp/schemas/sqlv_index_stats.schema.json"
+readOnly = true
+destructive = false

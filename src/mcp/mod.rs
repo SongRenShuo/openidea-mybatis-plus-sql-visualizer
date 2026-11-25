@@ -3,7 +3,7 @@
 //! Lane L9 owns this directory; see `docs/TASKS.md` P6 and
 //! `docs/registration/L9.md` for the manifest entries.
 //!
-//! The surface is deliberately thin: [`TOOLS`] declares the eleven tools,
+//! The surface is deliberately thin: [`TOOLS`] declares the twelve tools,
 //! [`call_tool`] dispatches by local name, and each handler lives in
 //! [`handlers`] as a plain function over the raw argument JSON. No handler
 //! calls `host::`, so every case is unit-testable; the `McpProvider`
@@ -24,7 +24,7 @@ use openidea_plugin::{Error, Invocation};
 
 pub use contract::ToolSpec;
 
-/// The eleven declared tools, in registration order.
+/// The twelve declared tools, in registration order.
 ///
 /// Local names are `sqlv_`-prefixed because the registered name is
 /// `songrenshuo_mybatis_plus_sql_visualizer__<name>` and the whole thing must
@@ -107,6 +107,13 @@ pub const TOOLS: &[ToolSpec] = &[
         read_only: true,
         destructive: false,
     },
+    ToolSpec {
+        name: "sqlv_index_stats",
+        description: "Report what the plugin's own Java/XML indexes hold and what indexing them cost (documents, bytes, total and slowest document).",
+        schema_path: "src/mcp/schemas/sqlv_index_stats.schema.json",
+        read_only: true,
+        destructive: false,
+    },
 ];
 
 /// Calls one tool by local name.
@@ -131,6 +138,7 @@ fn dispatch(tool: &str, arguments: &str) -> String {
         "sqlv_history_search" => handlers::history_search::run(arguments),
         "sqlv_schema_context" => handlers::schema_context::run(arguments),
         "sqlv_explain" => handlers::explain::run(arguments),
+        "sqlv_index_stats" => handlers::index_stats::run(arguments),
         other => contract::failure(
             contract::CODE_UNKNOWN_TOOL,
             contract::KEY_UNKNOWN_TOOL,

@@ -5,6 +5,7 @@ pub(crate) mod check_sql;
 pub(crate) mod crud_sql;
 pub(crate) mod explain;
 pub(crate) mod history_search;
+pub(crate) mod index_stats;
 pub(crate) mod mapper_check;
 pub(crate) mod perf_advice;
 pub(crate) mod render_logs;

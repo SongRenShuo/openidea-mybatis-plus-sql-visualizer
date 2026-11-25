@@ -1,0 +1,7 @@
+{
+  "title": "sqlv_index_stats",
+  "type": "object",
+  "description": "Report what the plugin's own Java/XML indexes hold (files, methods, statements, skipped files) and what indexing cost (documents, bytes, total milliseconds, slowest and average document). The indexes are process-wide and fed by the IDE's document indexer, so this reading separates the plugin's cost from the IDE's own scanning.",
+  "additionalProperties": false,
+  "properties": {}
+}
