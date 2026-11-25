@@ -42,6 +42,11 @@
    `unresolved` 时只给原因，不出 Java 代码。
 3. **EXPLAIN 不连库**：引擎只做 `EXPLAIN <语句>` 包装与格式分类，不执行、不自省表结构；
    `sqlv_explain` 只格式化调用方已经拿到的 EXPLAIN 结果，缺结果返回 `unresolved`。
+   为什么本版不补真执行：平台 `database` 明确不执行 SQL（`docs/FEATURES.md` F133+ 一档），
+   唯一执行面是 sidecar 的 JVM；而引擎要直连库必须带 JDBC 驱动，主流驱动又不在本仓
+   许可白名单内（MySQL Connector/J 为 GPLv2+FOSS、H2 为 MPL/EPL，均禁入；PostgreSQL BSD、
+   SQLite Apache-2.0 合规但本机没有对应真实库）。因此「3 个真实库 EXPLAIN 出结果」在本仓
+   红线下不可达，`T5-5` 验收项保留为未达成，而不是用打包 GPL 驱动去凑读数。
 4. **schema 由调用方提供**：`sqlv_schema_context` 格式化入参里的表/列/索引，不做数据库自省；
    诊断与 inlay 在没有列清单时一律不出结果（宁可不报，也不误报）。
 5. **MCP `sqlv_history_search` 只搜入参文本**：平台没有 IDE 历史记录 API，所以它不检索历史面板，

@@ -15,7 +15,7 @@
 | P2 界面面 | 完成 | 日志面板、预览工作台、42 项设置、双语表、标记/文件图标；GUI 走查待 IDE 重载 |
 | P3 导航与注解 | 完成（默认关） | `documentIndexers` 图、definition/line-markers、injections、inlay、diagnostics；Ctrl+B 真机未验 |
 | P4 捕获链 | 完成（固定端口） | agent ws 旁路（默认 TCP）、`websocket-ready` 消费、事件唤醒、日志文件路径 |
-| P5 sidecar 与执行 | 完成（不连库） | 引擎钉值 + sha256、stdio 真往返（204 ms）、Wrapper 文本解析、EXPLAIN 包装与结果模型、schema 缓存 |
+| P5 sidecar 与执行 | 完成（不连库；T5-5 未达成） | 引擎钉值 + sha256、stdio 真往返（204 ms）、Wrapper 文本解析、EXPLAIN 包装与结果模型、schema 缓存；「3 个真实库 EXPLAIN」因许可白名单（MySQL GPL、H2 MPL/EPL）与平台不执行 SQL 而未达成，理由见 `docs/LIMITS.md` 第 3 条 |
 | P6 MCP | 完成 | 11 个 `sqlv_*` 工具 + 11 份 schema，全部 readOnly，`partial` 不冒充 `exact` |
 | P7 发行 | 完成（市场 PR 外） | `scripts/release.sh`（真签真 pack 实测）、`release.yml`、Gitee 镜像、自建索引脚本与文档 |
 | P8 上游提案 | 完成（待提交上游） | `docs/upstream/T8-1~T8-3` 三份草案 + 索引；是否另有 CLA 待上游确认 |
