@@ -325,11 +325,11 @@ fn find_method_after(text: &str, from: usize) -> (Option<String>, Option<usize>)
             last_ident = Some((text[start..pos].to_string(), start));
             continue;
         }
-        if b == b'<' {
-            if let Some(after) = skip_angle(text, pos) {
-                pos = after;
-                continue;
-            }
+        if b == b'<'
+            && let Some(after) = skip_angle(text, pos)
+        {
+            pos = after;
+            continue;
         }
         pos += 1;
     }
