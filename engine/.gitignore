@@ -1,0 +1,4 @@
+# The engine jar is a build artifact of the IntelliJ repository; this repo pins
+# only ENGINE_VERSION + sha256 (see docs/ARCHITECTURE.md §6). A developer may drop
+# a jar here for `link` runs — never commit it.
+*.jar
