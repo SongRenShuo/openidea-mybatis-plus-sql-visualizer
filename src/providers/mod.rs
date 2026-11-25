@@ -35,7 +35,11 @@ pub(crate) fn setting_on(key: &str) -> bool {
 /// The configured dialect name (`mysql`, `postgres`, `oracle`, `sqlserver`, …),
 /// or an empty string when the user has not chosen one.
 pub(crate) fn dialect_setting() -> String {
-    host::setting_string(diag::DIALECT_SETTING).unwrap_or_default()
+    let value = host::setting_string(diag::DIALECT_SETTING).unwrap_or_default();
+    if value.trim().is_empty() {
+        return host::setting_string(diag::DIALECT_SETTING_LEGACY).unwrap_or_default();
+    }
+    value
 }
 
 pub(crate) fn is_xml(path: &str) -> bool {

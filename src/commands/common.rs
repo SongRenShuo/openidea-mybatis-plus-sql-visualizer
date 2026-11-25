@@ -30,8 +30,13 @@ pub const KEY_NO_PROJECT: &str = "cmd.project.missing";
 pub const KEY_JSON_INVALID: &str = "cmd.json.invalid";
 pub const KEY_OUTPUT_TRUNCATED: &str = "cmd.output.truncated";
 
-/// The setting L6 registers for the SQL dialect used by quote checks.
-pub const DIALECT_SETTING: &str = "sql.dialect";
+/// The settings page's key for the SQL dialect (`settings.schema.json`). Older
+/// builds read `sql.dialect`, which the schema never declared, so a value set in
+/// Settings never reached the commands; it stays as a fallback only.
+pub const DIALECT_SETTING: &str = "dialect.default";
+
+/// The pre-schema key, honoured only when the declared one is empty.
+pub const DIALECT_SETTING_LEGACY: &str = "sql.dialect";
 
 /// A failure the command turns into a readable Output block plus an `Err`.
 ///
@@ -185,9 +190,16 @@ pub fn json_arg<T: DeserializeOwned>(ctx: &Invocation, arg: Option<&str>) -> Res
     serde_json::from_str(&text).map_err(|e| CliError::new(KEY_JSON_INVALID, e.to_string()))
 }
 
-/// The configured dialect name (`sql.dialect`), or an empty string when unset.
+/// The configured dialect name (`dialect.default`), or an empty string when unset.
+///
+/// The schema's default is `MySQL`, so the legacy key is only consulted when the
+/// declared one yields nothing at all (an IDE without that schema field).
 pub fn configured_dialect() -> String {
-    host::setting_string(DIALECT_SETTING).unwrap_or_default()
+    let value = host::setting_string(DIALECT_SETTING).unwrap_or_default();
+    if value.trim().is_empty() {
+        return host::setting_string(DIALECT_SETTING_LEGACY).unwrap_or_default();
+    }
+    value
 }
 
 /// Split a [`GenError`] into its message key and readable detail.

@@ -19,7 +19,12 @@ use crate::indexer::StatementKind;
 use openidea_plugin::Severity;
 use openidea_plugin::diagnostics::{Diagnostic, DiagnosticsProvider, Document};
 
-pub const DIALECT_SETTING: &str = "sql.dialect";
+/// The settings page's dialect key (`settings.schema.json`); older builds read
+/// `sql.dialect`, which the schema never declared.
+pub const DIALECT_SETTING: &str = "dialect.default";
+
+/// The pre-schema key, honoured only when the declared one is empty.
+pub const DIALECT_SETTING_LEGACY: &str = "sql.dialect";
 
 impl DiagnosticsProvider for crate::Main {
     fn diagnostics(&mut self, doc: &Document) -> Vec<Diagnostic> {

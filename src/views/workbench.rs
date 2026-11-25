@@ -906,6 +906,15 @@ fn escape_attr(text: &str) -> String {
 // Tests
 // ---------------------------------------------------------------------------
 
+/// Serialises tests that read or write the process-wide model. `commands`'
+/// `open-workbench` tests set it too; without one shared lock a parallel
+/// `views::workbench` test observes their state instead of its own.
+#[cfg(test)]
+pub(crate) fn test_store_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -913,12 +922,8 @@ mod tests {
     use openidea_plugin::mock::MockHost;
     use serde_json::json;
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
     fn test_host() -> (MockHost, MutexGuard<'static, ()>) {
-        let guard = TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = test_store_lock();
         let host = MockHost::install();
         clear();
         (host, guard)

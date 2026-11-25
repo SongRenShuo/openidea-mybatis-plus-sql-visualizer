@@ -81,8 +81,10 @@ mod tests {
     use openidea_plugin::mock::MockHost;
     use serde_json::{Value, json};
 
-    /// Restores the process-wide workbench model, which the view tests share.
+    /// Restores the process-wide workbench model, which the view tests share; the
+    /// lock is the view tests' own, so the two modules never interleave.
     fn with_model_restore<T>(body: impl FnOnce() -> T) -> T {
+        let _guard = workbench::test_store_lock();
         let previous = workbench::model();
         let out = body();
         workbench::set_model(previous);
