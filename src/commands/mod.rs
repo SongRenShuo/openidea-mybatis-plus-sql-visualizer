@@ -13,7 +13,9 @@
 // would trip `dead_code` in a non-test build.
 #![allow(dead_code)]
 
+pub mod check_sql;
 pub mod common;
+pub mod perf_advice;
 pub mod render_xml;
 
 /// The Output tab every command writes to.
