@@ -145,10 +145,11 @@ pub struct Filter {
 
 impl Filter {
     fn matches(&self, row: &PanelRow) -> bool {
-        if let Some(category) = self.category {
-            if row.category != category {
-                return false;
-            }
+        if self
+            .category
+            .is_some_and(|category| row.category != category)
+        {
+            return false;
         }
         let keyword = self.keyword.trim().to_lowercase();
         keyword.is_empty() || row.searchable().to_lowercase().contains(&keyword)
@@ -197,8 +198,10 @@ pub fn build_rows(
             .map(|group| expanded.contains(&group.key))
             .unwrap_or(false);
 
-        if dedupe && duplicate.is_some() && !is_expanded {
-            let group = duplicate.expect("checked above");
+        if dedupe
+            && !is_expanded
+            && let Some(group) = duplicate
+        {
             if !folded_groups.insert(group.key.clone()) {
                 continue;
             }
@@ -526,15 +529,16 @@ fn ensure_parsed(state: &mut Store) {
 }
 
 fn parse_options() -> ParseOptions {
-    let mut options = ParseOptions::default();
-    options.slow_threshold_ms = settings::get_i64("log.slowThresholdMs", 1000).max(0) as f64;
-    options.n_plus_one_threshold = settings::get_i64("log.nPlusOneThreshold", 5).max(2) as usize;
-    options.ignore_params_in_dedupe = settings::get_bool("log.ignoreParamsInDedupe", false);
     let window = settings::get_i64("log.dedupeWindowMs", 0);
-    options.dedupe_window_ms = (window > 0).then_some(window);
-    options.max_sql_len = settings::get_i64("log.maxSqlLength", 20_000).max(256) as usize;
-    options.timestamp_offset_minutes = settings::get_i64("log.timestampOffsetMinutes", 0) as i32;
-    options
+    ParseOptions {
+        slow_threshold_ms: settings::get_i64("log.slowThresholdMs", 1000).max(0) as f64,
+        n_plus_one_threshold: settings::get_i64("log.nPlusOneThreshold", 5).max(2) as usize,
+        ignore_params_in_dedupe: settings::get_bool("log.ignoreParamsInDedupe", false),
+        dedupe_window_ms: (window > 0).then_some(window),
+        max_sql_len: settings::get_i64("log.maxSqlLength", 20_000).max(256) as usize,
+        timestamp_offset_minutes: settings::get_i64("log.timestampOffsetMinutes", 0) as i32,
+        ..ParseOptions::default()
+    }
 }
 
 // ---------------------------------------------------------------------------

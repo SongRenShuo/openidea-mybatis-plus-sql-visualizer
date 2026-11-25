@@ -61,6 +61,7 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "Copied to the clipboard.",
         "已复制到剪贴板。",
     ),
+    ("view.workbench.confidence", "Confidence", "置信度"),
     ("view.workbench.confidence.exact", "Exact", "精确"),
     ("view.workbench.confidence.partial", "Partial", "部分"),
     (

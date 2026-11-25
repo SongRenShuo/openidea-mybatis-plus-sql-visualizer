@@ -132,7 +132,7 @@ impl WorkbenchModel {
         ];
         let confidence = self.confidence_label();
         if !confidence.is_empty() {
-            fields.push((t("view.workbench.confidence.exact"), confidence));
+            fields.push((t("view.workbench.confidence"), confidence));
         }
         fields
     }
@@ -345,7 +345,7 @@ fn build_html(model: &WorkbenchModel) -> String {
     html.push_str("<p id=\"notice\" class=\"notice\" hidden></p>");
     html.push_str("<script>var MODEL=");
     html.push_str(&json_for_script(model));
-    html.push_str(";");
+    html.push(';');
     html.push_str(
         "(function(){\
 function post(message){if(window.openidea&&window.openidea.postMessage){\
