@@ -29,6 +29,7 @@ use crate::core::perf::{self, Severity};
 use crate::core::xml::{Confidence, MapperSet, RenderOutput};
 use crate::core::{dialect, format};
 use crate::i18n::t;
+use crate::settings;
 
 /// The input is SQL text, used verbatim.
 pub const KIND_SQL: &str = "sql";
@@ -42,6 +43,9 @@ const DIALECT_SETTING: &str = "dialect.default";
 const DIALECT_SETTING_LEGACY: &str = "sql.dialect";
 /// Used when neither setting holds a value.
 const FALLBACK_DIALECT: &str = "MySQL";
+
+/// Lane L34: format the statement a hand-off put in the preview.
+const FORMAT_ON_PREVIEW_SETTING: &str = "render.formatOnPreview";
 
 /// How many project files one "load from file" pick lists.
 const PICK_LIMIT: u32 = 200;
@@ -419,6 +423,11 @@ struct PreviewStore {
     /// to open and select the preview tab. Cleared once the page reports the
     /// tab it shows, because by then it has applied the selection.
     select_pending: bool,
+    /// Set together with `replace_input` by a command that handed a statement
+    /// over (lane L34). Consumed by [`format_handoff_sql`] when the page
+    /// reports its tab, so only handed-over SQL — never what the user typed —
+    /// goes through `render.formatOnPreview`.
+    handoff: bool,
 }
 
 impl Default for PreviewStore {
@@ -428,6 +437,7 @@ impl Default for PreviewStore {
             status: String::new(),
             replace_input: false,
             select_pending: false,
+            handoff: false,
         }
     }
 }
@@ -453,7 +463,11 @@ pub fn model() -> WorkbenchModel {
 
 /// Empties the preview tab.
 pub fn clear() {
-    preview_store().model = WorkbenchModel::default();
+    let mut store = preview_store();
+    store.model = WorkbenchModel::default();
+    // Nothing is left to replace or format once the model is gone.
+    store.replace_input = false;
+    store.handoff = false;
 }
 
 /// Asks the page to open and select the "SQL 预览" tab on the next push.
@@ -470,7 +484,44 @@ pub fn note_page_tab() {
 /// that handed a statement over has to show it there, and no op of the page
 /// ran to set the flag.
 pub fn request_input_replace() {
-    preview_store().replace_input = true;
+    let mut store = preview_store();
+    store.replace_input = true;
+    // A command handing a statement over is a hand-off, the one case
+    // `render.formatOnPreview` applies to (lane L34).
+    store.handoff = true;
+}
+
+/// Formats the statement a hand-off put in the preview, when
+/// `render.formatOnPreview` is on (lane L34).
+///
+/// The reference setting is "格式化还原 SQL" — restored SQL, i.e. what a
+/// command or a log row handed over. It runs when the page reports the tab it
+/// switched to, the point where the hand-off has landed, and it is a no-op for
+/// what the user typed: a re-render of the input box stays byte-identical.
+///
+/// Returns `true` when the model was rewritten; the next push then also
+/// replaces the input box, so the two panes agree.
+pub fn format_handoff_sql() -> bool {
+    let pending = std::mem::take(&mut preview_store().handoff);
+    if !pending || !settings::get_bool(FORMAT_ON_PREVIEW_SETTING, true) {
+        return false;
+    }
+    let (dialect_name, _) = configured_dialect();
+    let Some(found) = dialect::by_name(&dialect_name) else {
+        return false;
+    };
+    let mut store = preview_store();
+    if store.model.sql.trim().is_empty() {
+        return false;
+    }
+    let formatted = format::format(&store.model.sql, found);
+    if formatted == store.model.sql {
+        return false;
+    }
+    store.model.sql = formatted;
+    store.model.dialect = dialect_name;
+    store.replace_input = true;
+    true
 }
 
 fn set_status(status: String, replace_input: bool) {
@@ -988,6 +1039,7 @@ mod tests {
         let mut store = preview_store();
         store.status.clear();
         store.replace_input = false;
+        store.handoff = false;
         drop(store);
         (host, guard)
     }
@@ -1594,6 +1646,53 @@ mod tests {
         assert_eq!(select_tab(), Some("preview"));
         note_page_tab();
         assert_eq!(select_tab(), None);
+    }
+
+    #[test]
+    fn format_on_preview_formats_the_handed_off_statement() {
+        // Lane L34: a command hands a statement over (`set_model` +
+        // `request_input_replace`); once the page reports its tab,
+        // `render.formatOnPreview` (default on) formats the model.
+        let (_host, _guard) = test_host();
+        let input = "select id from t where a = 1";
+        set_model(WorkbenchModel::new(input, Vec::new(), "MySQL"));
+        request_input_replace();
+        assert!(
+            format_handoff_sql(),
+            "the handed-off statement is formatted"
+        );
+        let mysql = dialect::by_name("MySQL").expect("MySQL");
+        assert_eq!(model().sql, format::format(input, mysql));
+        assert_ne!(model().sql, input);
+        assert_eq!(
+            tab()["replaceInput"],
+            true,
+            "the input box follows the formatted statement"
+        );
+    }
+
+    #[test]
+    fn format_on_preview_off_keeps_the_handed_off_statement_byte_for_byte() {
+        let (host, _guard) = test_host();
+        host.set_setting("render.formatOnPreview", "false");
+        let input = "  select id\nfrom t where a=1  ";
+        set_model(WorkbenchModel::new(input, Vec::new(), "MySQL"));
+        request_input_replace();
+        assert!(!format_handoff_sql());
+        assert_eq!(model().sql, input);
+    }
+
+    #[test]
+    fn format_on_preview_leaves_typed_renders_and_plain_models_alone() {
+        // The setting is about restored SQL, not about text the user typed: a
+        // `preview-render` and a model set without a hand-off stay verbatim.
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": "select 2" }));
+        assert_eq!(model().sql, "select 2");
+        assert!(!format_handoff_sql(), "nothing was handed off");
+        set_model(WorkbenchModel::new("select 3", Vec::new(), "MySQL"));
+        assert!(!format_handoff_sql(), "a bare set_model is not a hand-off");
+        assert_eq!(model().sql, "select 3");
     }
 
     #[test]
