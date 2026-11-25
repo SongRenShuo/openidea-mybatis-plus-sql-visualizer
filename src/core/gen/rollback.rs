@@ -237,10 +237,10 @@ fn target_of(sa: &Analysis, kind: RollbackKind) -> Option<(String, Option<String
                 .get(i + 1)
                 .and_then(|t| t.ident_name())
                 .map(str::to_string);
-        } else if let Some(a) = sa.tokens.get(i).and_then(|t| t.ident_name()) {
-            if !crate::core::perf::sql::is_keyword(a) {
-                alias = Some(a.to_string());
-            }
+        } else if let Some(a) = sa.tokens.get(i).and_then(|t| t.ident_name())
+            && !crate::core::perf::sql::is_keyword(a)
+        {
+            alias = Some(a.to_string());
         }
     }
     Some((qualified, alias))

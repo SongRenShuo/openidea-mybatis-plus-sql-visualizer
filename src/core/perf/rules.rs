@@ -306,11 +306,11 @@ fn function_on_column(sa: &Analysis, f: &Features) -> Option<Finding> {
             i += 1;
             continue;
         }
-        if let Some(col) = sa.read_column_ref(i + 2) {
-            if !sa.tokens.get(i + 2).is_some_and(|t| t.is_punct('(')) {
-                names.push(format!("{}({})", word, col.column));
-                first.get_or_insert(i);
-            }
+        if let Some(col) = sa.read_column_ref(i + 2)
+            && !sa.tokens.get(i + 2).is_some_and(|t| t.is_punct('('))
+        {
+            names.push(format!("{}({})", word, col.column));
+            first.get_or_insert(i);
         }
         i += 1;
     }
@@ -547,18 +547,19 @@ fn dialect_quote_mismatch(
     let profile = profile?;
     let mut offending: Vec<(char, String, usize)> = Vec::new();
     for i in 0..sa.len() {
-        if let TokenKind::QuotedIdent(q) = sa.tokens[i].kind {
-            if !profile.accepts(q) && !is_literal_position(sa, i) {
-                let name = sa.tokens[i]
-                    .value
-                    .clone()
-                    .unwrap_or_else(|| sa.tokens[i].text.clone());
-                if !offending
-                    .iter()
-                    .any(|(c, n, _)| *c == q && n.eq_ignore_ascii_case(&name))
-                {
-                    offending.push((q, name, i));
-                }
+        if let TokenKind::QuotedIdent(q) = sa.tokens[i].kind
+            && !profile.accepts(q)
+            && !is_literal_position(sa, i)
+        {
+            let name = sa.tokens[i]
+                .value
+                .clone()
+                .unwrap_or_else(|| sa.tokens[i].text.clone());
+            if !offending
+                .iter()
+                .any(|(c, n, _)| *c == q && n.eq_ignore_ascii_case(&name))
+            {
+                offending.push((q, name, i));
             }
         }
     }

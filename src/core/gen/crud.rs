@@ -148,7 +148,7 @@ mod tests {
         )
     }
 
-    fn stmt<'a>(out: &'a [CrudStatement], kind: CrudKind) -> &'a CrudStatement {
+    fn stmt(out: &[CrudStatement], kind: CrudKind) -> &CrudStatement {
         out.iter().find(|s| s.kind == kind).expect("statement")
     }
 
