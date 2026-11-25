@@ -3,6 +3,10 @@
 这份文件是**材料准备与自查**，不是已验证的对接流程。原因见第 1 节：官方没有公开
 的第三方提交入口，本轮也没有提交任何 PR。
 
+可直接提交的材料在 [`official-pr/`](official-pr/README.md)：PR 描述（`pr-body.md`）、
+注册表条目骨架（`registry-entry.json`）与提交步骤。**提交与审核是上游动作**，需要
+已发布的签名包、可用的下载 URL，以及用户对目标仓库的 fork/push 授权。
+
 ## 1 现状：入口不明（本轮实测）
 
 - `openidea-plugin --help`（0.1.51）共 11 个子命令：
@@ -25,7 +29,7 @@
 | 版本一致 | tag = `plugin.toml` 版本 | `release.yml` 里有一条硬校验 |
 | 签名 | 公钥已登记在该索引的 publisher 下；包 signed | `scripts/release.sh` 缺密钥直接失败 |
 | digest 一致 | 索引条目的 `digest` 由 `build-index.sh` 从同一份包生成（它是内容摘要，不是文件 sha256） | 见 `docs/registration/L10.md` 的一致性步骤 |
-| 能力诚实 | `plugin.toml` 声明的能力 = README 能力表 = 真实行为 | 目前只有 `project.read` |
+| 能力诚实 | `plugin.toml` 声明的能力 = README 能力表 = 真实行为 | `project.read` + `events`（required），`clipboard` / `process:java` / `net:127.0.0.1`（optional，均有降级），`java.agent` 由 manifest 派生 |
 | 描述 | 不加未实现的功能承诺 | `plugin.toml` 的 description 只写已能做与将要做的事 |
 | 主页 | 可达的 HTTPS | 指向 Gitee 仓，提交前确认能打开 |
 | API 线 | `^1.15`，不含 1.16 特性 | `engines.openidea = "^1.15"`；`frames` / `markdown_hover` / `customEditors.binary` 未使用 |

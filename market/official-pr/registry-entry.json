@@ -1,0 +1,16 @@
+{
+  "id": "songrenshuo.mybatis-plus-sql-visualizer",
+  "name": "MyBatis SQL Visualizer",
+  "version": "0.1.0",
+  "description": "Renders MyBatis mapper XML, annotation SQL, iBatis 2.x, MyBatis-Plus wrappers and SQL logs into executable SQL, and checks a statement before it reaches a database. Every result carries exact/partial/unresolved confidence; unresolved never produces SQL.",
+  "authors": ["songrenshuo"],
+  "publisher": "songrenshuo",
+  "download": "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/releases/download/v0.1.0/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin",
+  "digest": "<fill from dist/*.sha256 after the signed release>",
+  "capabilities": ["project.read", "events", "clipboard", "process:java", "net:127.0.0.1"],
+  "engine": "^1.15",
+  "categories": ["tools"],
+  "icon": null,
+  "homepage": "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer",
+  "notes": "Requires re-approving capabilities if the plugin was linked before this version: the manifest now declares events as required."
+}
