@@ -83,8 +83,10 @@ jobs:
       - name: Check package
         run: openidea-plugin check .
 
+      # The jar is never committed (only the version + sha256 pin are), so the
+      # gate checks the pin itself. A developer with the jar runs the full form.
       - name: Engine pin check
-        run: bash scripts/verify-engine.sh
+        run: bash scripts/verify-engine.sh --pin-only
 
       - uses: actions/upload-artifact@v4
         with:
