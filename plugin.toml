@@ -138,12 +138,13 @@ command = "render-log"
 menu = "projectView.context"
 command = "open-workbench"
 
-# Panels (L5). `sqlv-logs` is drawn by code; `sqlv-workbench` is the package page.
+# Panels (L5). `sqlv-logs` is the package page; `sqlv-workbench` is the package page.
+# The log window sits on the right, as the IntelliJ plugin's SQL Logs tool window.
 [[contributes.views]]
 id = "sqlv-logs"
 title = "SQL Logs"
 icon = "icons/sqlLog.svg"
-location = "bottom"
+location = "right"
 web = "web/log-panel.html"
 
 [[contributes.views]]
