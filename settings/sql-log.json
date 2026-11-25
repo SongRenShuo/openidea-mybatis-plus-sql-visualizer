@@ -28,7 +28,7 @@
       "type": "integer",
       "title": "Duplicate window (ms)",
       "group": "Log",
-      "default": 0
+      "default": 60000
     },
     "log.ignoreParamsInDedupe": {
       "type": "boolean",
@@ -62,9 +62,9 @@
     },
     "logs.pageSize": {
       "type": "integer",
-      "title": "SQL log entries shown per render-log run",
+      "title": "Maximum SQL log entries",
       "group": "Log",
-      "default": 50,
+      "default": 200,
       "minimum": 1,
       "maximum": 5000
     },

@@ -162,7 +162,7 @@ pub static DEFINITIONS: [SettingDef; 42] = [
         title: "Duplicate window (ms)",
         group: "Log",
         kind: Kind::Integer,
-        default: DefaultValue::Int(0),
+        default: DefaultValue::Int(60_000),
         needs_restart: false,
     },
     SettingDef {
@@ -207,10 +207,10 @@ pub static DEFINITIONS: [SettingDef; 42] = [
     },
     SettingDef {
         key: "logs.pageSize",
-        title: "SQL log entries shown per render-log run",
+        title: "Maximum SQL log entries",
         group: "Log",
         kind: Kind::Integer,
-        default: DefaultValue::Int(50),
+        default: DefaultValue::Int(200),
         needs_restart: false,
     },
     SettingDef {

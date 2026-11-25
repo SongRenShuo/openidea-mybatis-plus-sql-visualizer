@@ -34,7 +34,7 @@
   "Refresh interval (ms)": "Refresh interval (ms)",
   "Timestamp offset (minutes east of UTC)": "Timestamp offset (minutes east of UTC)",
   "Show raw line for partial statements": "Show raw line for partial statements",
-  "SQL log entries shown per render-log run": "SQL log entries shown per render-log run",
+  "Maximum SQL log entries": "Maximum SQL log entries",
   "Java agent capture WebSocket port": "Java agent capture WebSocket port",
   "MyBatis SQL: Start Capture": "MyBatis SQL: Start Capture",
   "MyBatis SQL: Stop Capture": "MyBatis SQL: Stop Capture",
