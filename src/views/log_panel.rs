@@ -12,12 +12,13 @@
 //! The store lives in a `OnceLock<Mutex<_>>` because `Main` belongs to the
 //! controller (wasm is single-threaded; the mutex only serialises test threads).
 
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use openidea_plugin::host;
 use openidea_plugin::views::{Body, Button, View, ViewEvent, Views};
-use openidea_plugin::{Error, Invocation};
+use openidea_plugin::{Error, Invocation, NotificationLevel};
 use serde_json::{Value, json};
 
 use crate::commands::common;
@@ -142,6 +143,12 @@ pub struct PanelRow {
     /// Size of the N+1 group (1 when the row is not part of one).
     pub group_count: usize,
     pub n_plus_one: bool,
+    /// The dedupe group's key when the row is the folded representative
+    /// (lane L26: the ⨉N badge toggles this group); empty otherwise.
+    pub dedupe_key: String,
+    /// The N+1 group's template key when the row belongs to one (lane L26:
+    /// the ×N badge toggles this group); empty otherwise.
+    pub n_plus_one_key: String,
     /// `<== Total:` affected-row count, when the family prints one.
     pub affected_rows: Option<u64>,
     /// Where the row came from: the logger-derived class/method plus the
@@ -359,6 +366,32 @@ impl Default for Filter {
     }
 }
 
+/// The display order of the pushed rows (lane L26, the "sort by duration"
+/// toolbar button). `Time` keeps capture order; `Duration` orders by the
+/// statement's duration, longest first, rows without a duration last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortMode {
+    Time,
+    Duration,
+}
+
+impl SortMode {
+    pub fn token(self) -> &'static str {
+        match self {
+            SortMode::Time => "time",
+            SortMode::Duration => "duration",
+        }
+    }
+
+    pub fn parse(token: &str) -> Option<Self> {
+        match token {
+            "duration" => Some(SortMode::Duration),
+            "time" => Some(SortMode::Time),
+            _ => None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Row assembly
 // ---------------------------------------------------------------------------
@@ -436,6 +469,10 @@ pub fn build_rows_with(
                 n_plus_one.map(|group| group.count).unwrap_or(1),
                 n_plus_one.is_some(),
                 source,
+                group.key.clone(),
+                n_plus_one
+                    .map(|group| group.template.clone())
+                    .unwrap_or_default(),
             ));
             continue;
         }
@@ -448,9 +485,125 @@ pub fn build_rows_with(
             n_plus_one.map(|group| group.count).unwrap_or(1),
             n_plus_one.is_some(),
             source,
+            String::new(),
+            n_plus_one
+                .map(|group| group.template.clone())
+                .unwrap_or_default(),
         ));
     }
     rows
+}
+
+/// The rows the panel shows: the folded rows, with the groups the user
+/// expanded (lane L26) unfolded into their occurrences.
+///
+/// A group is keyed `d:<dedupe key>` (the ⨉N badge) or `n:<n+1 template>`
+/// (the ×N badge). When a key is expanded, the group's occurrences replace
+/// the folded representative: the first occurrence keeps the group's counts
+/// (its badges stay, now collapsing), the rest are members carrying the same
+/// keys so the page renders them indented. When both of a row's groups are
+/// expanded, the occurrences are emitted once, as the union of both groups.
+fn display_rows(
+    analysis: &LogAnalysis,
+    sources: &LogSources,
+    removed: &BTreeSet<usize>,
+    blocked: &BTreeSet<String>,
+    dedupe: bool,
+    slow_threshold_ms: f64,
+    expanded: &BTreeSet<String>,
+) -> Vec<PanelRow> {
+    let rows = build_rows_with(
+        analysis,
+        Some(sources),
+        removed,
+        blocked,
+        dedupe,
+        slow_threshold_ms,
+    );
+    if expanded.is_empty() {
+        return rows;
+    }
+    let entries_by_line: HashMap<usize, &LogEntry> = analysis
+        .entries
+        .iter()
+        .map(|entry| (entry.line_no, entry))
+        .collect();
+    let dedupe_by_key: HashMap<String, &DuplicateGroup> = analysis
+        .duplicates
+        .iter()
+        .map(|group| (group.key.clone(), group))
+        .collect();
+    let n_plus_one_by_key: HashMap<String, &NPlusOneGroup> = analysis
+        .n_plus_one
+        .iter()
+        .map(|group| (group.template.clone(), group))
+        .collect();
+
+    let mut out = Vec::new();
+    let mut emitted: BTreeSet<String> = BTreeSet::new();
+    for row in rows {
+        let d_key = dedupe_key_token(&row.dedupe_key);
+        let n_key = n_plus_one_key_token(&row.n_plus_one_key);
+        let d_expand = !d_key.is_empty() && expanded.contains(&d_key);
+        let n_expand = !n_key.is_empty() && expanded.contains(&n_key);
+        if !d_expand && !n_expand {
+            out.push(row);
+            continue;
+        }
+        // The first row of an expanded group emits its occurrences; the other
+        // rows of the same group (possible when dedupe is off) are replaced by
+        // that emission rather than repeated.
+        let d_new = d_expand && emitted.insert(d_key.clone());
+        let n_new = n_expand && emitted.insert(n_key.clone());
+        if !d_new && !n_new {
+            continue;
+        }
+        let mut lines: Vec<usize> = Vec::new();
+        if d_new {
+            if let Some(group) = dedupe_by_key.get(&row.dedupe_key) {
+                lines.extend(group.line_nos.iter().copied());
+            }
+        }
+        if n_new {
+            if let Some(group) = n_plus_one_by_key.get(&row.n_plus_one_key) {
+                for line in &group.line_nos {
+                    if !lines.contains(line) {
+                        lines.push(*line);
+                    }
+                }
+            }
+        }
+        let n1_group = n_plus_one_by_key.get(&row.n_plus_one_key).copied();
+        for (index, line) in lines.iter().enumerate() {
+            let Some(entry) = entries_by_line.get(line).copied() else {
+                continue;
+            };
+            let source = sources.get(*line).cloned().unwrap_or_default();
+            let member = row_of(
+                entry,
+                categorize(entry, n1_group, slow_threshold_ms),
+                sql_type_of(entry),
+                if index == 0 { row.dedupe_count } else { 1 },
+                if index == 0 { row.group_count } else { 1 },
+                n1_group.is_some(),
+                source,
+                row.dedupe_key.clone(),
+                row.n_plus_one_key.clone(),
+            );
+            out.push(member);
+        }
+    }
+    out
+}
+
+/// The expanded-set token for a dedupe group key.
+fn dedupe_key_token(key: &str) -> String {
+    format!("d:{key}")
+}
+
+/// The expanded-set token for an N+1 template key.
+fn n_plus_one_key_token(key: &str) -> String {
+    format!("n:{key}")
 }
 
 fn categorize(
@@ -509,6 +662,8 @@ fn row_of(
     group_count: usize,
     n_plus_one: bool,
     source: LineSource,
+    dedupe_key: String,
+    n_plus_one_key: String,
 ) -> PanelRow {
     PanelRow {
         line_no: entry.line_no,
@@ -521,6 +676,8 @@ fn row_of(
         dedupe_count,
         group_count,
         n_plus_one,
+        dedupe_key,
+        n_plus_one_key,
         affected_rows: entry.affected_rows,
         source,
         raw_line: entry.raw_line.clone(),
@@ -654,11 +811,20 @@ struct Store {
     removed: BTreeSet<usize>,
     /// `class_name#method` keys the user blocked for this session (`屏蔽此方法`).
     blocked: BTreeSet<String>,
+    /// The groups the user expanded (`×N` / `⨉N` badges, lane L26), keyed
+    /// `d:<dedupe key>` / `n:<n+1 template>`.
+    expanded: BTreeSet<String>,
     dirty: bool,
     filter: Filter,
     /// Once the page sends a filter, its `dedupe` choice wins over the setting.
     filter_touched: bool,
     paused: bool,
+    /// Whether the list auto-scrolls to the newest row (lane L26). The page
+    /// reports a flip when the user scrolls away from the bottom; the
+    /// "scroll to bottom" button and scrolling back restore it.
+    follow: bool,
+    /// The display order (`time` / `duration`), lane L26.
+    sort: SortMode,
     /// Line the "Log → SQL" tab restores (the page's selection; `None` means
     /// "last statement"), kept so a later state push does not drop the tab.
     log_to_sql_line: Option<usize>,
@@ -715,10 +881,13 @@ impl Default for Store {
             sources: LogSources::default(),
             removed: BTreeSet::new(),
             blocked: BTreeSet::new(),
+            expanded: BTreeSet::new(),
             dirty: false,
             filter: Filter::default(),
             filter_touched: false,
             paused: false,
+            follow: true,
+            sort: SortMode::Time,
             log_to_sql_line: None,
             sql_to_java: SqlToJavaTab::default(),
             history: HistoryTab::default(),
@@ -857,6 +1026,16 @@ fn buffer_cap() -> usize {
     settings::get_i64("logs.pageSize", DEFAULT_BUFFER_CAP).clamp(1, MAX_BUFFER_CAP) as usize
 }
 
+/// The dedupe choice the display uses: the page's filter wins once it sent
+/// one, the setting decides before that.
+fn dedupe_active(state: &Store) -> bool {
+    if state.filter_touched {
+        state.filter.dedupe
+    } else {
+        settings::get_bool("log.dedupe", true)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // State push
 // ---------------------------------------------------------------------------
@@ -867,22 +1046,30 @@ fn build_state() -> Value {
     ensure_parsed(&mut state);
 
     let slow_threshold_ms = slow_threshold();
-    let dedupe = if state.filter_touched {
-        state.filter.dedupe
-    } else {
-        settings::get_bool("log.dedupe", true)
-    };
-    let rows = build_rows_with(
+    let dedupe = dedupe_active(&state);
+    let rows = display_rows(
         &state.analysis,
-        Some(&state.sources),
+        &state.sources,
         &state.removed,
         &state.blocked,
         dedupe,
         slow_threshold_ms,
+        &state.expanded,
     );
 
     let filter = state.filter.clone();
-    let filtered = filter_row_refs(&rows, &filter, slow_threshold_ms);
+    let mut filtered = filter_row_refs(&rows, &filter, slow_threshold_ms);
+    // Lane L26: `duration` orders longest first (rows without a duration last,
+    // stable so capture order survives among equals). The buffer cap then
+    // keeps the first `cap` rows of the sorted order.
+    if state.sort == SortMode::Duration {
+        filtered.sort_by(|a, b| match (a.duration_ms, b.duration_ms) {
+            (Some(x), Some(y)) => y.partial_cmp(&x).unwrap_or(Ordering::Equal),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        });
+    }
     let total = filtered.len();
     let slow = filtered
         .iter()
@@ -942,12 +1129,21 @@ fn build_state() -> Value {
                 "error_text": row.error_text(),
                 "category": row.category.token(),
                 "sql_type": row.sql_type.token(),
+                // Group expansion (lane L26): the keys the ⨉N / ×N badges
+                // toggle, and whether this row belongs to an expanded group.
+                "dedupe_key": row.dedupe_key,
+                "n_plus_one_key": row.n_plus_one_key,
+                "expanded": state.expanded.contains(&dedupe_key_token(&row.dedupe_key))
+                    || state.expanded.contains(&n_plus_one_key_token(&row.n_plus_one_key)),
             })
         })
         .collect();
 
     let console_lines = state.text.lines().count() as u64;
     let paused = state.paused;
+    let follow = state.follow;
+    let sort = state.sort;
+    let blocked_keys: Vec<String> = state.blocked.iter().cloned().collect();
     let log_to_sql = log_to_sql_payload(&state.analysis, state.log_to_sql_line);
     let sql_to_java = sql_to_java_state(&state.sql_to_java);
     let history = history_state(&state.history);
@@ -988,7 +1184,9 @@ fn build_state() -> Value {
                 Some(focus) => json!({"kind": focus.kind.token(), "value": focus.value}),
                 None => Value::Null,
             },
-            "blocked": blocked,
+            // The blocked keys themselves (lane L26: the eye-off popup lists
+            // them); the count stays in `counts.blocked`.
+            "blocked": blocked_keys,
         },
         "counts": {
             "total": total,
@@ -1004,7 +1202,9 @@ fn build_state() -> Value {
             "agent_connected": stats.connected,
             "agent_events": stats.events,
             "paused": paused,
+            "follow": follow,
         },
+        "sort": sort.token(),
         "slow_threshold_ms": slow_threshold_ms,
         "labels": labels_json(),
     })
@@ -1132,6 +1332,67 @@ fn block_line(line_no: usize) -> Option<String> {
 /// Clears the session's blocked methods.
 fn unblock_all() {
     store().blocked.clear();
+}
+
+/// Flips the expanded state of the group the row's `kind` badge toggles
+/// (lane L26).
+///
+/// `kind` is `dedupe` (the ⨉N badge) or `group` (the ×N badge). A row that
+/// states no such group is a no-op: the page only makes the badge clickable
+/// when the key exists.
+fn toggle_group(line_no: usize, kind: &str) {
+    let mut state = store();
+    ensure_parsed(&mut state);
+    let rows = display_rows(
+        &state.analysis,
+        &state.sources,
+        &state.removed,
+        &state.blocked,
+        dedupe_active(&state),
+        slow_threshold(),
+        &state.expanded,
+    );
+    let Some(row) = rows.iter().find(|row| row.line_no == line_no) else {
+        return;
+    };
+    let key = match kind {
+        "dedupe" => row.dedupe_key.clone(),
+        _ => row.n_plus_one_key.clone(),
+    };
+    if key.is_empty() {
+        return;
+    }
+    let combined = if kind == "dedupe" {
+        dedupe_key_token(&key)
+    } else {
+        n_plus_one_key_token(&key)
+    };
+    if state.expanded.contains(&combined) {
+        state.expanded.remove(&combined);
+    } else {
+        state.expanded.insert(combined);
+    }
+}
+
+/// The one-screen shortcut/interaction cheat sheet the help button prints.
+fn help_text() -> String {
+    let lines = [
+        t("view.logs.help.title"),
+        t("view.logs.help.search"),
+        t("view.logs.help.tab"),
+        t("view.logs.help.dblclick"),
+        t("view.logs.help.menu"),
+        t("view.logs.help.scroll"),
+        t("view.logs.help.sort"),
+        t("view.logs.help.blocked"),
+    ];
+    let mut out = String::new();
+    for line in lines {
+        out.push_str("-- ");
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1360,7 +1621,20 @@ fn history_match(item: &Value, analysis: &LogAnalysis) -> HistoryMatch {
     }
 }
 
+/// The label map the page binds (see [`labels_base`] and [`labels_actions`]).
+///
+/// The two halves are separate `json!` objects because one object literal of
+/// this size exceeds the macro's recursion limit; merging keeps the page's
+/// single `labels` object.
 fn labels_json() -> Value {
+    let mut base = labels_base();
+    if let (Some(target), Value::Object(extra)) = (base.as_object_mut(), labels_actions()) {
+        target.extend(extra);
+    }
+    base
+}
+
+fn labels_base() -> Value {
     json!({
         "typesTitle": t("view.logs.filter.types_title"),
         "typesAll": t("view.logs.filter.all"),
@@ -1449,6 +1723,27 @@ fn labels_json() -> Value {
         "tabConfidenceExact": t("view.logs.tab.confidence.exact"),
         "tabConfidencePartial": t("view.logs.tab.confidence.partial"),
         "tabConfidenceUnresolved": t("view.logs.tab.confidence.unresolved"),
+    })
+}
+
+/// Toolbar actions and interactions (lane L26).
+fn labels_actions() -> Value {
+    json!({
+        "captureStart": t("view.logs.button.capture_start"),
+        "captureStop": t("view.logs.button.capture_stop"),
+        "scrollEnd": t("view.logs.button.scroll_end"),
+        "sortDuration": t("view.logs.button.sort_duration"),
+        "sortTimeTitle": t("view.logs.sort.time_title"),
+        "sortDurationTitle": t("view.logs.sort.duration_title"),
+        "blocked": t("view.logs.button.blocked"),
+        "blockedTitle": t("view.logs.blocked.title"),
+        "blockedEmpty": t("view.logs.blocked.empty"),
+        "settings": t("view.logs.button.settings"),
+        "help": t("view.logs.button.help"),
+        "followOn": t("view.logs.status.follow_on"),
+        "followOff": t("view.logs.status.follow_off"),
+        "groupExpand": t("view.logs.group.expand"),
+        "groupCollapse": t("view.logs.group.collapse"),
     })
 }
 
@@ -1665,6 +1960,75 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
         "clear-blocked" => {
             unblock_all();
             let _ = push_state();
+        }
+        // Capture controls (lane L26): the toolbar buttons forward to the
+        // existing commands, which write their own Output lines (connected /
+        // already connected / the failure reason); the panel only refreshes the
+        // state so the status line follows the connection.
+        "capture-start" => {
+            let _ = crate::commands::capture_start::run(ctx, None);
+            let _ = push_state();
+        }
+        "capture-stop" => {
+            let _ = crate::commands::capture_stop::run(ctx, None);
+            let _ = push_state();
+        }
+        // Follow (lane L26): the page reports a flip when the user scrolls
+        // away from the bottom; "scroll to bottom" restores it.
+        "follow" => {
+            let follow = message
+                .get("follow")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            store().follow = follow;
+            let _ = push_state();
+        }
+        "scroll-end" => {
+            store().follow = true;
+            let _ = push_state();
+            host::refresh_view(VIEW_ID);
+        }
+        // Display order (lane L26): the sort-by-duration button toggles.
+        "sort" => {
+            if let Some(mode) = message
+                .get("sort")
+                .and_then(Value::as_str)
+                .and_then(SortMode::parse)
+            {
+                store().sort = mode;
+                let _ = push_state();
+            }
+        }
+        // Group expansion (lane L26): the ⨉N / ×N badges toggle their group.
+        "toggle-group" => {
+            if let Some(line) = message_line(&message) {
+                let kind = message
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("group");
+                toggle_group(line, kind);
+                let _ = push_state();
+            }
+        }
+        // The platform has no API to open the settings page, so the button
+        // points the user there through a notification and the Output channel
+        // instead of doing nothing.
+        "settings" => {
+            host::notify(
+                NotificationLevel::Info,
+                &t("view.logs.settings.title"),
+                &t("view.logs.settings.guide"),
+            );
+            common::emit(&format!(
+                "-- {}\n{}\n",
+                t("view.logs.settings.title"),
+                t("view.logs.settings.guide")
+            ))?;
+        }
+        // Help: a one-screen shortcut/interaction cheat sheet in the Output
+        // channel.
+        "help" => {
+            common::emit(&help_text())?;
         }
         // The preview tab (lane L23): the page prefixes its ops so they cannot
         // collide with this panel's own `clear` / `export` / `copy`; the model
@@ -2235,6 +2599,13 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             ("pauseBtn", "'toggle-pause'"),
             ("clearBtn", "'clear'"),
             ("copyAllBtn", "'copy-all'"),
+            // Lane L26 toolbar actions.
+            ("captureBtn", "'capture-start'"),
+            ("scrollEndBtn", "'scroll-end'"),
+            ("sortBtn", "'sort'"),
+            ("blockedBtn", "'clear-blocked'"),
+            ("settingsBtn", "'settings'"),
+            ("helpBtn", "'help'"),
         ] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
             assert!(page.contains(op), "missing op {op}");
@@ -2244,16 +2615,22 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             );
         }
         // The action row draws pause + resume (one is hidden by the state),
-        // clear and copy: four SVG bodies, no text buttons left.
+        // clear, copy, capture run + stop, scroll-to-bottom, sort, blocked,
+        // settings and help: eleven SVG bodies, no text buttons left.
         let bar_start = page.find("class=\"actionbar\"").expect("action row");
         let bar_end = page.find("class=\"filterbar\"").expect("filter row");
         let actionbar = &page[bar_start..bar_end];
-        assert_eq!(actionbar.matches("<svg").count(), 4, "{actionbar}");
+        assert_eq!(actionbar.matches("<svg").count(), 11, "{actionbar}");
         assert!(
             !actionbar.contains("class=\"btn\""),
             "the action row has no text buttons"
         );
-        for id in ["pauseIcon", "resumeIcon"] {
+        for id in [
+            "pauseIcon",
+            "resumeIcon",
+            "captureRunIcon",
+            "captureStopIcon",
+        ] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
         // The label binds through `title` and `aria-label`, both fed by the
@@ -2264,7 +2641,23 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         );
         assert!(page.contains("node.title = label || ''"), "title binding");
         let labels = labels_json();
-        for key in ["pause", "resume", "clear", "copyAll"] {
+        for key in [
+            "pause",
+            "resume",
+            "clear",
+            "copyAll",
+            "captureStart",
+            "captureStop",
+            "scrollEnd",
+            "sortDuration",
+            "blocked",
+            "settings",
+            "help",
+            "followOn",
+            "followOff",
+            "groupExpand",
+            "groupCollapse",
+        ] {
             assert!(labels.get(key).is_some(), "missing label {key}");
         }
     }
@@ -2667,7 +3060,9 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             "the slow capsule is the one right-aligned element"
         );
 
-        let build_start = page.find("function buildRow(row, slowThreshold)").unwrap();
+        let build_start = page
+            .find("function buildRow(row, slowThreshold, isMember)")
+            .unwrap();
         let build_end = page.find("function formatMs(ms)").unwrap();
         let build = &page[build_start..build_end];
         let seq = build.find("makePart('seq'").expect("seq");
@@ -2795,7 +3190,10 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             "pvFormatPreview",
             "pvMode",
             "pvExport",
-            "pvParams",
+            "pvParamsList",
+            "pvRebindBtn",
+            "pvImportBtn",
+            "pvRollback",
             "pvTabBody",
             "pvExecute",
             "pvCopySql",
@@ -2809,6 +3207,23 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
                 "missing inner tab {tab}"
             );
         }
+        // Lane L27: the parameter column is editable, rebinds through the host
+        // and imports a comma/newline separated list from the clipboard; when
+        // the clipboard API is absent the import button is greyed with the
+        // reason, and the rollback entry explains why it is disabled.
+        assert!(page.contains("pv-param-input"), "editable parameter inputs");
+        assert!(page.contains("op: 'preview-params'"), "the rebind op");
+        assert!(
+            page.contains("navigator.clipboard.readText()"),
+            "the clipboard read"
+        );
+        assert!(page.contains("importBtn.disabled"), "the degrade branch");
+        assert!(
+            page.contains("split(/[\\r\\n,]+/)"),
+            "comma/newline parsing"
+        );
+        assert!(page.contains("op: 'preview-rollback'"), "the rollback op");
+        assert!(page.contains("labels.rollbackNote"), "the rollback note");
         // Execute stays disabled with the reason in its tooltip; the page has
         // no external link, no storage and builds no markup from data.
         assert!(page.contains("pvSig"), "the tab body is signature guarded");
@@ -3232,6 +3647,263 @@ public interface UserMapper {
             elapsed < std::time::Duration::from_millis(400),
             "5k-row push took {elapsed:?}"
         );
+    }
+
+    // Toolbar actions and interactions (lane L26) -------------------------
+
+    #[test]
+    fn capture_start_message_forwards_to_the_capture_command() {
+        let (host, _guard) = test_host();
+        let _bridge = crate::capture::bridge::test_guard();
+        host.set_project_root(Some("/project"));
+        handle_panel_message(&host, "{\"op\":\"capture-start\"}").unwrap();
+        let out = &host.output()[common::CHANNEL];
+        // The command owns the Output text; the mock host has no agent, so the
+        // ws layer names the failure with its own key.
+        assert!(out.contains("-- "), "{out}");
+        assert!(
+            out.contains("capture.start") || out.contains("capture.ws"),
+            "{out}"
+        );
+        // The op refreshes the state so the status line follows the attempt.
+        assert!(host.view_messages().iter().any(|(view, _)| view == VIEW_ID));
+    }
+
+    #[test]
+    fn capture_stop_message_forwards_to_the_capture_command() {
+        let (host, _guard) = test_host();
+        let _bridge = crate::capture::bridge::test_guard();
+        handle_panel_message(&host, "{\"op\":\"capture-stop\"}").unwrap();
+        let out = &host.output()[common::CHANNEL];
+        assert!(out.contains("-- capture-stop:"), "{out}");
+        assert!(
+            out.contains(crate::commands::capture_stop::KEY_STOP_NOT_CONNECTED),
+            "{out}"
+        );
+        assert!(host.view_messages().iter().any(|(view, _)| view == VIEW_ID));
+    }
+
+    #[test]
+    fn follow_message_mirrors_the_page_flag_in_the_state() {
+        let (host, _guard) = test_host();
+        handle_panel_message(&host, "{\"op\":\"follow\",\"follow\":false}").unwrap();
+        assert_eq!(state_of(&host)["status"]["follow"], false);
+        handle_panel_message(&host, "{\"op\":\"follow\",\"follow\":true}").unwrap();
+        assert_eq!(state_of(&host)["status"]["follow"], true);
+    }
+
+    #[test]
+    fn scroll_end_restores_follow_and_refreshes_the_view() {
+        let (host, _guard) = test_host();
+        store().follow = false;
+        handle_panel_message(&host, "{\"op\":\"scroll-end\"}").unwrap();
+        assert_eq!(state_of(&host)["status"]["follow"], true);
+        assert!(host.refreshed_views().contains(&VIEW_ID.to_string()));
+    }
+
+    #[test]
+    fn sort_message_orders_by_duration_and_back_by_time() {
+        let (host, _guard) = test_host();
+        let text = "\
+1723456789012|300|statement|SELECT * FROM a
+1723456789013|1000|statement|SELECT * FROM b
+1723456789014|50|statement|SELECT * FROM c
+";
+        set_log_text(text);
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"duration\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sort"], "duration");
+        let order: Vec<String> = state["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["sql"].as_str().unwrap().to_string())
+            .collect();
+        assert!(order[0].contains("FROM b"), "{order:?}");
+        assert!(order[1].contains("FROM a"), "{order:?}");
+        assert!(order[2].contains("FROM c"), "{order:?}");
+
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"time\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sort"], "time");
+        let order: Vec<String> = state["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["sql"].as_str().unwrap().to_string())
+            .collect();
+        assert!(order[0].contains("FROM a"), "{order:?}");
+        assert!(order[2].contains("FROM c"), "{order:?}");
+    }
+
+    #[test]
+    fn sort_duration_puts_rows_without_a_duration_last() {
+        let (host, _guard) = test_host();
+        let text = "\
+1723456789012|300|statement|SELECT * FROM timed
+==>  Preparing: SELECT * FROM untimed WHERE id = ?
+==> Parameters: 1(Long)
+";
+        set_log_text(text);
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"duration\"}").unwrap();
+        let rows = state_of(&host)["rows"].as_array().cloned().unwrap();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert!(rows[0]["sql"].as_str().unwrap().contains("timed"));
+        assert_eq!(rows[1]["duration_ms"], Value::Null);
+    }
+
+    #[test]
+    fn settings_message_points_at_the_settings_page() {
+        let (host, _guard) = test_host();
+        handle_panel_message(&host, "{\"op\":\"settings\"}").unwrap();
+        let notes = host.notifications();
+        assert!(!notes.is_empty(), "a notification is published");
+        assert!(notes[0].body.contains("Settings"), "{:?}", notes[0]);
+        let out = &host.output()[common::CHANNEL];
+        assert!(out.contains("Plugins"), "{out}");
+    }
+
+    #[test]
+    fn help_message_prints_the_cheat_sheet() {
+        let (host, _guard) = test_host();
+        handle_panel_message(&host, "{\"op\":\"help\"}").unwrap();
+        let out = &host.output()[common::CHANNEL];
+        assert!(out.contains(&t("view.logs.help.title")), "{out}");
+        assert!(out.contains("Ctrl+F"), "{out}");
+        assert!(out.contains("Ctrl+Tab"), "{out}");
+    }
+
+    #[test]
+    fn toggle_group_expands_and_collapses_a_dedupe_group() {
+        let (host, _guard) = test_host();
+        let text = "\
+==>  Preparing: SELECT * FROM user WHERE id = ?
+==> Parameters: 1(Long)
+==>  Preparing: SELECT * FROM user WHERE id = ?
+==> Parameters: 1(Long)
+";
+        set_log_text(text);
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let state = state_of(&host);
+        let rows = state["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "folded while collapsed: {rows:?}");
+        assert_eq!(rows[0]["dedupe_count"], 2);
+        let key = rows[0]["dedupe_key"].as_str().unwrap().to_string();
+        assert!(!key.is_empty());
+        let line = rows[0]["line"].as_u64().unwrap();
+
+        handle_panel_message(
+            &host,
+            &format!("{{\"op\":\"toggle-group\",\"line\":{line},\"kind\":\"dedupe\"}}"),
+        )
+        .unwrap();
+        let state = state_of(&host);
+        let rows = state["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "unfolded into its occurrences: {rows:?}");
+        assert_eq!(rows[0]["expanded"], true);
+        assert_eq!(rows[1]["expanded"], true);
+        assert_eq!(rows[0]["dedupe_count"], 2);
+        assert_eq!(rows[1]["dedupe_count"], 1);
+        assert_eq!(rows[1]["dedupe_key"], json!(key));
+
+        // The same badge collapses it again.
+        handle_panel_message(
+            &host,
+            &format!("{{\"op\":\"toggle-group\",\"line\":{line},\"kind\":\"dedupe\"}}"),
+        )
+        .unwrap();
+        assert_eq!(state_of(&host)["rows"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn toggle_group_expands_an_n_plus_one_group() {
+        let (host, _guard) = test_host();
+        let mut text = String::new();
+        for id in 0..5 {
+            text.push_str(&format!(
+                "==>  Preparing: SELECT * FROM t WHERE id = ?\n==> Parameters: {id}(Integer)\n"
+            ));
+        }
+        set_log_text(&text);
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let state = state_of(&host);
+        let rows = state["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 5);
+        assert!(rows.iter().all(|row| row["group_count"] == 5));
+        let line = rows[0]["line"].as_u64().unwrap();
+
+        handle_panel_message(
+            &host,
+            &format!("{{\"op\":\"toggle-group\",\"line\":{line},\"kind\":\"group\"}}"),
+        )
+        .unwrap();
+        let state = state_of(&host);
+        let rows = state["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 5, "the group's occurrences: {rows:?}");
+        let heads = rows.iter().filter(|row| row["group_count"] == 5).count();
+        assert_eq!(heads, 1, "only the head keeps the ×N badge: {rows:?}");
+        assert!(rows.iter().all(|row| row["expanded"] == true));
+        assert!(rows[1..].iter().all(|row| row["group_count"] == 1));
+    }
+
+    #[test]
+    fn clear_blocked_empties_the_key_list_in_the_state() {
+        let (host, _guard) = test_host();
+        set_log_text(SOURCED_LOG);
+        let users = first_line_with(&snapshot().entries, "FROM users");
+        handle_panel_message(
+            &host,
+            &format!("{{\"op\":\"block-method\",\"line\":{users}}}"),
+        )
+        .unwrap();
+        let state = state_of(&host);
+        let blocked = state["filter"]["blocked"].as_array().unwrap();
+        assert_eq!(blocked.len(), 1, "{state}");
+        assert_eq!(blocked[0], "c.e.m.mapper.UserMapper#selectById");
+        assert_eq!(state["counts"]["blocked"], 1);
+
+        handle_panel_message(&host, "{\"op\":\"clear-blocked\"}").unwrap();
+        let state = state_of(&host);
+        assert!(state["filter"]["blocked"].as_array().unwrap().is_empty());
+        assert_eq!(state["counts"]["blocked"], 0);
+    }
+
+    #[test]
+    fn the_page_draws_the_l26_actions_and_the_interaction_state() {
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        // The two pause concepts stay separate: refresh pause (existing
+        // `paused`) and follow pause (`atBottom` / `follow`).
+        assert!(page.contains("scrollTop + list.clientHeight >= list.scrollHeight - 4"));
+        assert!(page.contains("var follow = true;"));
+        assert!(page.contains("post({ op: 'follow', follow: false })"));
+        assert!(page.contains("post({ op: 'scroll-end' })"));
+        // The sort button toggles time <-> duration and shows the current mode.
+        assert!(page.contains("sortMode = sortMode === 'duration' ? 'time' : 'duration';"));
+        assert!(page.contains("post({ op: 'sort', sort: sortMode })"));
+        assert!(page.contains("L.sortDurationTitle"));
+        // The blocked popup lists the keys and clears them.
+        assert!(page.contains("id=\"blockedMenu\""));
+        assert!(page.contains("id=\"blockedList\""));
+        assert!(page.contains("id=\"blockedClear\""));
+        assert!(page.contains("post({ op: 'clear-blocked' })"));
+        assert!(page.contains("renderBlocked(state)"));
+        // The group badges are clickable and post toggle-group with the kind.
+        assert!(page.contains("badgeButton(dedupeText, 'dedupe', dedupeTitle"));
+        assert!(page.contains("badgeButton(groupText, 'group', groupTitle"));
+        assert!(page.contains("kind: 'dedupe'"));
+        assert!(page.contains("kind: 'group'"));
+        assert!(page.contains("content.classList.add('member')"));
+        // The capture button is one icon button whose glyph follows the state.
+        assert!(page.contains("post({ op: connected ? 'capture-stop' : 'capture-start' })"));
+        assert!(page.contains("$('captureRunIcon').hidden = connected"));
+        // Settings and help have real feedback paths, not dead buttons.
+        assert!(page.contains("post({ op: 'settings' })"));
+        assert!(page.contains("post({ op: 'help' })"));
+        // The status line names the follow state.
+        assert!(page.contains("right = L.followOff || ''"));
+        // The scroll-to-bottom tooltip names the follow state too.
+        assert!(page.contains("$('scrollEndBtn').title = follow ? (L.followOn"));
     }
 
     // Helpers -------------------------------------------------------------

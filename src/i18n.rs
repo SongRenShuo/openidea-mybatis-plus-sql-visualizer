@@ -137,6 +137,100 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "The file cannot be opened from here; the position is on the clipboard and in the Output channel.",
         "此处无法打开文件；位置已复制到剪贴板并输出到 Output 通道。",
     ),
+    // Toolbar actions and interactions (lane L26).
+    (
+        "view.logs.button.capture_start",
+        "Start capture",
+        "开始捕捉",
+    ),
+    ("view.logs.button.capture_stop", "Stop capture", "停止捕捉"),
+    (
+        "view.logs.button.scroll_end",
+        "Scroll to bottom",
+        "滚动到底",
+    ),
+    (
+        "view.logs.button.sort_duration",
+        "Sort by duration",
+        "按耗时排序",
+    ),
+    (
+        "view.logs.sort.time_title",
+        "Sorted by time (ascending)",
+        "按时间正序",
+    ),
+    (
+        "view.logs.sort.duration_title",
+        "Sorted by duration (descending)",
+        "按耗时降序",
+    ),
+    ("view.logs.button.blocked", "Blocked methods", "屏蔽的方法"),
+    ("view.logs.blocked.title", "Blocked methods", "已屏蔽的方法"),
+    (
+        "view.logs.blocked.empty",
+        "No methods are blocked.",
+        "暂无屏蔽的方法。",
+    ),
+    ("view.logs.button.settings", "Settings", "设置"),
+    ("view.logs.settings.title", "Settings", "设置"),
+    (
+        "view.logs.settings.guide",
+        "Open Settings → Plugins → MyBatis SQL Visualizer to change the dialect and log options.",
+        "请在 Settings → Plugins → MyBatis SQL Visualizer 中修改方言与日志选项。",
+    ),
+    ("view.logs.button.help", "Help", "帮助"),
+    ("view.logs.status.follow_on", "Following latest", "跟随最新"),
+    ("view.logs.status.follow_off", "Follow paused", "跟随已暂停"),
+    (
+        "view.logs.group.expand",
+        "Expand this group of statements",
+        "展开这组同结构语句",
+    ),
+    (
+        "view.logs.group.collapse",
+        "Collapse this group",
+        "折叠这组语句",
+    ),
+    (
+        "view.logs.help.title",
+        "Keyboard shortcuts and interactions",
+        "快捷键与交互速查",
+    ),
+    (
+        "view.logs.help.search",
+        "Ctrl+F: open the search row (case / regex toggles)",
+        "Ctrl+F：打开搜索行（可切换大小写/正则）",
+    ),
+    (
+        "view.logs.help.tab",
+        "Ctrl+Tab / Ctrl+Shift+Tab: switch tabs",
+        "Ctrl+Tab / Ctrl+Shift+Tab：切换页签",
+    ),
+    (
+        "view.logs.help.dblclick",
+        "Double-click a row: send its SQL to the SQL Preview workbench",
+        "双击行：把该行 SQL 送入「SQL 预览」工作台",
+    ),
+    (
+        "view.logs.help.menu",
+        "Right-click a row: copy SQL / copy timestamp / export / jump to Java / jump to Mapper XML / focus by method / focus by request / delete / mute this method",
+        "右键行：复制 SQL / 复制时间戳 / 导出 / 跳转 Java / 跳转 Mapper XML / 按方法聚焦 / 按请求聚焦 / 删除 / 屏蔽此方法",
+    ),
+    (
+        "view.logs.help.scroll",
+        "Scroll the list: leaving the bottom pauses follow; scroll back or click Scroll to bottom to resume",
+        "滚动列表：滚离底部即暂停跟随，滚回底部或点「滚动到底」恢复",
+    ),
+    (
+        "view.logs.help.sort",
+        "Sort by duration: toggles between time order and duration order",
+        "「按耗时排序」：在时间正序与耗时降序间切换",
+    ),
+    (
+        "view.logs.help.blocked",
+        "Blocked methods: view the muted methods and restore them all",
+        "「屏蔽的方法」：查看已屏蔽的方法并全部恢复",
+    ),
     ("view.logs.type.select", "SELECT", "SELECT"),
     ("view.logs.type.insert", "INSERT", "INSERT"),
     ("view.logs.type.update", "UPDATE", "UPDATE"),
@@ -343,6 +437,63 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "view.workbench.status.dialect_readonly",
         "The dialect comes from the settings page and cannot be changed here.",
         "方言来自设置页，不能在此修改。",
+    ),
+    // Workbench parameters, clipboard import and rollback (lane L27).
+    ("view.workbench.action.rebind", "Rebind", "重绑定"),
+    (
+        "view.workbench.action.import_clipboard",
+        "Import from Clipboard",
+        "从剪贴板导入",
+    ),
+    (
+        "view.workbench.action.rollback",
+        "Generate Rollback",
+        "生成回滚",
+    ),
+    (
+        "view.workbench.rollback.note",
+        "The workbench has no table / primary-key metadata, so a rollback plan cannot be generated here; the rollback-plan command takes a table description (columns + primary key).",
+        "工作台没有表/主键元数据，无法在此生成回滚；回滚计划需要表结构（列 + 主键），请用 rollback-plan 命令并给出表描述。",
+    ),
+    (
+        "view.workbench.params.hint",
+        "Edit a value, then Rebind to write it into the SQL; numbers and booleans stay bare, everything else is quoted.",
+        "修改参数后点「重绑定」写入 SQL；数字与布尔值裸写，其余按字符串加引号。",
+    ),
+    (
+        "view.workbench.status.clipboard_missing",
+        "The clipboard capability is not granted; importing from the clipboard is unavailable.",
+        "未授予剪贴板能力，无法从剪贴板导入。",
+    ),
+    (
+        "view.workbench.status.imported",
+        "Imported {0} value(s) from the clipboard (not rebound).",
+        "已从剪贴板导入 {0} 个值（未自动重绑定）。",
+    ),
+    (
+        "view.workbench.status.import_failed",
+        "Could not read the clipboard: {0}",
+        "读取剪贴板失败：{0}",
+    ),
+    (
+        "view.workbench.status.params_empty",
+        "There are no parameter values to bind.",
+        "没有可回填的参数值。",
+    ),
+    (
+        "view.workbench.status.params_no_placeholder",
+        "The SQL has no ? placeholder to rebind.",
+        "SQL 中没有可回填的 ? 占位符。",
+    ),
+    (
+        "view.workbench.status.rebound",
+        "Parameters rebound into the SQL.",
+        "参数已回填到 SQL。",
+    ),
+    (
+        "view.workbench.status.rollback_refused",
+        "A rollback plan needs the table's primary key; the workbench has no table metadata, so no plan is generated (use the rollback-plan command with a table description).",
+        "回滚计划需要表的主键；工作台没有表元数据，因此不生成回滚（请用 rollback-plan 命令并给出表描述）。",
     ),
     // Parameter restoration keys (lane L2, docs/registration/L2.md).
     (
