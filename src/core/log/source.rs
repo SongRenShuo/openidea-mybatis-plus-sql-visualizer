@@ -29,14 +29,17 @@
 //! (`…JdbcTemplate`) and p6spy (`p6spy`) print a logger name too, but it is a
 //! logger, not a statement id, and its last segment is a class — so the
 //! logger-derived fields stay empty for them, exactly as the reference
-//! implementation's PSI path had no source for them either.
+//! implementation's PSI path had no source for them either. A logback-prefixed
+//! Hibernate row (`… org.hibernate.SQL : select …`) is still cut at its message
+//! body, so the SQL text can never donate a `request_id`, while the thread and
+//! the MDC correlation id in front of it stay readable.
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
 use super::model::LogAnalysis;
-use super::text::{find_ci, thread_token};
+use super::text::{find_ci, hibernate_logger_row, thread_token};
 
 /// Marker keywords that start a MyBatis message body. Their position is the
 /// boundary between "log prefix" (logger, thread, MDC) and "SQL" — text after
@@ -174,6 +177,12 @@ fn message_start(line: &str) -> Option<usize> {
             consider(at);
         }
     }
+    // Hibernate logger rows (`… org.hibernate.SQL : select …`, `… bind : binding
+    // parameter …`): the body starts right after the logger, so a
+    // `request_id = 'x'` predicate inside the SQL is not read as an id.
+    if let Some(row) = hibernate_logger_row(line) {
+        consider(row.message_start);
+    }
     best
 }
 
@@ -208,6 +217,11 @@ fn logger_of(prefix: &str) -> Option<SourceRef> {
     // must yield nothing.
     let first = method.chars().next()?;
     if first == '_' || !first.is_lowercase() {
+        return None;
+    }
+    // Lower-case logger tails that are still classes, not statement ids:
+    // `org.hibernate.orm.jdbc.bind` sits in front of every binding row.
+    if method == "bind" {
         return None;
     }
     Some(SourceRef {

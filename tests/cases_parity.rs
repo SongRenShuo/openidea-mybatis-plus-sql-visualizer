@@ -902,7 +902,8 @@ fn log_case(case: &Case) -> Result<Vec<String>, String> {
             .map_err(|e| format!("case {}: invalid options: {e}", case.id))?,
         None => log::ParseOptions::default(),
     };
-    let analysis = log::parse(text, &options);
+    let parsed = log::parse_with_sources(text, &options);
+    let analysis = parsed.analysis;
 
     let mut diffs = Vec::new();
     for (field, actual) in [
@@ -977,6 +978,22 @@ fn log_case(case: &Case) -> Result<Vec<String>, String> {
             }
             if let Some(v) = want.get("duration_ms") {
                 check_json(&mut diffs, "duration_ms", v, &json!(entry.duration_ms));
+            }
+            // Provenance read off the row itself: the logback `--- [thread]`
+            // bracket and an MDC pair in the prefix.
+            if let Some(v) = want.get("thread") {
+                let actual = parsed
+                    .sources
+                    .get(entry.line_no)
+                    .and_then(|source| source.thread.clone());
+                check_json(&mut diffs, "thread", v, &json!(actual));
+            }
+            if let Some(v) = want.get("request_id") {
+                let actual = parsed
+                    .sources
+                    .get(entry.line_no)
+                    .and_then(|source| source.request_id.clone());
+                check_json(&mut diffs, "request_id", v, &json!(actual));
             }
             if let Some(v) = want.get("keys_contains") {
                 contains_keys(&mut diffs, v, &entry.message_keys);
