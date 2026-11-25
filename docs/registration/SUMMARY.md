@@ -10,7 +10,7 @@
 | --- | ---: | --- |
 | commands | 13 | render-xml / check-sql / perf-advice / generate-crud / rollback-plan / render-log / capture-start / capture-stop / capture-status / capture-poll / capture-open-log / open-logs / open-workbench |
 | views | 2 | `sqlv-logs`（bottom，代码渲染）、`sqlv-workbench`（right，包内 web 页） |
-| settings | 1 页 | `settings.schema.json`，42 项五组（Dialect / Log / Rendering / Navigation / Engine） |
+| settings | 4 页 | `settings/{ui-actions,sql-preview,sql-log,engine}.json`，45 项；入口名 `MyBatis SQL Visualizer` |
 | documentIndexers | 1 | extensions `xml`、`java` |
 | providers | 4 | definition+line-markers（xml/java）、injections（xml）、inlay-hints（xml/java）、diagnostics（xml/java） |
 | mcpTools | 11 | `sqlv_render_sql` / `render_logs` / `check_sql` / `perf_advice` / `crud_sql` / `rollback_plan` / `reverse_sql` / `mapper_check` / `history_search` / `schema_context` / `explain` |

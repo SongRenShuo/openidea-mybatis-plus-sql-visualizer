@@ -43,7 +43,7 @@ openidea-plugin link .         # 之后 Settings › Plugins › Reload
 | 项目视图右键 | 选中文件即作为命令参数，日志文件不必手抄路径 |
 | MCP 工具（12 个 `sqlv_*`） | `render_sql`、`render_logs`、`check_sql`、`perf_advice`、`crud_sql`、`rollback_plan`、`reverse_sql`、`mapper_check`、`history_search`、`schema_context`、`explain`、`index_stats`。全部只读、不带破坏性操作，SQL 只以文本返回 |
 | 编辑期反馈 | mapper XML 上的语句/ResultMap 标记、`*Mapper.xml` 文件图标、SQL 高亮、定义跳转、INSERT 列 inlay、列名与方言引号诊断。导航与注入默认关闭（`nav.enabled` / `injections.enabled`） |
-| 设置页 | 42 项、五组（Log / Navigation / Rendering / Engine / Dialect），schema 见 `settings.schema.json` |
+| 设置页 | 入口名 `MyBatis SQL Visualizer`，四页（UI and Actions / SQL Preview / SQL Log / Engine）、45 项，schema 见 `settings/*.json` |
 
 每条渲染结果都带置信度：`exact` / `partial` / `unresolved`。判不出来就写 `unresolved` 并给原因和补充入口，不猜；MCP 工具也不把 `partial` 当 `exact` 返回。
 

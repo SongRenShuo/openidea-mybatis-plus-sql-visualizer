@@ -12,7 +12,7 @@
 | P0 骨架 | 完成 | 本仓首提交 `e2e6e38`：`plugin.toml`（API 1.15）、`render-xml` 命令、`openidea-plugin check` ok、wasm 110.6 KiB |
 | P0 引擎导出 | 完成（主仓） | 主仓 `sub-projects/engine-jar`，`b3a8aeb9a`；jar 4.5 MB、零 IntelliJ 引用、15 方言 |
 | P1 纯逻辑引擎 | 完成 | Rust 侧 XML/OGNL/include/注解/iBatis、15 方言、参数、格式化、21 条规则、生成/回滚、日志四族；`cases/cases.jsonl` 150 例对拍（144 绿 + 6 条有据白名单） |
-| P2 界面面 | 完成 | 日志面板、预览工作台、42 项设置、双语表、标记/文件图标；GUI 走查待 IDE 重载 |
+| P2 界面面 | 完成 | 日志面板、预览工作台、设置页（45 项、四页）、双语表、标记/文件图标；GUI 走查待 IDE 重载 |
 | P3 导航与注解 | 完成（默认关） | `documentIndexers` 图、definition/line-markers、injections、inlay、diagnostics；Ctrl+B 真机未验 |
 | P4 捕获链 | 完成（固定端口） | agent ws 旁路（默认 TCP）、`websocket-ready` 消费、事件唤醒、日志文件路径 |
 | P5 sidecar 与执行 | 完成 | 引擎钉值 + sha256、stdio 真往返（204 ms）、Wrapper 文本解析、EXPLAIN 包装与结果模型、schema 缓存；**T5-5 已达成**：引擎自带 PostgreSQL（BSD-2）/ mssql-jdbc（MIT），在 PG16、PG17、SQL Server 2022 三库真跑只读 EXPLAIN（JSON/XML 计划），写语句结构化拒绝 |
