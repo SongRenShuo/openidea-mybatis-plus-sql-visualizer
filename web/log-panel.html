@@ -197,6 +197,7 @@
     #panelPreview .pv-toolbar {
       display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px;
     }
+    #panelPreview .hint { padding: 0 8px 4px; color: var(--openidea-fg-muted); }
     #panelPreview #pvInput {
       flex: 1 1 auto; min-height: 0; margin: 0 8px 8px; padding: 6px 8px; resize: none;
       color: var(--openidea-fg); background: var(--openidea-bg-input);
@@ -973,9 +974,23 @@
       var PV_TAB_KEYS = { sql: 'tabSql', raw: 'tabRaw', columns: 'tabColumns' };
       var PV_TAB_ORDER = ['sql', 'raw', 'columns'];
       var preview = { model: {}, labels: {}, dialect: {}, tab: 'sql', mode: 'normal' };
+      // Signature of what the tab body shows: a state push that changes none
+      // of it must not re-render (the reader keeps their scroll position).
+      var pvSig = null;
 
       function pvNode(id) { return document.getElementById(id); }
       function pvTabs() { return preview.model.tabs || {}; }
+
+      function pvSignature() {
+        var m = preview.model || {};
+        var t = pvTabs();
+        var l = preview.labels || {};
+        return [
+          m.sql, m.reason, m.confidence, (m.params || []).join(','),
+          t.formatted, t.raw, t.columns, preview.tab, preview.mode,
+          l.empty, l.columnsEmpty, l.reasonTitle
+        ].join('\u0001');
+      }
 
       function pvInputText() {
         var editor = pvNode('pvInput');
@@ -1023,6 +1038,7 @@
         body.textContent = text;
         body.className = placeholder ? 'code pv-tabbody muted' : 'code pv-tabbody';
         body.scrollTop = 0;
+        pvSig = pvSignature();
       }
 
       function pvSelectTab(key) {
@@ -1115,7 +1131,8 @@
           if (editor) { editor.value = pvTabs().raw || ''; }
         }
         setText(pvNode('pvStatus'), tab.status ? tab.status.text : '');
-        pvRenderTab();
+        var sig = pvSignature();
+        if (sig !== pvSig) { pvRenderTab(); }
       }
 
       function applyState(state) {

@@ -2189,6 +2189,7 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         }
         // Execute stays disabled with the reason in its tooltip; the page has
         // no external link, no storage and builds no markup from data.
+        assert!(page.contains("pvSig"), "the tab body is signature guarded");
         assert!(page.contains("id=\"pvExecute\" class=\"btn\" type=\"button\" disabled"));
         assert!(
             page.contains("openidea.postMessage"),
