@@ -18,10 +18,8 @@ use crate::views::workbench;
 /// Matches `[[contributes.commands]] id` in `plugin.toml`.
 pub const ID: &str = "open-workbench";
 
-/// What the command accepts as `arg`.
-pub const USAGE: &str = "[sql text] | [@<path>]";
-
-/// Dispatch entry.
+/// Dispatch entry. The optional argument is SQL text or `@<path>`; without it
+/// the workbench opens empty.
 pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
     match open(ctx, arg) {
         Ok(text) => {

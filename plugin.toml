@@ -10,19 +10,21 @@ engines.openidea = "^1.15"
 # Built by `openidea-plugin build`. The code is loaded the first time one of its
 # commands runs; the commands below show in Find Action before that.
 wasm = "dist/plugin.wasm"
-activation = ["on-command:*"]
+activation = ["on-command:*", "on-event:websocket-ready"]
 
 # What the code may do. The user approves these when installing.
 # - project.read: render and check statements against the project's mapper XML and
 #   source files, which is the whole point of the plugin. It cannot write anything.
 [capabilities]
-required = ["project.read"]
+required = ["project.read", "events"]
 # clipboard: the log panel and the workbench copy/export SQL. Refusing it only
 # disables those two buttons; rendering, navigation and checks keep working.
 # process:java: starts the pinned engine jar (engine/ENGINE_VERSION) for Wrapper
-# rendering and EXPLAIN statement wrapping. Refusing it degrades to text mode;
-# every other feature still works.
-optional = ["clipboard", "process:java"]
+# rendering and EXPLAIN statement wrapping, and lets the Java agent attach.
+# Refusing it degrades to text mode; every other feature still works.
+# net:127.0.0.1: connects as a client to the agent's loopback capture socket
+# (the sandbox has no raw sockets). Refusing it leaves the log-file path.
+optional = ["clipboard", "process:java", "net:127.0.0.1"]
 
 [[contributes.commands]]
 id = "render-xml"
@@ -53,6 +55,50 @@ category = "MyBatis SQL Visualizer"
 id = "render-log"
 title = "MyBatis SQL: Render SQL Log"
 category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "capture-start"
+title = "MyBatis SQL: Start Capture"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "capture-stop"
+title = "MyBatis SQL: Stop Capture"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "capture-status"
+title = "MyBatis SQL: Capture Status"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "capture-poll"
+title = "MyBatis SQL: Poll Capture"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "capture-open-log"
+title = "MyBatis SQL: Open Capture Log"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "open-logs"
+title = "MyBatis SQL: Open SQL Logs"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "open-workbench"
+title = "MyBatis SQL: Open Workbench"
+category = "MyBatis SQL Visualizer"
+
+# Java agent (L7/L12): captures SQL from Application / Spring Boot / JAR
+# Application run configurations. Declaring it derives the high-risk java.agent
+# capability; refusing it leaves the log-file path. The transport switch is a
+# JVM system property, so it must ride in vmOptions, not in args.
+[[contributes.javaAgents]]
+path = "agent/mps-sql-agent.jar"
+args = "port=17890,stackFrames=24"
+vmOptions = ["-Dmpsv.capture.transport=ws"]
 
 # Panels (L5). `sqlv-logs` is drawn by code; `sqlv-workbench` is the package page.
 [[contributes.views]]

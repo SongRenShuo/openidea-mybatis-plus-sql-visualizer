@@ -49,7 +49,25 @@ impl Plugin for Main {
             commands::generate_crud::ID => commands::generate_crud::run(ctx, arg),
             commands::rollback_plan::ID => commands::rollback_plan::run(ctx, arg),
             commands::render_log::ID => commands::render_log::run(ctx, arg),
+            commands::capture_start::ID => commands::capture_start::run(ctx, arg),
+            commands::capture_stop::ID => commands::capture_stop::run(ctx, arg),
+            commands::capture_status::ID => commands::capture_status::run(ctx, arg),
+            commands::capture_poll::ID => commands::capture_poll::run(ctx, arg),
+            commands::capture_open_log::ID => commands::capture_open_log::run(ctx, arg),
+            commands::open_logs::ID => commands::open_logs::run(ctx, arg),
+            commands::open_workbench::ID => commands::open_workbench::run(ctx, arg),
             _ => Err(Error::NotFound(format!("command {id}"))),
+        }
+    }
+
+    /// `websocket-ready` wakes the capture consumer instead of polling: the
+    /// bridge drains at most 256 frames, reports host failures as a log line
+    /// and never panics, so an event batch cannot fail activation.
+    fn handle_events(&mut self, events: &[openidea_plugin::Event], ctx: &Invocation) {
+        for event in events {
+            if matches!(event, openidea_plugin::Event::WebSocketReady(_)) {
+                let _ = crate::capture::bridge::on_websocket_ready(ctx);
+            }
         }
     }
 }

@@ -124,6 +124,14 @@
       "minimum": 1,
       "maximum": 5000
     },
+    "capture.port": {
+      "type": "integer",
+      "title": "Java agent capture WebSocket port",
+      "group": "Log",
+      "default": 17890,
+      "minimum": 1,
+      "maximum": 65535
+    },
     "render.paramsSeparator": {
       "type": "string",
       "title": "Parameter separator",

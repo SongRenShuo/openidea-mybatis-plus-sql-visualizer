@@ -42,7 +42,9 @@ review.
 | --- | --- | --- |
 | `project.read` | low | The plugin's job is to read the project's mapper XML, Java sources and SQL logs and render them. Without read access there is nothing to render. It cannot write, delete or change anything in the project. |
 | `clipboard` (optional) | medium | The log panel and the workbench copy or export the rendered SQL. Refusing it only disables those two buttons; rendering, navigation and checks keep working. |
-| `process:java` (optional) | high | Starts the pinned engine jar (`engine/ENGINE_VERSION`, sha256-checked) for MyBatis-Plus Wrapper rendering and EXPLAIN statement wrapping. Refusing it degrades to text mode; every other feature still works. |
+| `process:java` (optional) | high | Starts the pinned engine jar (`engine/ENGINE_VERSION`, sha256-checked) for MyBatis-Plus Wrapper rendering and EXPLAIN statement wrapping, and lets the Java agent attach. Refusing it degrades to text mode; every other feature still works. |
+| `events` | low | Wakes the capture consumer on `websocket-ready` instead of polling. Without it only the log-file path remains. |
+| `net:127.0.0.1` (optional) | medium | Connects as a client to the Java agent's capture WebSocket on loopback (the sandbox has no raw sockets). Refusing it leaves the log-file path. |
 
 The plugin never writes project files, never connects to a database, and never
 opens a network connection on its own. The engine jar is started only after its

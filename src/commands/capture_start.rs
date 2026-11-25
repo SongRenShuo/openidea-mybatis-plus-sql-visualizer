@@ -19,10 +19,8 @@ use crate::commands::common::{self, CliError};
 /// Matches `[[contributes.commands]] id` in `plugin.toml`.
 pub const ID: &str = "capture-start";
 
-/// What the command accepts as `arg`.
-pub const USAGE: &str = "[port]";
-
-/// Dispatch entry.
+/// Dispatch entry. The optional argument is the capture port; without it the
+/// `capture.port` setting (default 17890) is used.
 pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
     match start(ctx, arg) {
         Ok(text) => {

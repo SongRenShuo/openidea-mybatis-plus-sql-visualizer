@@ -25,6 +25,9 @@ pub const USAGE: &str = "<log path> | @<log path>";
 
 /// Dispatch entry.
 pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
+    if arg.map(str::trim).unwrap_or("").is_empty() {
+        return common::fail(common::missing_arg(USAGE));
+    }
     match open_log(ctx, arg) {
         Ok(text) => {
             common::emit(&text)?;

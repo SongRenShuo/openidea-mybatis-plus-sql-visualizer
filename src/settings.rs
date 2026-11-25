@@ -71,8 +71,8 @@ pub struct SettingDef {
     pub needs_restart: bool,
 }
 
-/// The 41 settings of the first release, in page order.
-pub static DEFINITIONS: [SettingDef; 41] = [
+/// The 42 settings of the first release, in page order.
+pub static DEFINITIONS: [SettingDef; 42] = [
     // Dialect -------------------------------------------------------------
     SettingDef {
         key: "dialect.mode",
@@ -209,6 +209,14 @@ pub static DEFINITIONS: [SettingDef; 41] = [
         group: "Log",
         kind: Kind::Integer,
         default: DefaultValue::Int(50),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "capture.port",
+        title: "Java agent capture WebSocket port",
+        group: "Log",
+        kind: Kind::Integer,
+        default: DefaultValue::Int(17890),
         needs_restart: false,
     },
     // Rendering -----------------------------------------------------------
@@ -475,16 +483,16 @@ mod tests {
     }
 
     #[test]
-    fn definitions_cover_forty_one_fields_with_unique_keys() {
-        assert_eq!(definitions().len(), 41);
+    fn definitions_cover_forty_two_fields_with_unique_keys() {
+        assert_eq!(definitions().len(), 42);
         let mut keys = std::collections::BTreeSet::new();
         for def in definitions() {
             assert!(keys.insert(def.key), "duplicate key {}", def.key);
         }
         assert_eq!(
             keys.len(),
-            41,
-            "the first release ships exactly 41 settings"
+            42,
+            "the first release ships exactly 42 settings"
         );
     }
 
