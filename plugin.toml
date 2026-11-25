@@ -95,6 +95,13 @@ id = "open-workbench"
 title = "MyBatis SQL: Open Workbench"
 category = "MyBatis SQL Visualizer"
 
+# Diagnostics for big projects: what the Java/XML indexes hold and what indexing
+# cost (documents, bytes, total and slowest document). No arguments.
+[[contributes.commands]]
+id = "index-stats"
+title = "MyBatis SQL: Index Stats"
+category = "MyBatis SQL Visualizer"
+
 # Java agent (L7/L12): captures SQL from Application / Spring Boot / JAR
 # Application run configurations. Declaring it derives the high-risk java.agent
 # capability; refusing it leaves the log-file path. The transport switch is a

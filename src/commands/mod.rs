@@ -16,6 +16,7 @@ pub mod capture_stop;
 pub mod check_sql;
 pub mod common;
 pub mod generate_crud;
+pub mod index_stats;
 pub mod open_logs;
 pub mod open_workbench;
 pub mod perf_advice;

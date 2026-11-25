@@ -42,6 +42,7 @@ pub use java_methods::{JavaIndexBudget, JavaMethodIndex, JavaMethodLocation};
 pub use xml::{XmlFacts, XmlResultMap, XmlStatement, index_xml};
 pub use xml_statements::{XmlStatementIndex, XmlStatementLocation};
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use openidea_plugin::Range;
@@ -81,21 +82,51 @@ pub fn xml_statements() -> MutexGuard<'static, XmlStatementIndex> {
 /// else). Re-indexing a path replaces what it contributed before, so a save
 /// never doubles a file's entries.
 pub fn index_source(path: &str, text: &str) -> usize {
+    let started = std::time::Instant::now();
     let lower = path.to_ascii_lowercase();
-    if lower.ends_with(".java") {
+    let contributed = if lower.ends_with(".java") {
         java_methods().add_file(path, text)
     } else if lower.ends_with(".xml") {
         xml_statements().add_file(path, text)
     } else {
         0
-    }
+    };
+    // Cost counters only: they never gate anything, they are what `index-stats`
+    // reports when someone asks whether a big project pays for this.
+    let micros = started.elapsed().as_micros() as u64;
+    COST.documents.fetch_add(1, Ordering::Relaxed);
+    COST.bytes.fetch_add(text.len() as u64, Ordering::Relaxed);
+    COST.micros.fetch_add(micros, Ordering::Relaxed);
+    COST.slowest_micros.fetch_max(micros, Ordering::Relaxed);
+    contributed
 }
 
 /// Empties both indexes (the test harness; the host refills them on open).
 pub fn clear_indexes() {
     *java_methods() = JavaMethodIndex::new();
     *xml_statements() = XmlStatementIndex::new();
+    COST.documents.store(0, Ordering::Relaxed);
+    COST.bytes.store(0, Ordering::Relaxed);
+    COST.micros.store(0, Ordering::Relaxed);
+    COST.slowest_micros.store(0, Ordering::Relaxed);
 }
+
+/// What indexing has cost so far: documents handed in, their bytes, and the
+/// wall time spent inside [`index_source`].
+#[derive(Default)]
+struct IndexCost {
+    documents: AtomicU64,
+    bytes: AtomicU64,
+    micros: AtomicU64,
+    slowest_micros: AtomicU64,
+}
+
+static COST: IndexCost = IndexCost {
+    documents: AtomicU64::new(0),
+    bytes: AtomicU64::new(0),
+    micros: AtomicU64::new(0),
+    slowest_micros: AtomicU64::new(0),
+};
 
 /// What the two process indexes hold.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -106,6 +137,14 @@ pub struct IndexStats {
     pub xml_files: usize,
     pub xml_statements: usize,
     pub xml_skipped: usize,
+    /// Documents indexed since the indexes were last cleared.
+    pub documents: u64,
+    /// Their total size in bytes.
+    pub bytes: u64,
+    /// Total wall time spent indexing them (microseconds).
+    pub micros: u64,
+    /// The slowest single document (microseconds).
+    pub slowest_micros: u64,
 }
 
 /// A snapshot of both indexes.
@@ -122,6 +161,10 @@ pub fn index_stats() -> IndexStats {
     stats.xml_files = xml.file_count();
     stats.xml_statements = xml.len();
     stats.xml_skipped = xml.skipped_files();
+    stats.documents = COST.documents.load(Ordering::Relaxed);
+    stats.bytes = COST.bytes.load(Ordering::Relaxed);
+    stats.micros = COST.micros.load(Ordering::Relaxed);
+    stats.slowest_micros = COST.slowest_micros.load(Ordering::Relaxed);
     stats
 }
 

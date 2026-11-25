@@ -39,6 +39,7 @@
   "MyBatis SQL: Open Capture Log": "MyBatis SQL：打开捕获日志",
   "MyBatis SQL: Open SQL Logs": "MyBatis SQL：打开 SQL 日志",
   "MyBatis SQL: Open Workbench": "MyBatis SQL：打开工作台",
+  "MyBatis SQL: Index Stats": "MyBatis SQL：索引统计",
   "Parameter separator": "参数分隔符",
   "Rendered SQL case": "渲染 SQL 大小写",
   "Date format": "日期格式",
