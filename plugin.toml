@@ -1,0 +1,24 @@
+id = "songrenshuo.mybatis-plus-sql-visualizer"
+name = "MyBatis SQL Visualizer"
+version = "0.1.0"
+description = "Renders MyBatis mapper XML, annotation SQL, Wrapper chains and SQL logs into executable SQL, and checks a statement before it touches a database."
+authors = ["songrenshuo"]
+homepage = "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer"
+license = "Apache-2.0"
+categories = ["tools"]
+engines.openidea = "^1.15"
+# Built by `openidea-plugin build`. The code is loaded the first time one of its
+# commands runs; the commands below show in Find Action before that.
+wasm = "dist/plugin.wasm"
+activation = ["on-command:*"]
+
+# What the code may do. The user approves these when installing.
+# - project.read: render and check statements against the project's mapper XML and
+#   source files, which is the whole point of the plugin. It cannot write anything.
+[capabilities]
+required = ["project.read"]
+
+[[contributes.commands]]
+id = "render-xml"
+title = "MyBatis SQL: Render XML Snippet"
+category = "MyBatis SQL Visualizer"

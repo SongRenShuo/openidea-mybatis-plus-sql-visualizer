@@ -1,0 +1,5 @@
+/target
+/dist
+*.oiplugin
+.worktrees/
+node_modules/

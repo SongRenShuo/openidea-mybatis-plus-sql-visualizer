@@ -1,0 +1,21 @@
+MyBatis SQL Visualizer
+Copyright 2026 songrenshuo
+
+This product includes software developed by other projects.
+
+1. JSqlParser 5.3
+
+   Used by the rendering engine jar (`engine/`, built from the IntelliJ
+   repository) to parse SQL when checking dialect and performance rules.
+
+   JSqlParser is dual-licensed under LGPL-2.1 and Apache-2.0. This project uses
+   it under the Apache-2.0 branch only; the LGPL branch is not used, and no
+   LGPL obligation attaches to the distributed package. A copy of the
+   Apache-2.0 text is in LICENSE.
+
+   Project: https://github.com/JSQLParser/JSqlParser
+
+2. openidea-plugin SDK 0.1.51 (project API 1.15)
+
+   Linked at build time from https://github.com/l0ng-ai/openidea at tag
+   v0.1.51. Its licence and notices are those of the OpenIDEA repository.
