@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SQL Logs</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      font: var(--openidea-font-size, 13px)/1.4 var(--openidea-font-ui, sans-serif);
+      color: var(--openidea-fg);
+      background: var(--openidea-bg);
+    }
+
+    /* Filter row */
+    .filterbar {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      padding: 4px 8px; border-bottom: 1px solid var(--openidea-border);
+    }
+    .filterleft { display: flex; align-items: center; gap: 6px; position: relative; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--openidea-bg-input); color: var(--openidea-fg);
+      border: 1px solid var(--openidea-border); border-radius: 3px;
+      padding: 2px 8px; cursor: pointer;
+    }
+    .btn:hover { background: var(--openidea-bg-hover); }
+    .btn.on { background: var(--openidea-bg-selected); border-color: var(--openidea-accent); }
+    .caret { color: var(--openidea-fg-muted); font-size: 10px; }
+    .chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; white-space: nowrap; }
+
+    /* Type popup */
+    .menu {
+      position: absolute; top: 100%; left: 0; margin-top: 4px; z-index: 30;
+      min-width: 210px; padding: 4px;
+      background: var(--openidea-bg-elevated); border: 1px solid var(--openidea-border);
+      border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    }
+    .menu-item {
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap;
+    }
+    .menu-item:hover { background: var(--openidea-bg-hover); }
+    .menu-sep { height: 1px; background: var(--openidea-border); margin: 4px 2px; }
+    .menu-footer { display: flex; justify-content: space-between; padding: 2px 4px; }
+    .linkbtn {
+      background: none; border: none; color: var(--openidea-link);
+      cursor: pointer; padding: 2px 4px; font-size: 12px;
+    }
+    .linkbtn:hover { text-decoration: underline; }
+    .swatch { width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto; }
+
+    /* Search row */
+    .searchrow {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 8px; border-bottom: 1px solid var(--openidea-border);
+    }
+    .kw {
+      flex: 1 1 auto; min-width: 80px;
+      background: var(--openidea-bg-input); color: var(--openidea-fg);
+      border: 1px solid var(--openidea-border); border-radius: 3px; padding: 2px 6px;
+    }
+    .tog {
+      background: var(--openidea-bg-input); color: var(--openidea-fg-muted);
+      border: 1px solid var(--openidea-border); border-radius: 3px;
+      padding: 2px 6px; cursor: pointer; font-family: var(--openidea-font-mono, monospace);
+    }
+    .tog.on { background: var(--openidea-bg-selected); color: var(--openidea-fg-strong); border-color: var(--openidea-accent); }
+    .muted { color: var(--openidea-fg-muted); }
+    .danger { color: var(--openidea-danger); }
+    .badge {
+      display: inline-block; padding: 0 5px; border-radius: 3px;
+      background: var(--openidea-bg-selected); color: var(--openidea-fg-strong); font-size: 11px;
+    }
+
+    /* List */
+    .list { flex: 1 1 auto; overflow: auto; }
+    .row { display: flex; align-items: stretch; border-bottom: 1px solid var(--openidea-border); cursor: default; }
+    .row:hover { background: var(--openidea-bg-hover); }
+    .row.sel { background: var(--openidea-bg-selected); }
+    .row .bar { width: 3px; flex: 0 0 3px; }
+    .row .content { flex: 1 1 auto; min-width: 0; padding: 4px 8px; }
+    .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px; color: var(--openidea-fg-muted); }
+    .meta .seq { color: var(--openidea-fg-strong); font-weight: 600; }
+    .meta .dur.hot { color: var(--openidea-danger); font-weight: 600; }
+    .meta .part { white-space: nowrap; }
+    .sql {
+      margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
+      white-space: pre-wrap; word-break: break-word; color: var(--openidea-fg);
+    }
+    .err {
+      margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
+      white-space: pre-wrap; word-break: break-word; color: var(--openidea-danger);
+    }
+    .empty {
+      flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+      color: var(--openidea-fg-muted); padding: 16px;
+    }
+
+    /* Bottom status */
+    .status {
+      display: flex; align-items: center; gap: 8px; padding: 3px 8px;
+      border-top: 1px solid var(--openidea-border); font-size: 11px;
+      color: var(--openidea-fg-muted); background: var(--openidea-bg-elevated);
+    }
+    .status #statusMid { flex: 0 0 auto; }
+    .status #statusRight { margin-left: auto; }
+
+    /* Context menu */
+    .ctxmenu {
+      position: fixed; z-index: 50; min-width: 160px; padding: 4px;
+      background: var(--openidea-bg-elevated); border: 1px solid var(--openidea-border);
+      border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    }
+    .ctxmenu button {
+      display: block; width: 100%; text-align: left; background: none; border: none;
+      color: var(--openidea-fg); padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px;
+    }
+    .ctxmenu button:hover { background: var(--openidea-bg-hover); }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="filterbar">
+    <div class="filterleft">
+      <button id="typeBtn" class="btn" type="button" aria-haspopup="true" aria-expanded="false">
+        <span id="typeBtnText"></span><span class="caret">&#9662;</span>
+      </button>
+      <div id="typeMenu" class="menu" hidden>
+        <div id="typeList"></div>
+        <div class="menu-sep"></div>
+        <label class="menu-item"><input type="checkbox" id="slowOnly"><span id="slowOnlyLabel"></span></label>
+        <div class="menu-sep"></div>
+        <div class="menu-footer">
+          <button id="selectAll" class="linkbtn" type="button"></button>
+          <button id="selectNone" class="linkbtn" type="button"></button>
+        </div>
+      </div>
+      <button id="searchBtn" class="btn" type="button"></button>
+      <label class="chk"><input type="checkbox" id="dedupe"><span id="dedupeLabel"></span></label>
+      <span id="slowBadge" class="badge" hidden></span>
+    </div>
+  </div>
+
+  <div id="searchRow" class="searchrow" hidden>
+    <input id="kw" class="kw" type="text" autocomplete="off" spellcheck="false">
+    <button id="caseBtn" class="tog" type="button"></button>
+    <button id="regexBtn" class="tog" type="button"></button>
+    <span id="hitCount" class="muted"></span>
+    <span id="regexErr" class="danger" hidden></span>
+  </div>
+
+  <div id="list" class="list"></div>
+  <div id="empty" class="empty" hidden></div>
+
+  <div class="status">
+    <span id="statusLeft"></span>
+    <span id="statusMid"></span>
+    <span id="statusRight"></span>
+  </div>
+
+  <div id="ctxMenu" class="ctxmenu" hidden>
+    <button type="button" data-act="copy-sql"></button>
+    <button type="button" data-act="copy-time"></button>
+    <button type="button" data-act="export"></button>
+  </div>
+
+  <script>
+    (function () {
+      var TYPE_TOKENS = ['select', 'insert', 'update', 'delete', 'create', 'drop'];
+      var TYPE_COLORS = {
+        select: 'var(--openidea-link)',
+        insert: 'var(--openidea-success)',
+        update: 'var(--openidea-warning)',
+        delete: 'var(--openidea-danger)',
+        create: 'var(--openidea-info)',
+        drop: 'var(--openidea-accent)',
+        error: 'var(--openidea-danger)',
+        other: 'var(--openidea-fg-muted)'
+      };
+
+      var L = {};
+      var current = null;
+      var selectedLine = null;
+      var ctxLine = null;
+      var typeMenuBuilt = false;
+      var ui = {
+        types: { select: true, insert: true, update: true, delete: true, create: true, drop: true },
+        slowOnly: false, dedupe: true, matchCase: false, regex: false, keyword: ''
+      };
+      var kwTimer = null;
+
+      function $(id) { return document.getElementById(id); }
+      function post(message) {
+        if (window.openidea && window.openidea.postMessage) {
+          window.openidea.postMessage(JSON.stringify(message));
+        }
+      }
+      function setText(node, text) { if (node) { node.textContent = text == null ? '' : text; } }
+      function selectedTokens() {
+        var out = [];
+        for (var i = 0; i < TYPE_TOKENS.length; i++) {
+          if (ui.types[TYPE_TOKENS[i]]) { out.push(TYPE_TOKENS[i]); }
+        }
+        return out;
+      }
+      function typeLabel(token) {
+        switch (token) {
+          case 'select': return L.typeSelect;
+          case 'insert': return L.typeInsert;
+          case 'update': return L.typeUpdate;
+          case 'delete': return L.typeDelete;
+          case 'create': return L.typeCreate;
+          case 'drop': return L.typeDrop;
+          default: return token;
+        }
+      }
+
+      function postFilter() {
+        var toks = selectedTokens();
+        var mode = toks.length === TYPE_TOKENS.length ? 'all' : (toks.length === 0 ? 'none' : 'only');
+        post({
+          op: 'filter', types: toks, types_mode: mode,
+          slow_only: ui.slowOnly, keyword: ui.keyword,
+          match_case: ui.matchCase, regex: ui.regex, dedupe: ui.dedupe
+        });
+      }
+      function scheduleFilter() {
+        if (kwTimer) { clearTimeout(kwTimer); }
+        kwTimer = setTimeout(function () { kwTimer = null; postFilter(); }, 200);
+      }
+
+      function syncFromState(state) {
+        var f = state.filter || {};
+        if (f.types_mode === 'all') {
+          for (var i = 0; i < TYPE_TOKENS.length; i++) { ui.types[TYPE_TOKENS[i]] = true; }
+        } else if (f.types_mode === 'none') {
+          for (var j = 0; j < TYPE_TOKENS.length; j++) { ui.types[TYPE_TOKENS[j]] = false; }
+        } else if (f.types) {
+          var set = {};
+          for (var k = 0; k < f.types.length; k++) { set[f.types[k]] = true; }
+          for (var m = 0; m < TYPE_TOKENS.length; m++) { ui.types[TYPE_TOKENS[m]] = !!set[TYPE_TOKENS[m]]; }
+        }
+        ui.slowOnly = !!f.slow_only;
+        ui.dedupe = f.dedupe !== false;
+        ui.matchCase = !!f.match_case;
+        ui.regex = !!f.regex;
+        if (document.activeElement !== $('kw')) {
+          ui.keyword = f.keyword || '';
+          $('kw').value = ui.keyword;
+        }
+        $('slowOnly').checked = ui.slowOnly;
+        $('dedupe').checked = ui.dedupe;
+        $('caseBtn').classList.toggle('on', ui.matchCase);
+        $('regexBtn').classList.toggle('on', ui.regex);
+      }
+
+      function updateLabels() {
+        setText($('searchBtn'), L.search);
+        setText($('dedupeLabel'), L.dedupe);
+        setText($('slowOnlyLabel'), L.slowOnly);
+        setText($('selectAll'), L.selectAll);
+        setText($('selectNone'), L.selectNone);
+        setText($('caseBtn'), L.matchCase);
+        setText($('regexBtn'), L.regex);
+        $('caseBtn').title = L.matchCaseTitle || '';
+        $('regexBtn').title = L.regexTitle || '';
+        $('kw').placeholder = L.keywordPlaceholder || '';
+        setText($('ctxMenu').querySelector('[data-act="copy-sql"]'), L.menuCopySql);
+        setText($('ctxMenu').querySelector('[data-act="copy-time"]'), L.menuCopyTime);
+        setText($('ctxMenu').querySelector('[data-act="export"]'), L.menuExport);
+        setText($('empty'), L.empty);
+        updateTypeButton();
+      }
+
+      function updateTypeButton() {
+        var toks = selectedTokens();
+        var text;
+        if (toks.length === TYPE_TOKENS.length) { text = L.typesAll; }
+        else if (toks.length === 0) { text = L.typesNone; }
+        else { text = toks.length + ' ' + L.typesCountSuffix; }
+        setText($('typeBtnText'), text);
+        $('typeBtn').title = L.typesTitle || '';
+      }
+
+      function buildTypeMenu() {
+        if (typeMenuBuilt) { return; }
+        var host = $('typeList');
+        for (var i = 0; i < TYPE_TOKENS.length; i++) {
+          var token = TYPE_TOKENS[i];
+          var label = document.createElement('label');
+          label.className = 'menu-item';
+          var box = document.createElement('input');
+          box.type = 'checkbox';
+          box.setAttribute('data-token', token);
+          box.checked = !!ui.types[token];
+          box.addEventListener('change', function () {
+            var t = this.getAttribute('data-token');
+            ui.types[t] = this.checked;
+            updateTypeButton();
+            postFilter();
+          });
+          var sw = document.createElement('span');
+          sw.className = 'swatch';
+          sw.style.background = TYPE_COLORS[token] || 'var(--openidea-fg-muted)';
+          var text = document.createElement('span');
+          text.setAttribute('data-lbl', token);
+          text.textContent = typeLabel(token);
+          label.appendChild(box);
+          label.appendChild(sw);
+          label.appendChild(text);
+          host.appendChild(label);
+        }
+        typeMenuBuilt = true;
+      }
+
+      function syncTypeCheckboxes() {
+        var boxes = $('typeList').querySelectorAll('input[data-token]');
+        for (var i = 0; i < boxes.length; i++) {
+          var t = boxes[i].getAttribute('data-token');
+          boxes[i].checked = !!ui.types[t];
+        }
+        var labels = $('typeList').querySelectorAll('[data-lbl]');
+        for (var j = 0; j < labels.length; j++) {
+          var tok = labels[j].getAttribute('data-lbl');
+          labels[j].textContent = typeLabel(tok);
+        }
+      }
+
+      function makePart(className, text) {
+        var el = document.createElement('span');
+        el.className = className;
+        el.textContent = text;
+        return el;
+      }
+
+      function buildRow(row, slowThreshold) {
+        var el = document.createElement('div');
+        el.className = 'row';
+        el.setAttribute('data-line', String(row.line));
+
+        var bar = document.createElement('div');
+        bar.className = 'bar';
+        bar.style.background = TYPE_COLORS[row.sql_type] || TYPE_COLORS.other;
+
+        var content = document.createElement('div');
+        content.className = 'content';
+
+        var meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.appendChild(makePart('seq', '#' + row.seq));
+        meta.appendChild(makePart('part time', row.time || ''));
+        var dur = document.createElement('span');
+        dur.className = 'dur';
+        dur.textContent = row.duration_ms == null ? '-' : formatMs(row.duration_ms);
+        if (row.duration_ms != null && slowThreshold != null && row.duration_ms >= slowThreshold) {
+          dur.classList.add('hot');
+        }
+        meta.appendChild(dur);
+        if (row.db) { meta.appendChild(makePart('part db', '[' + row.db + ']')); }
+        if (row.rows_affected != null) { meta.appendChild(makePart('part rows', '(' + row.rows_affected + ')')); }
+        if (row.dedupe_count > 1) {
+          var db = makePart('badge dedupe', (L.dedupeBadgePrefix || '') + row.dedupe_count);
+          meta.appendChild(db);
+        }
+        if (row.group_count > 1) {
+          var gb = makePart('badge group', (L.groupBadgePrefix || '') + row.group_count);
+          meta.appendChild(gb);
+        }
+        if (row.n_plus_one) {
+          var n1 = makePart('badge n1', L.nPlusOne || 'N+1');
+          n1.style.color = 'var(--openidea-danger)';
+          meta.appendChild(n1);
+        }
+        if (row.source) { meta.appendChild(makePart('part src', '[' + row.source + ']')); }
+        if (row.method) { meta.appendChild(makePart('part method', '[' + row.method + ']')); }
+        content.appendChild(meta);
+
+        if (row.sql) {
+          var sql = document.createElement('div');
+          sql.className = 'sql';
+          sql.textContent = row.sql;
+          content.appendChild(sql);
+        }
+        if (row.error_text) {
+          var err = document.createElement('div');
+          err.className = 'err';
+          err.textContent = row.error_text;
+          content.appendChild(err);
+        }
+
+        content.addEventListener('click', function () { selectLine(row.line); });
+        el.addEventListener('click', function () { selectLine(row.line); });
+        el.addEventListener('dblclick', function () {
+          selectLine(row.line);
+          if (row.sql) { post({ op: 'open-line', line: row.line }); }
+        });
+        el.addEventListener('contextmenu', function (event) {
+          event.preventDefault();
+          selectLine(row.line);
+          openCtx(event.clientX, event.clientY, row.line);
+        });
+
+        el.appendChild(bar);
+        el.appendChild(content);
+        return el;
+      }
+
+      function formatMs(ms) {
+        if (Math.abs(ms - Math.round(ms)) < 0.001) { return String(Math.round(ms)); }
+        return ms.toFixed(1);
+      }
+
+      function selectLine(line) {
+        selectedLine = line;
+        var rows = $('list').querySelectorAll('.row');
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].getAttribute('data-line') === String(line)) { rows[i].classList.add('sel'); }
+          else { rows[i].classList.remove('sel'); }
+        }
+      }
+
+      function renderList(state) {
+        var list = $('list');
+        var rows = state.rows || [];
+        var threshold = state.slow_threshold_ms;
+        var wasAtBottom = (list.scrollHeight - list.scrollTop - list.clientHeight) < 40;
+
+        while (list.firstChild) { list.removeChild(list.firstChild); }
+        if (rows.length === 0) {
+          list.hidden = true;
+          $('empty').hidden = false;
+          return;
+        }
+        list.hidden = false;
+        $('empty').hidden = true;
+        var frag = document.createDocumentFragment();
+        for (var i = 0; i < rows.length; i++) {
+          frag.appendChild(buildRow(rows[i], threshold));
+        }
+        list.appendChild(frag);
+        if (selectedLine != null) { selectLine(selectedLine); }
+        var paused = state.status && state.status.paused;
+        if (!paused && wasAtBottom) { list.scrollTop = list.scrollHeight; }
+      }
+
+      function updateCounts(state) {
+        var c = state.counts || {};
+        var slowBadge = $('slowBadge');
+        if (c.slow > 0) {
+          slowBadge.hidden = false;
+          setText(slowBadge, (L.slowPrefix || '') + ' ' + c.slow);
+        } else {
+          slowBadge.hidden = true;
+        }
+        var hit = $('hitCount');
+        var keyword = ui.keyword && ui.keyword.trim();
+        setText(hit, keyword ? (c.total + ' ' + (L.hitsSuffix || '')) : '');
+        var err = $('regexErr');
+        var invalid = state.filter && state.filter.regex_error;
+        err.hidden = !invalid;
+        if (invalid) { setText(err, L.regexError); }
+      }
+
+      function updateStatus(state) {
+        var s = state.status || {};
+        var c = state.counts || {};
+        setText($('statusLeft'), (L.statusConsolePrefix || '') + ' ' + (s.console_lines || 0) + ' ' + (L.statusConsoleSuffix || ''));
+        var mid;
+        if (c.truncated) {
+          mid = (L.truncatedPrefix || '') + ' ' + c.cap;
+        } else {
+          mid = (L.totalPrefix || '') + ' ' + (c.total || 0) + ' ' + (L.totalSuffix || '');
+        }
+        setText($('statusMid'), mid.replace(/\s+/g, ' ').trim());
+        if (s.agent_connected) {
+          setText($('statusRight'), (L.statusAgentEventsPrefix || '') + ' ' + (s.agent_events || 0));
+        } else {
+          setText($('statusRight'), L.statusAgentOff || '');
+        }
+      }
+
+      function applyState(state) {
+        current = state;
+        L = state.labels || L;
+        buildTypeMenu();
+        updateLabels();
+        syncFromState(state);
+        syncTypeCheckboxes();
+        updateTypeButton();
+        renderList(state);
+        updateCounts(state);
+        updateStatus(state);
+      }
+
+      // Type popup ----------------------------------------------------------
+      function openTypeMenu(open) {
+        $('typeMenu').hidden = !open;
+        $('typeBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+
+      // Context menu --------------------------------------------------------
+      function openCtx(x, y, line) {
+        ctxLine = line;
+        var menu = $('ctxMenu');
+        menu.hidden = false;
+        var width = menu.offsetWidth || 160;
+        var height = menu.offsetHeight || 96;
+        menu.style.left = Math.min(x, window.innerWidth - width - 4) + 'px';
+        menu.style.top = Math.min(y, window.innerHeight - height - 4) + 'px';
+      }
+      function closeCtx() { $('ctxMenu').hidden = true; ctxLine = null; }
+
+      // Wiring --------------------------------------------------------------
+      $('typeBtn').addEventListener('click', function (event) {
+        event.stopPropagation();
+        openTypeMenu($('typeMenu').hidden);
+      });
+      $('typeMenu').addEventListener('click', function (event) { event.stopPropagation(); });
+      $('slowOnly').addEventListener('change', function () { ui.slowOnly = this.checked; postFilter(); });
+      $('selectAll').addEventListener('click', function () {
+        for (var i = 0; i < TYPE_TOKENS.length; i++) { ui.types[TYPE_TOKENS[i]] = true; }
+        syncTypeCheckboxes(); updateTypeButton(); postFilter();
+      });
+      $('selectNone').addEventListener('click', function () {
+        for (var i = 0; i < TYPE_TOKENS.length; i++) { ui.types[TYPE_TOKENS[i]] = false; }
+        syncTypeCheckboxes(); updateTypeButton(); postFilter();
+      });
+
+      $('searchBtn').addEventListener('click', function () {
+        var row = $('searchRow');
+        row.hidden = !row.hidden;
+        $('searchBtn').classList.toggle('on', !row.hidden);
+        if (!row.hidden) { $('kw').focus(); }
+      });
+      $('kw').addEventListener('input', function () { ui.keyword = this.value; scheduleFilter(); });
+      $('kw').addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') { event.preventDefault(); if (kwTimer) { clearTimeout(kwTimer); kwTimer = null; } postFilter(); }
+      });
+      $('caseBtn').addEventListener('click', function () { ui.matchCase = !ui.matchCase; this.classList.toggle('on', ui.matchCase); postFilter(); });
+      $('regexBtn').addEventListener('click', function () { ui.regex = !ui.regex; this.classList.toggle('on', ui.regex); postFilter(); });
+      $('dedupe').addEventListener('change', function () { ui.dedupe = this.checked; postFilter(); });
+
+      $('ctxMenu').addEventListener('click', function (event) {
+        var act = event.target && event.target.getAttribute && event.target.getAttribute('data-act');
+        if (!act) { return; }
+        if (act === 'copy-sql') { post({ op: 'copy-line', line: ctxLine }); }
+        else if (act === 'copy-time') { post({ op: 'copy-time', line: ctxLine }); }
+        else if (act === 'export') { post({ op: 'export' }); }
+        closeCtx();
+      });
+
+      document.addEventListener('click', function () { openTypeMenu(false); closeCtx(); });
+      document.addEventListener('keydown', function (event) {
+        var isFind = (event.ctrlKey || event.metaKey) && (event.key === 'f' || event.key === 'F');
+        if (isFind) {
+          event.preventDefault();
+          $('searchRow').hidden = false;
+          $('searchBtn').classList.add('on');
+          $('kw').focus();
+          $('kw').select();
+          return;
+        }
+        if (event.key === 'Escape') {
+          if (!$('ctxMenu').hidden) { closeCtx(); return; }
+          if (!$('typeMenu').hidden) { openTypeMenu(false); return; }
+          if (!$('searchRow').hidden) {
+            $('searchRow').hidden = true;
+            $('searchBtn').classList.remove('on');
+          }
+        }
+      });
+
+      if (window.openidea && window.openidea.onMessage) {
+        window.openidea.onMessage(function (raw) {
+          try {
+            var message = JSON.parse(raw);
+            if (message.op === 'state') { applyState(message); }
+          } catch (error) { /* ignore malformed */ }
+        });
+      }
+      post({ op: 'ready' });
+    })();
+  </script>
+</body>
+</html>

@@ -47,3 +47,12 @@ This product includes software developed by other projects.
    are distributed under Apache-2.0; a copy of that text is in LICENSE.
 
    Project: https://github.com/JetBrains/intellij-community
+
+6. regex 1.x (MIT OR Apache-2.0)
+
+   Linked into the wasm plugin to power the SQL log panel's `.*` regular
+   expression search toggle (case-insensitive matching, `\b`/`\d`/`\w`). Built
+   with the `std` and `unicode` features only (no performance DFA tables). A
+   copy of the Apache-2.0 text is in LICENSE.
+
+   Project: https://github.com/rust-lang/regex

@@ -71,7 +71,7 @@ fn open_log(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     } else if analysis.entries.len() > page {
         let _ = writeln!(
             out,
-            "-- {} entries; the panel shows one page at a time and `logs.pageSize` is {page} [{}]",
+            "-- {} entries; the panel buffer is capped at `logs.pageSize` ({page}) [{}]",
             analysis.entries.len(),
             bridge::KEY_OPEN_LOG_LIMITED
         );
@@ -130,7 +130,7 @@ Parameters: 2(Long)
         let text = &host.output()[common::CHANNEL];
         assert!(text.contains(bridge::KEY_OPEN_LOG_LIMITED), "{text}");
         assert!(text.contains("2 entries"), "{text}");
-        assert!(text.contains("`logs.pageSize` is 1"), "{text}");
+        assert!(text.contains("`logs.pageSize` (1)"), "{text}");
     }
 
     #[test]

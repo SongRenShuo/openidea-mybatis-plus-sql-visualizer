@@ -144,6 +144,7 @@ id = "sqlv-logs"
 title = "SQL Logs"
 icon = "icons/sqlLog.svg"
 location = "bottom"
+web = "web/log-panel.html"
 
 [[contributes.views]]
 id = "sqlv-workbench"

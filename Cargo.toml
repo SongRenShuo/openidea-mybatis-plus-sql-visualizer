@@ -20,6 +20,11 @@ openidea-plugin = { git = "https://github.com/l0ng-ai/openidea", tag = "v0.1.51"
 # Both are Apache-2.0/MIT and already in the SDK's tree, so the build cost is nil.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# SQL log panel search: the `.*` toggle is a real regular expression, including
+# case-insensitive matching and `\b`/`\d`/`\w`. Built without the `perf` DFA
+# tables (log search is small) so the wasm stays lean; an invalid pattern is
+# reported per match attempt, never panics.
+regex = { version = "1", default-features = false, features = ["std", "unicode"] }
 
 [profile.release]
 opt-level = "s"
