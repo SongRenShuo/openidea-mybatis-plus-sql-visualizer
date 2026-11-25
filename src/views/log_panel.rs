@@ -1,9 +1,13 @@
-//! SQL log panel (T2-1).
+//! SQL log panel (T2-1, lane L17).
 //!
 //! Data is pushed by the capture lane and by commands: [`set_log_text`] and
-//! [`append_text`] fill a module-level buffer, and the panel parses it lazily on
-//! the next render. Parsing stays out of the view loop when nothing changed, and
-//! the renderer only serialises the rows of the requested [`Viewport`] page.
+//! [`append_text`] fill a module-level buffer, and the panel parses it lazily.
+//! The panel UI is the packaged page `web/log-panel.html`
+//! (`web = "web/log-panel.html"` in `plugin.toml`, applied by the controller):
+//! the page owns the DOM and posts user actions (`ready`, `filter`, `copy-line`,
+//! `open-line`, `toggle-pause`, `clear`, `export`), and the plugin answers with
+//! the full state through [`host::post_view_message`]. No HTML is built in Rust
+//! any more, so the page always renders text with `textContent` (no injection).
 //!
 //! The store lives in a `OnceLock<Mutex<_>>` because `Main` belongs to the
 //! controller (wasm is single-threaded; the mutex only serialises test threads).
@@ -12,9 +16,11 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use openidea_plugin::host;
-use openidea_plugin::views::{Body, Button, View, ViewEvent, Viewport, Views};
+use openidea_plugin::views::{Body, Button, View, ViewEvent, Views};
 use openidea_plugin::{Error, Invocation};
+use serde_json::{Value, json};
 
+use crate::commands::common;
 use crate::core::log::{
     DuplicateGroup, EntryClass, LogAnalysis, LogEntry, NPlusOneGroup, ParseOptions, parse,
 };
@@ -24,17 +30,21 @@ use crate::settings;
 /// The id declared in `[[contributes.views]]`.
 pub const VIEW_ID: &str = "sqlv-logs";
 
-/// Default refresh interval for pushed rows.
+/// Default refresh interval for pushed rows (also the parse throttle window).
 pub const DEFAULT_REFRESH_MS: u64 = 250;
-/// Rows serialised when the host asks for no particular page.
-const DEFAULT_PAGE_ROWS: u32 = 200;
+/// SQL displayed before truncation (the full statement is kept in the store and
+/// copied/exported in full).
 const SQL_DISPLAY_CHARS: usize = 180;
+/// `logs.pageSize` default and clamp when used as the panel buffer cap.
+const DEFAULT_BUFFER_CAP: i64 = 50;
+const MAX_BUFFER_CAP: i64 = 100_000;
 
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
 
-/// Panel category of a row: the display axis the user filters by.
+/// Panel category of a row: the display axis used for the text/left-bar colours
+/// (normal / duplicate / N+1 / slow / error).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RowCategory {
     Normal,
@@ -45,15 +55,7 @@ pub enum RowCategory {
 }
 
 impl RowCategory {
-    pub const ALL: [RowCategory; 5] = [
-        RowCategory::Normal,
-        RowCategory::Duplicate,
-        RowCategory::NPlusOne,
-        RowCategory::Slow,
-        RowCategory::Error,
-    ];
-
-    /// Stable token used in filters and CSS classes (`n_plus_one`).
+    /// Stable token used in the push state (`n_plus_one`).
     pub fn token(self) -> &'static str {
         match self {
             RowCategory::Normal => "normal",
@@ -63,21 +65,66 @@ impl RowCategory {
             RowCategory::Error => "error",
         }
     }
+}
 
-    /// Localised label shown in the table.
-    pub fn label(self) -> String {
-        t(&format!("view.logs.category.{}", self.token()))
+/// SQL statement kind, the axis of the "SQL 类型" multi-select filter and the
+/// left colour bar. DDL is split into CREATE and DROP so the two filters the
+/// reference UI offers stay distinct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SqlType {
+    Select,
+    Insert,
+    Update,
+    Delete,
+    Create,
+    Drop,
+    Other,
+    Error,
+}
+
+impl SqlType {
+    /// The six kinds the filter offers, in display order.
+    pub const FILTERABLE: [SqlType; 6] = [
+        SqlType::Select,
+        SqlType::Insert,
+        SqlType::Update,
+        SqlType::Delete,
+        SqlType::Create,
+        SqlType::Drop,
+    ];
+
+    pub fn token(self) -> &'static str {
+        match self {
+            SqlType::Select => "select",
+            SqlType::Insert => "insert",
+            SqlType::Update => "update",
+            SqlType::Delete => "delete",
+            SqlType::Create => "create",
+            SqlType::Drop => "drop",
+            SqlType::Other => "other",
+            SqlType::Error => "error",
+        }
     }
 
-    /// Parses a filter token; unknown tokens mean "all categories".
+    /// Parses a filter token; unknown tokens are ignored (never "matches all").
     pub fn parse(token: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|category| category.token() == token)
+        [
+            SqlType::Select,
+            SqlType::Insert,
+            SqlType::Update,
+            SqlType::Delete,
+            SqlType::Create,
+            SqlType::Drop,
+            SqlType::Other,
+            SqlType::Error,
+        ]
+        .into_iter()
+        .find(|kind| kind.token() == token)
     }
 }
 
-/// One rendered row: either a single entry or a folded duplicate group.
+/// One rendered row: a single entry, or the representative of a folded
+/// duplicate group.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PanelRow {
     pub line_no: usize,
@@ -87,13 +134,19 @@ pub struct PanelRow {
     pub sql: String,
     pub params: Vec<String>,
     pub category: RowCategory,
-    /// Size of the duplicate (or N+1) group this row stands for.
-    pub count: usize,
-    pub group_key: Option<String>,
-    pub occurrences: Vec<usize>,
-    /// Original text for rows without SQL (errors, partial entries).
-    pub raw_line: Option<String>,
+    pub sql_type: SqlType,
+    /// Size of the folded duplicate group (1 when this row is one occurrence).
+    pub dedupe_count: usize,
+    /// Size of the N+1 group (1 when the row is not part of one).
+    pub group_count: usize,
     pub n_plus_one: bool,
+    /// `<== Total:` affected-row count, when the family prints one.
+    pub affected_rows: Option<u64>,
+    /// Source file/method: not carried by the log parser yet (empty → omitted).
+    pub source: String,
+    pub method: String,
+    /// Original text for error rows (kept when no SQL was recovered).
+    pub raw_line: Option<String>,
 }
 
 impl PanelRow {
@@ -110,72 +163,111 @@ impl PanelRow {
         }
     }
 
-    pub fn params_text(&self) -> String {
-        self.params.join(", ")
-    }
-
-    /// SQL (or the raw line when no SQL was recovered), truncated for display.
+    /// SQL truncated for the list; error rows have no SQL here (see
+    /// [`PanelRow::error_text`]).
     pub fn display_sql(&self) -> String {
-        let text = if self.sql.is_empty() {
-            self.raw_line.as_deref().unwrap_or_default()
-        } else {
-            self.sql.as_str()
-        };
-        truncate_chars(text, SQL_DISPLAY_CHARS)
+        truncate_chars(&self.sql, SQL_DISPLAY_CHARS)
     }
 
+    /// The original line shown under an error row (empty for non-error rows).
+    pub fn error_text(&self) -> String {
+        if self.category == RowCategory::Error {
+            self.raw_line.clone().unwrap_or_default()
+        } else {
+            String::new()
+        }
+    }
+
+    /// Full text searched by the keyword/regex filter.
     fn searchable(&self) -> String {
         let mut text = self.sql.clone();
         if let Some(raw) = &self.raw_line {
             text.push('\n');
             text.push_str(raw);
         }
-        text.push('\n');
-        text.push_str(&self.params.join(", "));
+        if !self.params.is_empty() {
+            text.push('\n');
+            text.push_str(&self.params.join(", "));
+        }
         text
     }
 }
 
-/// Category/keyword filter applied before pagination.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Filter {
-    pub category: Option<RowCategory>,
-    pub keyword: String,
+/// The "SQL 类型" selection: the button shows 全部 / 无 / N 项, so "all six" and
+/// "none" must stay distinguishable (an empty `Only` set is never produced by
+/// the page; empty defaults to `All`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeFilter {
+    All,
+    None,
+    Only(BTreeSet<SqlType>),
 }
 
-impl Filter {
-    fn matches(&self, row: &PanelRow) -> bool {
-        if self
-            .category
-            .is_some_and(|category| row.category != category)
-        {
-            return false;
-        }
-        let keyword = self.keyword.trim().to_lowercase();
-        keyword.is_empty() || row.searchable().to_lowercase().contains(&keyword)
+impl Default for TypeFilter {
+    fn default() -> Self {
+        TypeFilter::All
     }
 }
 
-/// Rows of one page plus the total row count after filtering.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Page {
-    pub first: u32,
-    pub total: u32,
-    pub rows: Vec<PanelRow>,
+impl TypeFilter {
+    fn matches(&self, kind: SqlType) -> bool {
+        match self {
+            TypeFilter::All => true,
+            TypeFilter::None => false,
+            TypeFilter::Only(set) => set.contains(&kind),
+        }
+    }
+
+    /// Selected tokens, for the push state (`Only` only).
+    fn selected_tokens(&self) -> Vec<&'static str> {
+        match self {
+            TypeFilter::Only(set) => set.iter().map(|kind| kind.token()).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn mode(&self) -> &'static str {
+        match self {
+            TypeFilter::All => "all",
+            TypeFilter::None => "none",
+            TypeFilter::Only(_) => "only",
+        }
+    }
+}
+
+/// The category/keyword/type filter applied before the buffer cap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Filter {
+    /// Selected statement kinds.
+    pub types: TypeFilter,
+    pub slow_only: bool,
+    pub keyword: String,
+    pub match_case: bool,
+    pub regex: bool,
+    /// Fold duplicate statements into one row.
+    pub dedupe: bool,
+}
+
+impl Default for Filter {
+    fn default() -> Self {
+        Self {
+            types: TypeFilter::All,
+            slow_only: false,
+            keyword: String::new(),
+            match_case: false,
+            regex: false,
+            dedupe: true,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Row assembly
 // ---------------------------------------------------------------------------
 
-/// Collapses duplicate groups (unless expanded), tags N+1 rows and classifies
+/// Collapses duplicate groups (when `dedupe`), tags N+1 rows and classifies
 /// each row. Rows keep `line_no` order.
-pub fn build_rows(
-    analysis: &LogAnalysis,
-    dedupe: bool,
-    expanded: &BTreeSet<String>,
-    slow_threshold_ms: f64,
-) -> Vec<PanelRow> {
+pub fn build_rows(analysis: &LogAnalysis, dedupe: bool, slow_threshold_ms: f64) -> Vec<PanelRow> {
     let mut duplicate_by_line: HashMap<usize, &DuplicateGroup> = HashMap::new();
     for group in &analysis.duplicates {
         for &line in &group.line_nos {
@@ -194,43 +286,30 @@ pub fn build_rows(
     for entry in &analysis.entries {
         let duplicate = duplicate_by_line.get(&entry.line_no).copied();
         let n_plus_one = n_plus_one_by_line.get(&entry.line_no).copied();
-        let is_expanded = duplicate
-            .map(|group| expanded.contains(&group.key))
-            .unwrap_or(false);
+        let category = categorize(entry, n_plus_one, slow_threshold_ms);
+        let sql_type = sql_type_of(entry);
 
-        if dedupe
-            && !is_expanded
-            && let Some(group) = duplicate
-        {
+        if dedupe && let Some(group) = duplicate {
             if !folded_groups.insert(group.key.clone()) {
                 continue;
             }
-            let count = group.count.max(n_plus_one.map(|n1| n1.count).unwrap_or(1));
             rows.push(row_of(
                 entry,
-                categorize(entry, n_plus_one, slow_threshold_ms),
-                count,
-                Some(group.key.clone()),
-                group.line_nos.clone(),
+                category,
+                sql_type,
+                group.count.max(1),
+                n_plus_one.map(|group| group.count).unwrap_or(1),
                 n_plus_one.is_some(),
             ));
             continue;
         }
 
-        let occurrences = match (duplicate, is_expanded) {
-            (Some(group), true) => group.line_nos.clone(),
-            _ => vec![entry.line_no],
-        };
-        let count = duplicate
-            .map(|group| group.count)
-            .or_else(|| n_plus_one.map(|group| group.count))
-            .unwrap_or(1);
         rows.push(row_of(
             entry,
-            categorize(entry, n_plus_one, slow_threshold_ms),
-            count,
-            duplicate.map(|group| group.key.clone()),
-            occurrences,
+            category,
+            sql_type,
+            1,
+            n_plus_one.map(|group| group.count).unwrap_or(1),
             n_plus_one.is_some(),
         ));
     }
@@ -253,12 +332,44 @@ fn categorize(
     }
 }
 
+/// Statement kind for the filter/colour bar. `EntryClass` groups all DDL into
+/// one variant, so the first keyword decides between CREATE and DROP.
+fn sql_type_of(entry: &LogEntry) -> SqlType {
+    if entry.class == EntryClass::Error {
+        return SqlType::Error;
+    }
+    match first_keyword(&entry.sql).as_str() {
+        "SELECT" => SqlType::Select,
+        "INSERT" | "REPLACE" => SqlType::Insert,
+        "UPDATE" => SqlType::Update,
+        "DELETE" => SqlType::Delete,
+        "CREATE" => SqlType::Create,
+        "DROP" | "TRUNCATE" => SqlType::Drop,
+        _ => match entry.class {
+            EntryClass::Select => SqlType::Select,
+            EntryClass::Insert => SqlType::Insert,
+            EntryClass::Update => SqlType::Update,
+            EntryClass::Delete => SqlType::Delete,
+            EntryClass::Ddl => SqlType::Create,
+            _ => SqlType::Other,
+        },
+    }
+}
+
+fn first_keyword(sql: &str) -> String {
+    sql.trim_start()
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphabetic())
+        .collect::<String>()
+        .to_ascii_uppercase()
+}
+
 fn row_of(
     entry: &LogEntry,
     category: RowCategory,
-    count: usize,
-    group_key: Option<String>,
-    occurrences: Vec<usize>,
+    sql_type: SqlType,
+    dedupe_count: usize,
+    group_count: usize,
     n_plus_one: bool,
 ) -> PanelRow {
     PanelRow {
@@ -268,109 +379,107 @@ fn row_of(
         sql: entry.sql.clone(),
         params: entry.params.clone(),
         category,
-        count,
-        group_key,
-        occurrences,
-        raw_line: entry.raw_line.clone(),
+        sql_type,
+        dedupe_count,
+        group_count,
         n_plus_one,
+        affected_rows: entry.affected_rows,
+        source: String::new(),
+        method: String::new(),
+        raw_line: entry.raw_line.clone(),
     }
 }
 
-/// Applies the filter and returns only the requested page's rows.
-pub fn paginate(rows: &[PanelRow], filter: &Filter, viewport: Option<Viewport>) -> Page {
-    let filtered: Vec<PanelRow> = rows
-        .iter()
-        .filter(|row| filter.matches(row))
+// ---------------------------------------------------------------------------
+// Filtering (pure)
+// ---------------------------------------------------------------------------
+
+/// A compiled keyword matcher. `Invalid` is what an unparsable regular
+/// expression becomes: it matches nothing instead of panicking.
+#[derive(Debug)]
+enum Matcher {
+    Empty,
+    Text {
+        needle: String,
+        case_sensitive: bool,
+    },
+    Regex(regex::Regex),
+    Invalid,
+}
+
+impl Matcher {
+    fn new(keyword: &str, case_sensitive: bool, regex: bool) -> Self {
+        let needle = keyword.trim();
+        if needle.is_empty() {
+            return Self::Empty;
+        }
+        if regex {
+            match regex::RegexBuilder::new(needle)
+                .case_insensitive(!case_sensitive)
+                .build()
+            {
+                Ok(compiled) => Self::Regex(compiled),
+                Err(_) => Self::Invalid,
+            }
+        } else {
+            Self::Text {
+                needle: needle.to_string(),
+                case_sensitive,
+            }
+        }
+    }
+
+    fn is_match(&self, haystack: &str) -> bool {
+        match self {
+            Self::Empty => true,
+            Self::Invalid => false,
+            Self::Regex(compiled) => compiled.is_match(haystack),
+            Self::Text {
+                needle,
+                case_sensitive,
+            } => {
+                if *case_sensitive {
+                    haystack.contains(needle)
+                } else {
+                    haystack.to_lowercase().contains(&needle.to_lowercase())
+                }
+            }
+        }
+    }
+}
+
+/// True when `row` passes `filter` at `slow_threshold_ms`.
+pub fn row_matches(row: &PanelRow, filter: &Filter, slow_threshold_ms: f64) -> bool {
+    if !filter.types.matches(row.sql_type) {
+        return false;
+    }
+    if filter.slow_only {
+        let slow = row.duration_ms.is_some_and(|ms| ms >= slow_threshold_ms);
+        if !slow {
+            return false;
+        }
+    }
+    let matcher = Matcher::new(&filter.keyword, filter.match_case, filter.regex);
+    matcher.is_match(&row.searchable())
+}
+
+/// Applies `filter` and returns the surviving rows (order preserved).
+pub fn filter_rows(rows: &[PanelRow], filter: &Filter, slow_threshold_ms: f64) -> Vec<PanelRow> {
+    rows.iter()
+        .filter(|row| row_matches(row, filter, slow_threshold_ms))
         .cloned()
-        .collect();
-    let total = filtered.len() as u32;
-    let range = Viewport::range(viewport, total, DEFAULT_PAGE_ROWS);
-    Page {
-        first: range.start,
-        total,
-        rows: filtered[range.start as usize..range.end as usize].to_vec(),
-    }
+        .collect()
 }
 
-// ---------------------------------------------------------------------------
-// Refresh throttle
-// ---------------------------------------------------------------------------
-
-/// Decides when a burst of pushed rows becomes one `refresh_view` call.
-///
-/// `request` grants the first refresh immediately, then at most one per
-/// interval. While paused it records a pending refresh and grants nothing;
-/// [`Throttle::resume`] clears the timestamp so the next request goes out at
-/// once (the panel also turns auto-scroll back on then).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Throttle {
-    interval_ms: u64,
-    last_ms: Option<u64>,
-    paused: bool,
-    pending: bool,
-}
-
-impl Throttle {
-    pub fn new(interval_ms: u64) -> Self {
-        Self {
-            interval_ms,
-            last_ms: None,
-            paused: false,
-            pending: false,
-        }
-    }
-
-    pub fn interval_ms(&self) -> u64 {
-        self.interval_ms
-    }
-
-    pub fn set_interval_ms(&mut self, interval_ms: u64) {
-        self.interval_ms = interval_ms;
-    }
-
-    pub fn is_paused(&self) -> bool {
-        self.paused
-    }
-
-    pub fn has_pending(&self) -> bool {
-        self.pending
-    }
-
-    pub fn pause(&mut self) {
-        self.paused = true;
-    }
-
-    pub fn resume(&mut self) {
-        self.paused = false;
-        self.last_ms = None;
-    }
-
-    /// True when the caller should refresh now.
-    pub fn request(&mut self, now_ms: u64) -> bool {
-        if self.paused {
-            self.pending = true;
-            return false;
-        }
-        match self.last_ms {
-            Some(last) if now_ms.saturating_sub(last) < self.interval_ms => {
-                self.pending = true;
-                false
-            }
-            _ => {
-                self.last_ms = Some(now_ms);
-                self.pending = false;
-                true
-            }
-        }
-    }
-
-    /// True when a suppressed refresh has become due.
-    pub fn tick(&mut self, now_ms: u64) -> bool {
-        if self.paused || !self.pending {
-            return false;
-        }
-        self.request(now_ms)
-    }
+/// Whether the keyword is a regular expression that fails to compile (so the
+/// page can flag it). Only meaningful when `filter.regex` is set.
+pub fn regex_is_invalid(filter: &Filter) -> bool {
+    filter.regex
+        && !filter.keyword.trim().is_empty()
+        && regex::RegexBuilder::new(filter.keyword.trim())
+            .case_insensitive(!filter.match_case)
+            .build()
+            .is_err()
 }
 
 // ---------------------------------------------------------------------------
@@ -382,9 +491,9 @@ struct Store {
     analysis: LogAnalysis,
     dirty: bool,
     filter: Filter,
-    expanded: BTreeSet<String>,
-    throttle: Throttle,
-    auto_scroll: bool,
+    /// Once the page sends a filter, its `dedupe` choice wins over the setting.
+    filter_touched: bool,
+    paused: bool,
 }
 
 impl Default for Store {
@@ -394,9 +503,8 @@ impl Default for Store {
             analysis: empty_analysis(),
             dirty: false,
             filter: Filter::default(),
-            expanded: BTreeSet::new(),
-            throttle: Throttle::new(DEFAULT_REFRESH_MS),
-            auto_scroll: true,
+            filter_touched: false,
+            paused: false,
         }
     }
 }
@@ -448,54 +556,30 @@ pub fn clear() {
     state.text.clear();
     state.analysis = empty_analysis();
     state.dirty = false;
-    state.expanded.clear();
 }
 
-/// Whether refresh is paused (pushed rows keep accumulating meanwhile).
+/// Whether live refresh is paused (rows keep accumulating meanwhile).
 pub fn is_paused() -> bool {
-    store().throttle.is_paused()
+    store().paused
 }
 
-/// Sets the paused flag; resuming also re-enables auto-scroll.
+/// Sets the paused flag.
 pub fn set_paused(paused: bool) {
-    let mut state = store();
-    state.auto_scroll = !paused;
-    if paused {
-        state.throttle.pause();
-    } else {
-        state.throttle.resume();
-    }
+    store().paused = paused;
 }
 
 /// Toggles pause and returns the new paused state.
 pub fn toggle_pause() -> bool {
-    let paused = !store().throttle.is_paused();
+    let paused = !store().paused;
     set_paused(paused);
     paused
 }
 
-/// Replaces the category/keyword filter.
-pub fn set_filter(category: Option<RowCategory>, keyword: &str) {
+/// Replaces the whole filter (from a `filter` message).
+pub fn set_filter(filter: Filter) {
     let mut state = store();
-    state.filter = Filter {
-        category,
-        keyword: keyword.to_string(),
-    };
-}
-
-/// Expands or folds one duplicate group.
-pub fn set_expanded(group_key: &str, expanded: bool) {
-    let mut state = store();
-    if expanded {
-        state.expanded.insert(group_key.to_string());
-    } else {
-        state.expanded.remove(group_key);
-    }
-}
-
-/// Whether a duplicate group is currently expanded.
-pub fn is_expanded(group_key: &str) -> bool {
-    store().expanded.contains(group_key)
+    state.filter = filter;
+    state.filter_touched = true;
 }
 
 /// The parsed analysis of the buffered text (parses on demand).
@@ -503,12 +587,6 @@ pub fn snapshot() -> LogAnalysis {
     let mut state = store();
     ensure_parsed(&mut state);
     state.analysis.clone()
-}
-
-/// True when the caller should call `refresh_view(VIEW_ID)` at `now_ms`.
-/// The first burst goes out immediately; later ones are throttled.
-pub fn take_refresh(now_ms: u64) -> bool {
-    store().throttle.request(now_ms)
 }
 
 /// Number of buffered characters (for status lines and diagnostics).
@@ -523,9 +601,6 @@ fn ensure_parsed(state: &mut Store) {
     let options = parse_options();
     state.analysis = parse(&state.text, &options);
     state.dirty = false;
-    let interval =
-        settings::get_i64("log.refreshIntervalMs", DEFAULT_REFRESH_MS as i64).max(0) as u64;
-    state.throttle.set_interval_ms(interval);
 }
 
 fn parse_options() -> ParseOptions {
@@ -541,293 +616,265 @@ fn parse_options() -> ParseOptions {
     }
 }
 
+fn slow_threshold() -> f64 {
+    settings::get_i64("log.slowThresholdMs", 1000).max(0) as f64
+}
+
+fn buffer_cap() -> usize {
+    settings::get_i64("logs.pageSize", DEFAULT_BUFFER_CAP).clamp(1, MAX_BUFFER_CAP) as usize
+}
+
 // ---------------------------------------------------------------------------
-// Rendering
+// State push
 // ---------------------------------------------------------------------------
 
-/// Builds the panel view for `viewport` (public for commands and tests).
-pub fn render_panel(viewport: Option<Viewport>) -> View {
+/// Builds the full push state (see the lane contract in `docs/registration/L17.md`).
+fn build_state() -> Value {
     let mut state = store();
     ensure_parsed(&mut state);
 
-    let dedupe = settings::get_bool("log.dedupe", true);
-    let slow_threshold = settings::get_i64("log.slowThresholdMs", 1000).max(0) as f64;
-    let rows = build_rows(&state.analysis, dedupe, &state.expanded, slow_threshold);
-    let page = paginate(&rows, &state.filter, viewport);
+    let slow_threshold_ms = slow_threshold();
+    let dedupe = if state.filter_touched {
+        state.filter.dedupe
+    } else {
+        settings::get_bool("log.dedupe", true)
+    };
+    let rows = build_rows(&state.analysis, dedupe, slow_threshold_ms);
 
-    let html = build_html(
-        &page,
-        &state.filter,
-        &state.expanded,
-        &state.throttle,
-        state.auto_scroll,
-    );
-    let paused = state.throttle.is_paused();
+    let filter = state.filter.clone();
+    let filtered = filter_rows(&rows, &filter, slow_threshold_ms);
+    let total = filtered.len();
+    let slow = filtered
+        .iter()
+        .filter(|row| row.duration_ms.is_some_and(|ms| ms >= slow_threshold_ms))
+        .count();
+    let n_plus_one = filtered.iter().filter(|row| row.n_plus_one).count();
+
+    let cap = buffer_cap();
+    let start = total.saturating_sub(cap);
+    let shown = &filtered[start..];
+    let truncated = total > shown.len();
+
+    let rows_json: Vec<Value> = shown
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            json!({
+                "line": row.line_no,
+                "seq": start + index + 1,
+                "time": row.time_text(),
+                "duration_ms": row.duration_ms,
+                "db": "",
+                "rows_affected": row.affected_rows,
+                "dedupe_count": row.dedupe_count,
+                "group_count": row.group_count,
+                "n_plus_one": row.n_plus_one,
+                "source": row.source,
+                "method": row.method,
+                "sql": row.display_sql(),
+                "error_text": row.error_text(),
+                "category": row.category.token(),
+                "sql_type": row.sql_type.token(),
+            })
+        })
+        .collect();
+
+    let console_lines = state.text.lines().count() as u64;
+    let paused = state.paused;
+    drop(state);
+
+    let stats = crate::capture::bridge::Stats::current();
+
+    json!({
+        "op": "state",
+        "rows": rows_json,
+        "filter": {
+            "types": filter.types.selected_tokens(),
+            "types_mode": filter.types.mode(),
+            "slow_only": filter.slow_only,
+            "keyword": filter.keyword,
+            "match_case": filter.match_case,
+            "regex": filter.regex,
+            "dedupe": dedupe,
+            "regex_error": regex_is_invalid(&filter),
+        },
+        "counts": {
+            "total": total,
+            "shown": shown.len(),
+            "slow": slow,
+            "n_plus_one": n_plus_one,
+            "truncated": truncated,
+            "cap": cap,
+        },
+        "status": {
+            "console_lines": console_lines,
+            "agent_connected": stats.connected,
+            "agent_events": stats.events,
+            "paused": paused,
+        },
+        "slow_threshold_ms": slow_threshold_ms,
+        "labels": labels_json(),
+    })
+}
+
+/// Posts the full state to the packaged page.
+pub fn push_state() -> Result<(), Error> {
+    let state = build_state();
+    host::post_view_message(VIEW_ID, &state.to_string())
+}
+
+fn labels_json() -> Value {
+    json!({
+        "typesTitle": t("view.logs.filter.types_title"),
+        "typesAll": t("view.logs.filter.all"),
+        "typesNone": t("view.logs.filter.none"),
+        "typesCountSuffix": t("view.logs.filter.count_suffix"),
+        "selectAll": t("view.logs.filter.select_all"),
+        "selectNone": t("view.logs.filter.select_none"),
+        "slowOnly": t("view.logs.filter.slow_only"),
+        "search": t("view.logs.filter.search"),
+        "dedupe": t("view.logs.filter.dedupe"),
+        "keywordPlaceholder": t("view.logs.filter.keyword"),
+        "matchCase": t("view.logs.filter.match_case"),
+        "matchCaseTitle": t("view.logs.filter.match_case_title"),
+        "regex": t("view.logs.filter.regex"),
+        "regexTitle": t("view.logs.filter.regex_title"),
+        "hitsSuffix": t("view.logs.filter.hits_suffix"),
+        "regexError": t("view.logs.filter.regex_error"),
+        "slowPrefix": t("view.logs.slow_prefix"),
+        "empty": t("view.logs.empty"),
+        "paused": t("view.logs.paused"),
+        "statusConsolePrefix": t("view.logs.status.console_prefix"),
+        "statusConsoleSuffix": t("view.logs.status.console_suffix"),
+        "statusAgentOff": t("view.logs.status.agent_off"),
+        "statusAgentEventsPrefix": t("view.logs.status.agent_events_prefix"),
+        "totalPrefix": t("view.logs.status.total_prefix"),
+        "totalSuffix": t("view.logs.status.total_suffix"),
+        "truncatedPrefix": t("view.logs.status.truncated_prefix"),
+        "nPlusOne": t("view.logs.badge.n_plus_one"),
+        "dedupeBadgePrefix": t("view.logs.badge.dedupe_prefix"),
+        "groupBadgePrefix": t("view.logs.badge.group_prefix"),
+        "menuCopySql": t("view.logs.menu.copy_sql"),
+        "menuCopyTime": t("view.logs.menu.copy_time"),
+        "menuExport": t("view.logs.menu.export"),
+        "typeSelect": t("view.logs.type.select"),
+        "typeInsert": t("view.logs.type.insert"),
+        "typeUpdate": t("view.logs.type.update"),
+        "typeDelete": t("view.logs.type.delete"),
+        "typeCreate": t("view.logs.type.create"),
+        "typeDrop": t("view.logs.type.drop"),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Rendering (toolbar + status chrome; the body is the packaged page)
+// ---------------------------------------------------------------------------
+
+/// Builds the panel view chrome for a `web =` view.
+///
+/// The page is the body; this returns the toolbar buttons and status that the
+/// host draws around it. It also re-pushes the state on every render so the
+/// live capture path (`refresh_view`) reaches the page.
+pub fn render_panel() -> View {
+    let paused = store().paused;
+    if !paused {
+        let _ = push_state();
+    }
+
     let pause_label = if paused {
         t("view.logs.button.resume")
     } else {
         t("view.logs.button.pause")
     };
-
-    let mut view = View::new(Body::Html(html));
+    let mut view = View::new(Body::Html(String::new()));
     view.toolbar
         .push(Button::new("toggle-pause", &pause_label).icon(if paused { "run" } else { "stop" }));
     view.toolbar
         .push(Button::new("clear", &t("view.logs.button.clear")).icon("remove"));
     view.toolbar
         .push(Button::new("copy-all", &t("view.logs.button.copy")));
-    let shown_end = page.first + page.rows.len() as u32;
-    let first_shown = if page.rows.is_empty() {
-        0
-    } else {
-        page.first + 1
-    };
-    let mut status = format!("{first_shown}-{shown_end} / {}", page.total);
     if paused {
-        status.push_str(" · ");
-        status.push_str(&t("view.logs.paused"));
+        view.status = Some(t("view.logs.paused"));
     }
-    view.status = Some(status);
     view
-}
-
-fn build_html(
-    page: &Page,
-    filter: &Filter,
-    expanded: &BTreeSet<String>,
-    throttle: &Throttle,
-    auto_scroll: bool,
-) -> String {
-    let mut html = String::with_capacity(4096);
-    html.push_str(
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>\
-body{font:var(--openidea-font-size,13px)/1.4 var(--openidea-font-ui,sans-serif);\
-color:var(--openidea-fg);margin:0;padding:6px}\
-.bar{display:flex;gap:6px;align-items:center;margin-bottom:6px}\
-select,input{background:var(--openidea-bg-input);color:var(--openidea-fg);\
-border:1px solid var(--openidea-border);border-radius:3px;padding:2px 4px}\
-table{width:100%;border-collapse:collapse}\
-th{text-align:left;font-weight:600;border-bottom:1px solid var(--openidea-border);\
-padding:3px 6px;position:sticky;top:0;background:var(--openidea-bg)}\
-td{padding:3px 6px;border-bottom:1px solid var(--openidea-border);vertical-align:top}\
-td.sql{font-family:var(--openidea-font-mono,monospace);white-space:pre-wrap}\
-td.t,td.ms{white-space:nowrap;font-family:var(--openidea-font-mono,monospace)}\
-tr.row-error td{background:color-mix(in srgb,var(--openidea-danger) 14%,transparent)}\
-tr.row-error td.cat{color:var(--openidea-danger);font-weight:600}\
-tr.row-slow td.cat{color:var(--openidea-warning)}\
-tr.row-n_plus_one td.cat{color:var(--openidea-accent);font-weight:600}\
-.badge{display:inline-block;margin-right:6px;padding:0 4px;border-radius:3px;\
-background:var(--openidea-bg-selected);color:var(--openidea-fg-strong);font-size:11px}\
-button.expand{background:none;border:1px solid var(--openidea-border);border-radius:3px;\
-color:var(--openidea-link);cursor:pointer;font-size:11px;margin-right:6px}\
-.empty{padding:12px;color:var(--openidea-fg-muted)}</style></head><body ",
-    );
-    html.push_str(&format!("data-autoscroll=\"{auto_scroll}\">"));
-
-    html.push_str("<div class=\"bar\"><select id=\"log-category\">");
-    let all_selected = filter.category.is_none();
-    html.push_str(&format!(
-        "<option value=\"all\"{}>{}</option>",
-        if all_selected { " selected" } else { "" },
-        escape_html(&t("view.logs.filter.all"))
-    ));
-    for category in RowCategory::ALL {
-        let selected = filter.category == Some(category);
-        html.push_str(&format!(
-            "<option value=\"{}\"{}>{}</option>",
-            category.token(),
-            if selected { " selected" } else { "" },
-            escape_html(&category.label())
-        ));
-    }
-    html.push_str("</select>");
-    html.push_str(&format!(
-        "<input id=\"log-keyword\" value=\"{}\" placeholder=\"{}\">",
-        escape_attr(&filter.keyword),
-        escape_attr(&t("view.logs.filter.keyword"))
-    ));
-    if throttle.is_paused() {
-        html.push_str(&format!(
-            "<span class=\"badge\">{}</span>",
-            escape_html(&t("view.logs.paused"))
-        ));
-    }
-    html.push_str("</div>");
-
-    html.push_str("<table><thead><tr>");
-    for key in [
-        "view.logs.column.time",
-        "view.logs.column.duration",
-        "view.logs.column.sql",
-        "view.logs.column.params",
-        "view.logs.column.category",
-    ] {
-        html.push_str(&format!("<th>{}</th>", escape_html(&t(key))));
-    }
-    html.push_str("</tr></thead><tbody>");
-
-    if page.rows.is_empty() {
-        html.push_str(&format!(
-            "<tr><td colspan=\"5\"><div class=\"empty\">{}</div></td></tr>",
-            escape_html(&t("view.logs.empty"))
-        ));
-    }
-    for row in &page.rows {
-        html.push_str(&row_html(row, expanded));
-    }
-    html.push_str("</tbody></table>");
-
-    html.push_str(
-        "<script>(function(){\
-function post(message){if(window.openidea&&window.openidea.postMessage){\
-window.openidea.postMessage(JSON.stringify(message));}}\
-var cat=document.getElementById('log-category');\
-var kw=document.getElementById('log-keyword');\
-function apply(){post({op:'set-filter',category:cat.value,keyword:kw.value});}\
-var timer=null;\
-function flush(){if(timer){clearTimeout(timer);timer=null;}apply();}\
-function schedule(){if(timer){clearTimeout(timer);}timer=setTimeout(flush,300);}\
-if(cat){cat.addEventListener('change',apply);}\
-if(kw){\
-kw.addEventListener('input',schedule);\
-kw.addEventListener('change',flush);\
-kw.addEventListener('keydown',function(e){\
-if(e.key==='Enter'){e.preventDefault();flush();}});}\
-if(kw&&kw.value&&(!document.hasFocus||document.hasFocus())){\
-try{var len=kw.value.length;kw.focus();kw.setSelectionRange(len,len);}catch(_){}}\
-var buttons=document.querySelectorAll('button.expand');\
-for(var i=0;i<buttons.length;i++){(function(b){\
-b.addEventListener('click',function(){post({op:'toggle-group',key:b.getAttribute('data-key')});});\
-})(buttons[i]);}\
-if(document.body.getAttribute('data-autoscroll')==='true'){\
-var rows=document.querySelectorAll('tbody tr');\
-if(rows.length){rows[rows.length-1].scrollIntoView({block:'end'});}\
-}}})();</script></body></html>",
-    );
-    html
-}
-
-fn row_html(row: &PanelRow, expanded: &BTreeSet<String>) -> String {
-    let is_expanded = row
-        .group_key
-        .as_ref()
-        .map(|key| expanded.contains(key))
-        .unwrap_or(false);
-    let mut html = format!(
-        "<tr class=\"row row-{}\" data-line=\"{}\">",
-        row.category.token(),
-        row.line_no
-    );
-    html.push_str(&format!(
-        "<td class=\"t\">{}</td>",
-        escape_html(&row.time_text())
-    ));
-    html.push_str(&format!(
-        "<td class=\"ms\">{}</td>",
-        escape_html(&row.duration_text())
-    ));
-
-    html.push_str("<td class=\"sql\">");
-    if row.n_plus_one && row.count > 1 {
-        html.push_str(&format!(
-            "<span class=\"badge\">{} ×{}</span>",
-            escape_html(&t("view.logs.badge.n_plus_one")),
-            row.count
-        ));
-    } else if row.group_key.is_some() && row.count > 1 {
-        html.push_str(&format!(
-            "<span class=\"badge\">{} ×{}</span>",
-            escape_html(&t("view.logs.category.duplicate")),
-            row.count
-        ));
-    }
-    if let (Some(key), true) = (&row.group_key, row.occurrences.len() > 1) {
-        let label = if is_expanded {
-            t("view.logs.collapse")
-        } else {
-            format!("{} ×{}", t("view.logs.expand"), row.count)
-        };
-        html.push_str(&format!(
-            "<button class=\"expand\" data-key=\"{}\" data-expanded=\"{}\">{}</button>",
-            escape_attr(key),
-            is_expanded,
-            escape_html(&label)
-        ));
-    }
-    html.push_str(&escape_html(&row.display_sql()));
-    html.push_str("</td>");
-
-    html.push_str(&format!(
-        "<td class=\"params\">{}</td>",
-        escape_html(&row.params_text())
-    ));
-    html.push_str(&format!(
-        "<td class=\"cat\">{}</td></tr>",
-        escape_html(&row.category.label())
-    ));
-    html
 }
 
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
 
-/// Handles toolbar buttons and messages posted by the panel's page.
-pub fn handle_panel_event(event: ViewEvent) -> Result<(), Error> {
+/// Handles toolbar buttons and messages posted by the packaged page.
+pub fn handle_panel_event(event: ViewEvent, ctx: &Invocation) -> Result<(), Error> {
     match event {
         ViewEvent::Button(id) if id == "toggle-pause" => {
             toggle_pause();
+            let _ = push_state();
             host::refresh_view(VIEW_ID);
         }
         ViewEvent::Button(id) if id == "clear" => {
             clear();
+            let _ = push_state();
             host::refresh_view(VIEW_ID);
         }
         ViewEvent::Button(id) if id == "copy-all" => {
-            let text = all_sql();
-            host::copy_to_clipboard(&text)?;
+            host::copy_to_clipboard(&all_sql())?;
         }
-        ViewEvent::Message(text) => handle_message(&text)?,
+        ViewEvent::Message(text) => handle_message(&text, ctx)?,
         _ => {}
     }
     Ok(())
 }
 
-fn handle_message(text: &str) -> Result<(), Error> {
-    let message: serde_json::Value =
+fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
+    let message: Value =
         serde_json::from_str(text).map_err(|error| Error::Invalid(error.to_string()))?;
-    match message
+    let op = message
         .get("op")
         .and_then(|value| value.as_str())
-        .unwrap_or("")
-    {
-        "toggle-group" => {
-            if let Some(key) = message.get("key").and_then(|value| value.as_str()) {
-                let expanded = !is_expanded(key);
-                set_expanded(key, expanded);
-                host::refresh_view(VIEW_ID);
-            }
+        .unwrap_or("");
+    match op {
+        // The packaged page asks for the state once its script is ready.
+        "ready" | "page" => {
+            let _ = push_state();
         }
-        "set-filter" => {
-            let category = message
-                .get("category")
-                .and_then(|value| value.as_str())
-                .and_then(RowCategory::parse);
-            let keyword = message
-                .get("keyword")
-                .and_then(|value| value.as_str())
-                .unwrap_or("");
-            set_filter(category, keyword);
-            host::refresh_view(VIEW_ID);
+        "filter" => {
+            set_filter(filter_from_message(&message));
+            let _ = push_state();
         }
         "toggle-pause" => {
             toggle_pause();
+            let _ = push_state();
+            host::refresh_view(VIEW_ID);
+        }
+        "clear" => {
+            clear();
+            let _ = push_state();
             host::refresh_view(VIEW_ID);
         }
         "copy-line" => {
-            if let Some(line) = message.get("line").and_then(|value| value.as_u64()) {
-                let sql = sql_of_line(line as usize).unwrap_or_default();
-                host::copy_to_clipboard(&sql)?;
+            if let Some(line) = message_line(&message) {
+                let sql = sql_of_line(line).unwrap_or_default();
+                if !sql.is_empty() {
+                    host::copy_to_clipboard(&sql)?;
+                }
+            }
+        }
+        "copy-time" => {
+            if let Some(line) = message_line(&message)
+                && let Some(time) = time_of_line(line)
+            {
+                host::copy_to_clipboard(&time)?;
+            }
+        }
+        "export" => {
+            common::emit(&visible_sql())?;
+        }
+        "open-line" => {
+            if let Some(line) = message_line(&message) {
+                let sql = sql_of_line(line).unwrap_or_default();
+                if !sql.is_empty() {
+                    crate::commands::open_workbench::run(ctx, Some(&sql))?;
+                }
             }
         }
         _ => {}
@@ -835,9 +882,66 @@ fn handle_message(text: &str) -> Result<(), Error> {
     Ok(())
 }
 
+fn message_line(message: &Value) -> Option<usize> {
+    message
+        .get("line")
+        .and_then(|value| value.as_u64())
+        .map(|line| line as usize)
+}
+
+fn filter_from_message(message: &Value) -> Filter {
+    let selected: BTreeSet<SqlType> = message
+        .get("types")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .filter_map(SqlType::parse)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    let types = match message
+        .get("types_mode")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+    {
+        "none" => TypeFilter::None,
+        "only" => TypeFilter::Only(selected),
+        "all" => TypeFilter::All,
+        // No mode: an empty selection means "all" (backward-compatible).
+        _ if selected.is_empty() => TypeFilter::All,
+        _ => TypeFilter::Only(selected),
+    };
+    let keyword = message
+        .get("keyword")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    Filter {
+        types,
+        slow_only: message
+            .get("slow_only")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        keyword,
+        match_case: message
+            .get("match_case")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        regex: message
+            .get("regex")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        dedupe: message
+            .get("dedupe")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true),
+    }
+}
+
 fn all_sql() -> String {
-    let analysis = snapshot();
-    analysis
+    snapshot()
         .entries
         .iter()
         .filter(|entry| entry.has_sql())
@@ -846,12 +950,40 @@ fn all_sql() -> String {
         .join(";\n")
 }
 
+/// SQL of the visible (filtered + capped) rows, joined for the export action.
+pub fn visible_sql() -> String {
+    let analysis = snapshot();
+    let slow_threshold_ms = slow_threshold();
+    let dedupe = settings::get_bool("log.dedupe", true);
+    let rows = build_rows(&analysis, dedupe, slow_threshold_ms);
+    let filter = store().filter.clone();
+    let filtered = filter_rows(&rows, &filter, slow_threshold_ms);
+    let cap = buffer_cap();
+    let start = filtered.len().saturating_sub(cap);
+    filtered[start..]
+        .iter()
+        .filter(|row| !row.sql.is_empty())
+        .map(|row| format!("{};", row.sql))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn sql_of_line(line_no: usize) -> Option<String> {
     snapshot()
         .entries
         .into_iter()
         .find(|entry| entry.line_no == line_no)
         .map(|entry| entry.sql)
+        .filter(|sql| !sql.is_empty())
+}
+
+fn time_of_line(line_no: usize) -> Option<String> {
+    snapshot()
+        .entries
+        .into_iter()
+        .find(|entry| entry.line_no == line_no)
+        .and_then(|entry| entry.timestamp_ms)
+        .map(format_epoch_ms)
 }
 
 // ---------------------------------------------------------------------------
@@ -866,8 +998,8 @@ pub fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// `HH:MM:SS.mmm` UTC for an epoch timestamp. Logs rarely carry a zone; the
-/// panel shows the raw wall clock of the row rather than guessing one.
+/// `YYYY-MM-DD HH:MM:SS.mmm` UTC for an epoch timestamp. Logs rarely carry a
+/// zone; the panel shows the raw wall clock rather than guessing one.
 fn format_epoch_ms(ms: i64) -> String {
     let seconds = ms.div_euclid(1000);
     let millis = ms.rem_euclid(1000);
@@ -901,9 +1033,9 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 fn format_ms(ms: f64) -> String {
     if (ms - ms.round()).abs() < 0.001 {
-        format!("{:.0}", ms)
+        format!("{ms:.0}")
     } else {
-        format!("{:.1}", ms)
+        format!("{ms:.1}")
     }
 }
 
@@ -916,25 +1048,6 @@ fn truncate_chars(text: &str, max: usize) -> String {
     truncated
 }
 
-fn escape_html(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-fn escape_attr(text: &str) -> String {
-    escape_html(text)
-}
-
 // ---------------------------------------------------------------------------
 // View trait
 // ---------------------------------------------------------------------------
@@ -943,19 +1056,19 @@ impl Views for crate::Main {
     fn render(
         &mut self,
         view: &str,
-        viewport: Option<Viewport>,
+        _viewport: Option<openidea_plugin::views::Viewport>,
         _ctx: &Invocation,
     ) -> Result<View, Error> {
         match view {
-            VIEW_ID => Ok(render_panel(viewport)),
+            VIEW_ID => Ok(render_panel()),
             crate::views::workbench::VIEW_ID => Ok(crate::views::workbench::render_workbench()),
             other => Err(Error::NotFound(format!("view {other}"))),
         }
     }
 
-    fn handle(&mut self, view: &str, event: ViewEvent, _ctx: &Invocation) -> Result<(), Error> {
+    fn handle(&mut self, view: &str, event: ViewEvent, ctx: &Invocation) -> Result<(), Error> {
         match view {
-            VIEW_ID => handle_panel_event(event),
+            VIEW_ID => handle_panel_event(event, ctx),
             crate::views::workbench::VIEW_ID => {
                 crate::views::workbench::handle_workbench_event(event)
             }
@@ -982,302 +1095,388 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let host = MockHost::install();
         clear();
-        set_filter(None, "");
+        set_filter(Filter::default());
         set_paused(false);
         (host, guard)
     }
 
-    fn html_of(view: &View) -> String {
-        match &view.body {
-            Body::Html(html) => html.clone(),
-            other => panic!("expected an html body, got {other:?}"),
-        }
+    /// Two statements with different kinds, one slow, one error.
+    const MIXED_LOG: &str = "\
+Preparing: SELECT id FROM users WHERE id = ?
+Parameters: 1(Long)
+Preparing: DELETE FROM users WHERE id = ?
+Parameters: 2(Long)
+Preparing: UPDATE account SET balance = ?
+Parameters: 3(Long)
+java.sql.SQLException: Table 'demo.user' doesn't exist
+";
+
+    fn analysis_of(text: &str) -> LogAnalysis {
+        parse(text, &ParseOptions::default())
     }
 
-    fn big_log(count: usize) -> String {
-        let mut text = String::new();
-        for index in 0..count {
-            text.push_str(&format!(
-                "==>  Preparing: SELECT f{index:04}(id) FROM t WHERE id = ?\n"
-            ));
-            text.push_str(&format!("==> Parameters: {index}(Integer)\n"));
-        }
-        text
+    fn rows_of(text: &str) -> Vec<PanelRow> {
+        build_rows(&analysis_of(text), true, 1000.0)
     }
 
-    fn row_count(html: impl AsRef<str>) -> usize {
-        html.as_ref().matches("<tr class=\"row").count()
-    }
-
-    // Throttle -------------------------------------------------------------
+    // build_rows ----------------------------------------------------------
 
     #[test]
-    fn throttle_grants_the_first_refresh_then_one_per_interval() {
-        let mut throttle = Throttle::new(250);
-        assert!(throttle.request(1_000), "first burst goes out immediately");
-        assert!(
-            !throttle.request(1_100),
-            "within the interval it is suppressed"
+    fn build_rows_classifies_statement_kinds() {
+        let rows = rows_of(MIXED_LOG);
+        let kinds: Vec<&str> = rows.iter().map(|row| row.sql_type.token()).collect();
+        assert!(kinds.contains(&"select"), "{kinds:?}");
+        assert!(kinds.contains(&"delete"), "{kinds:?}");
+        assert!(kinds.contains(&"update"), "{kinds:?}");
+        assert!(kinds.contains(&"error"), "{kinds:?}");
+    }
+
+    #[test]
+    fn build_rows_splits_ddl_into_create_and_drop() {
+        assert_eq!(
+            sql_type_of_entry("CREATE TABLE t (id INT)"),
+            SqlType::Create
         );
-        assert!(throttle.has_pending());
-        assert!(throttle.request(1_250), "at the interval it goes out");
-        assert!(!throttle.has_pending());
-    }
-
-    #[test]
-    fn throttle_pause_defers_and_resume_releases_immediately() {
-        let mut throttle = Throttle::new(250);
-        throttle.pause();
-        assert!(!throttle.request(2_000));
-        assert!(throttle.has_pending());
-        assert!(!throttle.tick(2_500), "paused tick never refreshes");
-        throttle.resume();
-        assert!(throttle.tick(2_501), "resume releases the pending refresh");
-        assert!(!throttle.tick(2_502), "then the interval applies again");
-    }
-
-    #[test]
-    fn throttle_tick_waits_out_the_interval() {
-        let mut throttle = Throttle::new(250);
-        assert!(throttle.request(0));
-        assert!(!throttle.request(100));
-        assert!(!throttle.tick(200));
-        assert!(throttle.tick(300));
-    }
-
-    #[test]
-    fn throttle_interval_changes_take_effect() {
-        let mut throttle = Throttle::new(250);
-        assert!(throttle.request(0));
-        throttle.set_interval_ms(1_000);
-        assert!(!throttle.request(500));
-        assert!(throttle.request(1_000));
-        assert_eq!(throttle.interval_ms(), 1_000);
-    }
-
-    #[test]
-    fn pause_state_is_visible_in_the_panel_and_cleared_on_pause_toggle() {
-        let (_host, _guard) = test_host();
-        set_paused(true);
-        assert!(is_paused());
-        assert!(!take_refresh(10));
-        let view = render_panel(None);
-        assert!(html_of(&view).contains("data-autoscroll=\"false\""));
-        assert!(
-            view.status
-                .as_deref()
-                .unwrap_or("")
-                .contains(&t("view.logs.paused"))
+        assert_eq!(sql_type_of_entry("DROP TABLE t"), SqlType::Drop);
+        assert_eq!(sql_type_of_entry("TRUNCATE TABLE t"), SqlType::Drop);
+        assert_eq!(
+            sql_type_of_entry("ALTER TABLE t ADD c INT"),
+            SqlType::Create
         );
-
-        set_paused(false);
-        assert!(!is_paused());
-        assert!(take_refresh(20));
-        let view = render_panel(None);
-        assert!(html_of(&view).contains("data-autoscroll=\"true\""));
     }
 
-    // Paging ---------------------------------------------------------------
-
-    #[test]
-    fn viewport_serialises_only_the_requested_page() {
-        let (_host, _guard) = test_host();
-        set_log_text(&big_log(1_000));
-        let view = render_panel(Some(Viewport {
-            first_row: 900,
-            rows: 50,
-        }));
-        let html = html_of(&view);
-        assert_eq!(row_count(&html), 50, "only the page's rows are serialised");
-        assert!(html.contains("f0900("), "the page starts at row 900");
-        assert!(!html.contains("f0000("), "earlier rows are not serialised");
-        assert!(!html.contains("f0950("), "later rows are not serialised");
-        let page = paginate(
-            &build_rows(&snapshot(), true, &BTreeSet::new(), 1_000.0),
-            &Filter::default(),
-            Some(Viewport {
-                first_row: 900,
-                rows: 50,
-            }),
-        );
-        assert_eq!(page.first, 900);
-        assert_eq!(page.total, 1_000);
-        assert_eq!(page.rows.len(), 50);
+    fn sql_type_of_entry(sql: &str) -> SqlType {
+        let entry = LogEntry {
+            family: crate::core::log::Family::MyBatis,
+            line_no: 1,
+            timestamp_ms: None,
+            duration_ms: None,
+            sql: sql.to_string(),
+            params: Vec::new(),
+            class: if sql.to_ascii_uppercase().starts_with("CREATE")
+                || sql.to_ascii_uppercase().starts_with("DROP")
+                || sql.to_ascii_uppercase().starts_with("TRUNCATE")
+                || sql.to_ascii_uppercase().starts_with("ALTER")
+            {
+                EntryClass::Ddl
+            } else {
+                EntryClass::Other
+            },
+            confidence: crate::core::log::Confidence::Exact,
+            raw_sql: sql.to_string(),
+            affected_rows: None,
+            raw_line: None,
+            message_keys: Vec::new(),
+        };
+        sql_type_of(&entry)
     }
-
-    #[test]
-    fn default_page_is_bounded_for_large_logs() {
-        let (_host, _guard) = test_host();
-        set_log_text(&big_log(1_000));
-        let view = render_panel(None);
-        assert_eq!(row_count(html_of(&view)), DEFAULT_PAGE_ROWS as usize);
-        assert!(view.status.as_deref().unwrap_or("").ends_with("/ 1000"));
-    }
-
-    // Dedupe / N+1 / errors ------------------------------------------------
 
     #[test]
     fn duplicate_statements_fold_into_one_row_with_a_count() {
-        let (_host, _guard) = test_host();
-        set_log_text(
-            "==>  Preparing: SELECT * FROM user WHERE id = ?\n==> Parameters: 1(Long)\n\
-             ==>  Preparing: SELECT * FROM user WHERE id = ?\n==> Parameters: 1(Long)\n",
-        );
-        let view = render_panel(None);
-        let html = html_of(&view);
-        assert_eq!(row_count(&html), 1, "the duplicate group is folded");
-        assert!(html.contains("×2"), "the folded row shows the group size");
-        let page = paginate(
-            &build_rows(&snapshot(), true, &BTreeSet::new(), 1_000.0),
-            &Filter::default(),
-            None,
-        );
-        assert_eq!(page.rows[0].count, 2);
+        let text = "\
+==>  Preparing: SELECT * FROM user WHERE id = ?
+==> Parameters: 1(Long)
+==>  Preparing: SELECT * FROM user WHERE id = ?
+==> Parameters: 1(Long)
+";
+        let rows = build_rows(&analysis_of(text), true, 1000.0);
+        assert_eq!(rows.len(), 1, "the duplicate group is folded");
+        assert_eq!(rows[0].dedupe_count, 2);
     }
 
     #[test]
-    fn expanding_a_duplicate_group_lists_every_occurrence() {
-        let (_host, _guard) = test_host();
-        set_log_text(
-            "==>  Preparing: SELECT * FROM user WHERE id = ?\n==> Parameters: 1(Long)\n\
-             ==>  Preparing: SELECT * FROM user WHERE id = ?\n==> Parameters: 1(Long)\n",
-        );
-        let key = snapshot().duplicates[0].key.clone();
-        set_expanded(&key, true);
-        let html = html_of(&render_panel(None));
-        assert_eq!(row_count(&html), 2, "both occurrences are listed");
-        set_expanded(&key, false);
-        assert_eq!(row_count(html_of(&render_panel(None))), 1);
+    fn dedupe_off_keeps_every_occurrence() {
+        let text = "\
+==>  Preparing: SELECT * FROM user WHERE id = ?
+==> Parameters: 1(Long)
+==>  Preparing: SELECT * FROM user WHERE id = ?
+==> Parameters: 1(Long)
+";
+        let rows = build_rows(&analysis_of(text), false, 1000.0);
+        assert_eq!(rows.len(), 2, "without dedupe both occurrences stay");
+        assert_eq!(rows[0].dedupe_count, 1);
     }
 
     #[test]
-    fn n_plus_one_rows_carry_a_badge() {
-        let (_host, _guard) = test_host();
+    fn n_plus_one_rows_carry_their_group_count() {
         let mut text = String::new();
         for id in 0..5 {
             text.push_str(&format!(
                 "==>  Preparing: SELECT * FROM t WHERE id = ?\n==> Parameters: {id}(Integer)\n"
             ));
         }
-        set_log_text(&text);
-        let html = html_of(&render_panel(None));
-        assert_eq!(row_count(&html), 5, "distinct statements are not folded");
-        assert!(html.contains("N+1 ×5"), "each row shows the N+1 group size");
-        assert_eq!(
-            html.matches("class=\"row row-n_plus_one\"").count(),
-            5,
-            "rows carry the N+1 category"
+        let rows = build_rows(&analysis_of(&text), false, 1000.0);
+        assert_eq!(rows.len(), 5);
+        assert!(rows.iter().all(|row| row.n_plus_one));
+        assert_eq!(rows[0].group_count, 5);
+    }
+
+    // Filtering -----------------------------------------------------------
+
+    #[test]
+    fn empty_type_set_means_all_kinds() {
+        let rows = rows_of(MIXED_LOG);
+        let filter = Filter::default();
+        assert_eq!(filter.types, TypeFilter::All, "default is 全部");
+        let kept = filter_rows(&rows, &filter, 1000.0);
+        assert_eq!(kept.len(), rows.len());
+    }
+
+    #[test]
+    fn type_set_narrows_to_selected_kinds() {
+        let rows = rows_of(MIXED_LOG);
+        let filter = Filter {
+            types: TypeFilter::Only([SqlType::Select].into_iter().collect()),
+            ..Filter::default()
+        };
+        let kept = filter_rows(&rows, &filter, 1000.0);
+        assert!(!kept.is_empty());
+        assert!(kept.iter().all(|row| row.sql_type == SqlType::Select));
+
+        let none = Filter {
+            types: TypeFilter::None,
+            ..Filter::default()
+        };
+        assert!(
+            filter_rows(&rows, &none, 1000.0).is_empty(),
+            "无 shows no rows"
         );
     }
 
     #[test]
-    fn repeated_identical_statements_collapse_into_an_n_plus_one_row() {
-        let (_host, _guard) = test_host();
+    fn slow_only_keeps_rows_at_or_above_the_threshold() {
+        let text = "\
+1723456789012|999|statement|SELECT * FROM a
+1723456789013|1000|statement|SELECT * FROM b
+1723456789014|1200|statement|SELECT * FROM c
+";
+        let rows = build_rows(&analysis_of(text), true, 1000.0);
+        assert_eq!(rows.len(), 3, "the p6spy rows parse: {rows:?}");
+        let filter = Filter {
+            slow_only: true,
+            ..Filter::default()
+        };
+        let kept = filter_rows(&rows, &filter, 1000.0);
+        // Exactly the 1000 ms and 1200 ms rows survive; 999 ms is out.
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        assert!(
+            kept.iter()
+                .all(|row| row.duration_ms.is_some_and(|ms| ms >= 1000.0))
+        );
+    }
+
+    #[test]
+    fn keyword_case_insensitive_by_default_and_sensitive_when_asked() {
+        let text = "\
+==>  Preparing: SELECT Name FROM user
+==> Parameters: 1(Long)
+";
+        let rows = rows_of(text);
+        let mut filter = Filter::default();
+        filter.keyword = "name".to_string();
+        assert_eq!(filter_rows(&rows, &filter, 1000.0).len(), 1);
+        filter.keyword = "NAME".to_string();
+        assert_eq!(filter_rows(&rows, &filter, 1000.0).len(), 1);
+
+        filter.match_case = true;
+        filter.keyword = "NAME".to_string();
+        assert_eq!(
+            filter_rows(&rows, &filter, 1000.0).len(),
+            0,
+            "case-sensitive NAME does not match Name"
+        );
+        filter.keyword = "Name".to_string();
+        assert_eq!(filter_rows(&rows, &filter, 1000.0).len(), 1);
+    }
+
+    #[test]
+    fn regex_filter_matches_and_invalid_regex_is_safe() {
+        let text = "\
+==>  Preparing: SELECT id FROM orders WHERE id = ?
+==> Parameters: 42(Long)
+";
+        let rows = rows_of(text);
+        let mut filter = Filter::default();
+        filter.regex = true;
+        filter.keyword = "ord.rs".to_string();
+        assert_eq!(filter_rows(&rows, &filter, 1000.0).len(), 1);
+
+        filter.keyword = "(".to_string();
+        // Must not panic on an invalid pattern.
+        assert_eq!(filter_rows(&rows, &filter, 1000.0).len(), 0);
+        assert!(regex_is_invalid(&filter));
+    }
+
+    #[test]
+    fn row_matches_combines_type_slow_and_keyword() {
+        let rows = rows_of(MIXED_LOG);
+        let select = rows
+            .iter()
+            .find(|row| row.sql_type == SqlType::Select)
+            .unwrap();
+        let filter = Filter {
+            types: TypeFilter::Only([SqlType::Select].into_iter().collect()),
+            keyword: "users".to_string(),
+            ..Filter::default()
+        };
+        assert!(row_matches(select, &filter, 1000.0));
+        let delete_only = Filter {
+            types: TypeFilter::Only([SqlType::Delete].into_iter().collect()),
+            keyword: "users".to_string(),
+            ..Filter::default()
+        };
+        assert!(!row_matches(select, &delete_only, 1000.0));
+    }
+
+    // State push ----------------------------------------------------------
+
+    fn state_of(host: &MockHost) -> Value {
+        let messages = host.view_messages();
+        let last = messages.last().expect("a state message").clone();
+        serde_json::from_str(&last.1).expect("state is JSON")
+    }
+
+    #[test]
+    fn ready_message_pushes_rows_and_labels_without_html() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["op"], "state");
+        let rows = state["rows"].as_array().expect("rows array");
+        assert!(!rows.is_empty());
+        assert!(state["labels"]["empty"].as_str().is_some());
+        // No pre-rendered HTML leaks into the state.
+        let raw = state.to_string();
+        assert!(!raw.contains("<div"), "no html markup in state");
+        assert!(!raw.contains("<tr"), "no html markup in state");
+    }
+
+    #[test]
+    fn filter_message_narrows_the_pushed_rows() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(
+            &host,
+            "{\"op\":\"filter\",\"types\":[\"select\"],\"types_mode\":\"only\",\"keyword\":\"\"}",
+        )
+        .unwrap();
+        assert!(matches!(store().filter.types, TypeFilter::Only(_)));
+        let state = state_of(&host);
+        assert_eq!(state["filter"]["types_mode"], "only");
+        let rows = state["rows"].as_array().unwrap();
+        assert!(
+            rows.iter().all(|row| row["sql_type"] == "select"),
+            "{rows:?}"
+        );
+    }
+
+    #[test]
+    fn toggle_pause_message_flips_state() {
+        let (host, _guard) = test_host();
+        handle_panel_message(&host, "{\"op\":\"toggle-pause\"}").unwrap();
+        assert!(store().paused);
+        assert!(host.refreshed_views().contains(&VIEW_ID.to_string()));
+        handle_panel_message(&host, "{\"op\":\"toggle-pause\"}").unwrap();
+        assert!(!store().paused);
+    }
+
+    #[test]
+    fn clear_message_empties_the_buffer() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(&host, "{\"op\":\"clear\"}").unwrap();
+        assert_eq!(buffered_len(), 0);
+        let state = state_of(&host);
+        assert!(state["rows"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn copy_line_message_copies_the_statement() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        let line = snapshot()
+            .entries
+            .iter()
+            .find(|entry| entry.has_sql())
+            .unwrap()
+            .line_no;
+        handle_panel_message(&host, &format!("{{\"op\":\"copy-line\",\"line\":{line}}}")).unwrap();
+        assert!(host.clipboard().is_some_and(|text| !text.is_empty()));
+    }
+
+    #[test]
+    fn export_message_writes_the_visible_rows_to_output() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(&host, "{\"op\":\"export\"}").unwrap();
+        let out = &host.output()[common::CHANNEL];
+        assert!(out.contains("SELECT") || out.contains("DELETE"), "{out}");
+    }
+
+    #[test]
+    fn open_line_message_reveals_the_workbench() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        let line = snapshot()
+            .entries
+            .iter()
+            .find(|entry| entry.has_sql())
+            .unwrap()
+            .line_no;
+        handle_panel_message(&host, &format!("{{\"op\":\"open-line\",\"line\":{line}}}")).unwrap();
+        assert!(
+            host.revealed_views()
+                .iter()
+                .any(|view| view == crate::views::workbench::VIEW_ID),
+            "double-click opens the workbench"
+        );
+    }
+
+    #[test]
+    fn buffer_cap_truncates_rows_but_keeps_the_total() {
+        let (host, _guard) = test_host();
+        host.set_setting("logs.pageSize", "2");
         let mut text = String::new();
-        for _ in 0..5 {
-            text.push_str(
-                "==>  Preparing: SELECT * FROM t WHERE id = ?\n==> Parameters: 1(Integer)\n",
-            );
+        for index in 0..10 {
+            text.push_str(&format!(
+                "==>  Preparing: SELECT c{index} FROM t\n==> Parameters: {index}(Integer)\n"
+            ));
         }
         set_log_text(&text);
-        let html = html_of(&render_panel(None));
-        assert_eq!(row_count(&html), 1);
-        assert!(html.contains("N+1 ×5"));
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["rows"].as_array().unwrap().len(), 2, "capped to 2");
+        assert_eq!(state["counts"]["total"], 10);
+        assert_eq!(state["counts"]["truncated"], true);
     }
 
     #[test]
-    fn error_rows_are_highlighted_and_keep_their_raw_text() {
-        let (_host, _guard) = test_host();
-        set_log_text("java.sql.SQLException: Table 'demo.user' doesn't exist");
-        let html = html_of(&render_panel(None));
-        assert!(
-            html.contains("row-error"),
-            "error rows get the highlight class"
-        );
-        assert!(html.contains("SQLException"), "the raw line is shown");
-        assert!(html.contains("doesn&#39;t"), "raw text is html-escaped");
-    }
-
-    // Filtering ------------------------------------------------------------
-
-    #[test]
-    fn filters_narrow_by_category_and_keyword() {
-        let (_host, _guard) = test_host();
-        set_log_text(
-            "==>  Preparing: SELECT * FROM user WHERE name = ?\n==> Parameters: alice(String)\n\
-             java.sql.SQLException: Table 'demo.user' doesn't exist",
-        );
-        set_filter(Some(RowCategory::Error), "");
-        let html = html_of(&render_panel(None));
-        assert_eq!(row_count(&html), 1);
-        assert!(html.contains("SQLException"));
-
-        set_filter(None, "alice");
-        let html = html_of(&render_panel(None));
-        assert_eq!(row_count(&html), 1);
-        assert!(html.contains("SELECT * FROM user"));
-    }
-
-    #[test]
-    fn keyword_box_applies_on_input_enter_and_restores_focus() {
-        let (_host, _guard) = test_host();
-        let html = html_of(&render_panel(None));
-        assert!(
-            html.contains("addEventListener('input'"),
-            "typing in the keyword box applies without waiting for blur"
-        );
-        assert!(html.contains("keydown"), "Enter applies immediately");
-        assert!(
-            html.contains("setTimeout") && html.contains("clearTimeout"),
-            "typing is debounced so every keystroke does not refresh"
-        );
-        assert!(
-            html.contains("kw.focus()"),
-            "focus returns to the keyword box after the re-render"
-        );
-        assert!(
-            html.contains("setSelectionRange"),
-            "the caret is put back at the end of the keyword"
-        );
-        assert!(
-            html.contains("cat.addEventListener('change'"),
-            "the category dropdown still applies on change"
-        );
-        assert!(
-            !html.contains("cat.addEventListener('input'"),
-            "the category dropdown is not debounced"
-        );
-    }
-
-    #[test]
-    fn set_filter_message_narrows_the_panel_rows() {
-        let (_host, _guard) = test_host();
-        set_log_text(
-            "==>  Preparing: SELECT * FROM users WHERE id = ?\n==> Parameters: 1(Long)\n\
-             ==>  Preparing: SELECT * FROM orders WHERE id = ?\n==> Parameters: 2(Long)\n",
-        );
-        let rows = build_rows(&snapshot(), true, &BTreeSet::new(), 1_000.0);
-        let before = paginate(&rows, &store().filter.clone(), None);
-        assert_eq!(before.total, 2, "the fixture holds both statements");
-
-        handle_panel_event(ViewEvent::Message(
-            r#"{"op":"set-filter","category":null,"keyword":"orders"}"#.to_string(),
-        ))
-        .unwrap();
-
-        let filter = store().filter.clone();
-        assert_eq!(filter.keyword, "orders");
-        let after = paginate(&rows, &filter, None);
-        assert_eq!(after.total, 1, "only the matching statement is kept");
-        assert!(after.rows[0].searchable().contains("orders"));
+    fn render_pushes_state_unless_paused() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        let _ = render_panel();
+        assert_eq!(host.view_messages().len(), 1, "render pushes the state");
+        set_paused(true);
+        let view = render_panel();
         assert_eq!(
-            row_count(html_of(&render_panel(None))),
+            host.view_messages().len(),
             1,
-            "the rendered page is narrowed too"
+            "render does not push while paused"
+        );
+        assert!(
+            view.status.is_some(),
+            "the paused state shows in the status"
         );
     }
 
-    // Utilities ------------------------------------------------------------
+    // Helpers -------------------------------------------------------------
+
+    fn handle_panel_message(host: &MockHost, message: &str) -> Result<(), Error> {
+        handle_panel_event(ViewEvent::Message(message.to_string()), &host.invocation())
+    }
+
+    // Utilities -----------------------------------------------------------
 
     #[test]
     fn epoch_timestamps_render_as_utc() {
@@ -1286,24 +1485,6 @@ mod tests {
             format_epoch_ms(1_705_314_645_123),
             "2024-01-15 10:30:45.123"
         );
-    }
-
-    #[test]
-    fn paginate_clamps_out_of_range_viewports() {
-        let (_host, _guard) = test_host();
-        set_log_text(&big_log(10));
-        let rows = build_rows(&snapshot(), true, &BTreeSet::new(), 1_000.0);
-        let page = paginate(
-            &rows,
-            &Filter::default(),
-            Some(Viewport {
-                first_row: 50,
-                rows: 10,
-            }),
-        );
-        assert_eq!(page.total, 10);
-        assert_eq!(page.first, 10);
-        assert!(page.rows.is_empty());
     }
 
     #[test]

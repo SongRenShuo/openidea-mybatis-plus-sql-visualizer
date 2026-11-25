@@ -38,3 +38,12 @@ This product includes software developed by other projects.
    https://github.com/microsoft/mssql-jdbc
 
    Project: https://github.com/OW2/asm
+
+5. regex 1.x (MIT OR Apache-2.0)
+
+   Linked into the wasm plugin to power the SQL log panel's `.*` regular
+   expression search toggle (case-insensitive matching, `\b`/`\d`/`\w`). Built
+   with the `std` and `unicode` features only (no performance DFA tables). A
+   copy of the Apache-2.0 text is in LICENSE.
+
+   Project: https://github.com/rust-lang/regex
