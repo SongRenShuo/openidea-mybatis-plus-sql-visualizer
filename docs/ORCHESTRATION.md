@@ -175,6 +175,7 @@ name = "version"    # 许可：Apache-2.0；理由：一句
 | 车道「顺手」改共享文件 | 报告要求 `git status --short` 只含自己目录 |
 | 合并后测试红但各车道单独绿 | 多半是注册冲突或常量重复；先在 master 复跑定位，再回车道修 |
 | 忘删 worktree 导致磁盘涨 | 合并即 remove；`target/` 不共享硬链 |
+| 测试在 Windows 绿、Linux 红 | `MockHost` 是线程局部的：每个用例自己 `install()`，不依赖同线程前一个用例的残留；`#[path]` 不放进内联模块（基准目录可能不存在，Linux 拒绝规范化而 Windows 容忍） |
 
 ## 7 已铺好的基线（2026-11-25）
 
