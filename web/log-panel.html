@@ -311,23 +311,17 @@
       min-height: 0; min-width: 0;
     }
 
-    /* Shared body of the three auxiliary tabs */
+    /* Tab body of the history tab; the two input tabs (L33) use the split
+       layout further down. */
     .tabbody {
       flex: 1 1 auto; overflow: auto; padding: 8px;
       display: flex; flex-direction: column; gap: 6px; min-height: 0;
     }
-    .caption { font-size: 11px; color: var(--openidea-fg-muted); margin-top: 2px; }
     .code {
       margin: 0; padding: 6px; border-radius: 3px;
       background: var(--openidea-bg-input); border: 1px solid var(--openidea-border);
       color: var(--openidea-fg); font-family: var(--openidea-font-mono, monospace);
       white-space: pre-wrap; word-break: break-word; font-size: 12px;
-    }
-    .codeinput {
-      flex: 0 0 auto; min-height: 104px; resize: vertical;
-      background: var(--openidea-bg-input); color: var(--openidea-fg);
-      border: 1px solid var(--openidea-border); border-radius: 3px;
-      padding: 4px 6px; font-family: var(--openidea-font-mono, monospace); font-size: 12px;
     }
     .tabactions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .tabactions .spacer { margin-left: auto; }
@@ -336,8 +330,6 @@
       color: var(--openidea-fg-muted); padding: 16px 8px; text-align: center;
     }
     .btn[disabled] { opacity: 0.5; cursor: default; }
-    .badge.warn { background: var(--openidea-bg-selected); color: var(--openidea-danger); }
-    .entity { flex: 0 1 180px; }
     .histlist { flex: 1 1 auto; overflow: auto; min-height: 0; }
     .histrow {
       border-bottom: 1px solid var(--openidea-border); padding: 4px 8px;
@@ -345,6 +337,59 @@
     }
     .histrow:hover { background: var(--openidea-bg-hover); }
     .histrow .sql { margin-top: 2px; }
+
+    /* L33: the two input tabs — a vertical editor split (input on top, result
+       below), a toolbar per pane and one status line under both. Everything is
+       scoped to the two panels so the log list's own rules stay untouched. */
+    #panelLogToSql, #panelSqlToJava {
+      display: flex; flex-direction: column; flex: 1 1 auto;
+      min-height: 0; min-width: 0;
+    }
+    #panelLogToSql .editorpane, #panelSqlToJava .editorpane {
+      display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+    }
+    #panelLogToSql .editorpane.p-top, #panelSqlToJava .editorpane.p-top { flex: 0 0 42%; }
+    #panelLogToSql .editorpane.p-bottom, #panelSqlToJava .editorpane.p-bottom { flex: 1 1 auto; }
+    #panelLogToSql .editorbar, #panelSqlToJava .editorbar {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px 4px;
+    }
+    #panelLogToSql .tabhint, #panelSqlToJava .tabhint {
+      padding: 0 8px 4px; color: var(--openidea-fg-muted); font-size: 11px;
+    }
+    #panelLogToSql .editorarea, #panelSqlToJava .editorarea {
+      flex: 1 1 auto; min-height: 0; margin: 0 8px 8px; padding: 6px 8px; resize: none;
+      color: var(--openidea-fg); background: var(--openidea-bg-input);
+      border: 1px solid var(--openidea-border); border-radius: 3px;
+      font: var(--openidea-font-size, 13px)/1.5 var(--openidea-font-mono, monospace);
+      white-space: pre; overflow: auto;
+    }
+    #panelLogToSql .editorsplit, #panelSqlToJava .editorsplit {
+      flex: 0 0 6px; cursor: row-resize; background: var(--openidea-border); opacity: 0.6;
+    }
+    #panelLogToSql .editorsplit:hover, #panelLogToSql .editorsplit.dragging,
+    #panelSqlToJava .editorsplit:hover, #panelSqlToJava .editorsplit.dragging {
+      background: var(--openidea-accent); opacity: 1;
+    }
+    #panelLogToSql .statusline, #panelSqlToJava .statusline {
+      flex: 0 0 auto; padding: 4px 8px; border-top: 1px solid var(--openidea-border);
+      color: var(--openidea-fg-muted); font-size: 11px; white-space: pre-wrap;
+    }
+    #panelLogToSql .statusline.error, #panelSqlToJava .statusline.error {
+      color: var(--openidea-danger);
+    }
+    #panelSqlToJava .optionsrow {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 8px 6px;
+    }
+    #panelSqlToJava .optionsrow label {
+      color: var(--openidea-fg-muted); font-size: 11px;
+    }
+    #panelSqlToJava .optselect, #panelSqlToJava .optinput {
+      background: var(--openidea-bg-input); color: var(--openidea-fg);
+      border: 1px solid var(--openidea-border); border-radius: 3px;
+      padding: 2px 4px; font-size: 12px;
+    }
+    #panelSqlToJava .optselect { flex: 0 0 auto; }
+    #panelSqlToJava .optinput { flex: 0 1 120px; min-width: 70px; }
 
     /* Fifth tab: the preview workbench (L23). Everything is scoped to
        #panelPreview so the log list's own .meta / .badge / .status rules keep
@@ -616,43 +661,71 @@
   </div>
   </div>
 
-  <!-- 日志 → SQL -->
+  <!-- 日志 → SQL (lane L33): the tab's own input pane on top, the restored SQL
+       below, a status line under both. Independent of the log list's
+       selection — it converts whatever is pasted into the top pane. -->
   <div class="panel" id="panelLogToSql" hidden>
-    <div class="tabbody">
-      <div class="tabactions">
-        <button id="l2sCopyBtn" class="btn" type="button"></button>
-        <button id="l2sSendBtn" class="btn" type="button"></button>
-        <span class="spacer"></span>
-        <span id="l2sConfidence" class="badge" hidden></span>
+    <div class="editorpane p-top">
+      <div class="editorbar">
+        <button id="l2sConvert" class="btn" type="button"></button>
+        <button id="l2sReadClipboard" class="btn" type="button"></button>
+        <button id="l2sClearInput" class="btn" type="button"></button>
       </div>
-      <div class="caption" id="l2sRawCaption"></div>
-      <pre class="code" id="l2sRaw"></pre>
-      <div class="caption" id="l2sParamsCaption"></div>
-      <pre class="code" id="l2sParams"></pre>
-      <div class="caption" id="l2sRestoredCaption"></div>
-      <pre class="code" id="l2sRestored"></pre>
-      <div id="l2sEmpty" class="tabempty" hidden></div>
+      <div class="tabhint" id="l2sInputHint"></div>
+      <textarea id="l2sInput" class="editorarea" spellcheck="false" autocomplete="off" wrap="off"></textarea>
     </div>
+    <div class="editorsplit" id="l2sSplitter" role="separator" aria-orientation="horizontal"
+         tabindex="0"></div>
+    <div class="editorpane p-bottom">
+      <div class="editorbar">
+        <button id="l2sCopy" class="btn" type="button"></button>
+        <button id="l2sToggleFormat" class="btn" type="button"></button>
+        <button id="l2sClearResult" class="btn" type="button"></button>
+      </div>
+      <div class="tabhint" id="l2sResultHint"></div>
+      <textarea id="l2sOutput" class="editorarea" spellcheck="false" autocomplete="off" wrap="off"></textarea>
+    </div>
+    <div class="statusline" id="l2sStatus"></div>
   </div>
 
-  <!-- SQL → Java -->
+  <!-- SQL → Java (lane L33 / reference SqlToJavaPanel.kt:87-123): SQL input on
+       top, generated Java below, the option row a separate row inside the top
+       pane, and a status line under both. -->
   <div class="panel" id="panelSqlToJava" hidden>
-    <div class="tabbody">
-      <div class="caption" id="s2jInputCaption"></div>
-      <textarea id="s2jInput" class="codeinput" spellcheck="false" autocomplete="off"></textarea>
-      <div class="tabactions">
-        <input id="s2jEntity" class="kw entity" type="text" autocomplete="off" spellcheck="false">
-        <button id="s2jRunBtn" class="btn" type="button"></button>
-        <button id="s2jCopyBtn" class="btn" type="button"></button>
-        <span class="spacer"></span>
-        <span id="s2jConfidence" class="badge" hidden></span>
+    <div class="editorpane p-top">
+      <div class="editorbar">
+        <button id="s2jConvert" class="btn" type="button"></button>
+        <button id="s2jFormatSql" class="btn" type="button"></button>
+        <button id="s2jClearInput" class="btn" type="button"></button>
       </div>
-      <div id="s2jReason" class="danger" hidden></div>
-      <div class="caption" id="s2jParams"></div>
-      <div class="caption" id="s2jOutputCaption" hidden></div>
-      <pre class="code" id="s2jOutput" hidden></pre>
-      <div id="s2jEmpty" class="tabempty" hidden></div>
+      <div class="optionsrow">
+        <label id="s2jFormatLabel" for="s2jFormatMode"></label>
+        <select id="s2jFormatMode" class="optselect">
+          <option value="lambda"></option>
+          <option value="stringColumns"></option>
+        </select>
+        <label id="s2jEntityLabel" for="s2jEntity"></label>
+        <input id="s2jEntity" class="optinput" type="text" autocomplete="off" spellcheck="false">
+        <label id="s2jCallerLabel" for="s2jCaller"></label>
+        <input id="s2jCaller" class="optinput" type="text" autocomplete="off" spellcheck="false">
+        <label id="s2jReturnLabel" for="s2jReturnType"></label>
+        <input id="s2jReturnType" class="optinput" type="text" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="tabhint" id="s2jOptionHint" hidden></div>
+      <div class="tabhint" id="s2jInputHint"></div>
+      <textarea id="s2jInput" class="editorarea" spellcheck="false" autocomplete="off" wrap="off"></textarea>
     </div>
+    <div class="editorsplit" id="s2jSplitter" role="separator" aria-orientation="horizontal"
+         tabindex="0"></div>
+    <div class="editorpane p-bottom">
+      <div class="editorbar">
+        <button id="s2jCopy" class="btn" type="button"></button>
+        <button id="s2jClearResult" class="btn" type="button"></button>
+      </div>
+      <div class="tabhint" id="s2jResultHint"></div>
+      <textarea id="s2jOutput" class="editorarea" spellcheck="false" autocomplete="off" wrap="off"></textarea>
+    </div>
+    <div class="statusline" id="s2jStatus"></div>
   </div>
 
   <!-- SQL 历史 -->
@@ -787,8 +860,6 @@
         preview: 'panelPreview'
       };
       var activeTab = 'logs';
-      // Line the "Log → SQL" tab shows (null = nothing to restore yet).
-      var logToSqlLine = null;
       // Signature of the rendered log rows: a state push that does not change
       // them must not rebuild the list (scroll and selection survive).
       var rowsSig = null;
@@ -1045,18 +1116,31 @@
           // name one hover away (the IDE does the same for squeezed tabs).
           btn.title = titles[TAB_IDS[i]];
         }
-        setText($('l2sRawCaption'), L.tabLogToSqlRaw);
-        setText($('l2sParamsCaption'), L.tabLogToSqlParams);
-        setText($('l2sRestoredCaption'), L.tabLogToSqlRestored);
-        setText($('l2sCopyBtn'), L.tabLogToSqlCopy);
-        setText($('l2sSendBtn'), L.tabLogToSqlSend);
-        setText($('s2jInputCaption'), L.tabSqlToJavaInput);
-        $('s2jInput').placeholder = L.tabSqlToJavaInput || '';
-        $('s2jEntity').placeholder = L.tabSqlToJavaEntity || '';
-        $('s2jEntity').title = L.tabSqlToJavaEntity || '';
-        setText($('s2jRunBtn'), L.tabSqlToJavaRun);
-        setText($('s2jCopyBtn'), L.tabSqlToJavaCopy);
-        setText($('s2jOutputCaption'), L.tabSqlToJavaOutput);
+        setText($('l2sConvert'), L.tabLogToSqlConvert);
+        setText($('l2sReadClipboard'), L.tabLogToSqlReadClipboard);
+        setText($('l2sClearInput'), L.tabLogToSqlClearInput);
+        setText($('l2sInputHint'), L.tabLogToSqlHintInput);
+        setText($('l2sResultHint'), L.tabLogToSqlHintResult);
+        setText($('l2sCopy'), L.tabLogToSqlCopy);
+        setText($('l2sToggleFormat'), L.tabLogToSqlToggleFormat);
+        setText($('l2sClearResult'), L.tabLogToSqlClearResult);
+        setText($('s2jConvert'), L.tabSqlToJavaConvert);
+        setText($('s2jFormatSql'), L.tabSqlToJavaFormat);
+        setText($('s2jClearInput'), L.tabSqlToJavaClearInput);
+        setText($('s2jInputHint'), L.tabSqlToJavaHintInput);
+        setText($('s2jResultHint'), L.tabSqlToJavaHintResult);
+        setText($('s2jCopy'), L.tabSqlToJavaCopy);
+        setText($('s2jClearResult'), L.tabSqlToJavaClearResult);
+        setText($('s2jFormatLabel'), L.tabSqlToJavaFormatLabel);
+        $('s2jFormatMode').options[0].textContent = L.tabSqlToJavaFormatLambda || '';
+        $('s2jFormatMode').options[1].textContent = L.tabSqlToJavaFormatString || '';
+        setText($('s2jEntityLabel'), L.tabSqlToJavaEntityLabel);
+        $('s2jEntity').placeholder = L.tabSqlToJavaEntityHint || '';
+        $('s2jEntity').title = L.tabSqlToJavaEntityHint || '';
+        setText($('s2jCallerLabel'), L.tabSqlToJavaCallerLabel);
+        $('s2jCaller').placeholder = L.tabSqlToJavaCallerHint || '';
+        setText($('s2jReturnLabel'), L.tabSqlToJavaReturnLabel);
+        $('s2jReturnType').placeholder = L.tabSqlToJavaReturnHint || '';
         $('histKw').placeholder = L.tabHistoryKeyword || '';
         setText($('histSearchBtn'), L.tabHistorySearch);
       }
@@ -1314,17 +1398,14 @@
       }
 
       function selectLine(line) {
-        var changed = selectedLine !== line;
         selectedLine = line;
         var rows = $('list').querySelectorAll('.row');
         for (var i = 0; i < rows.length; i++) {
           if (rows[i].getAttribute('data-line') === String(line)) { rows[i].classList.add('sel'); }
           else { rows[i].classList.remove('sel'); }
         }
-        // Only a real change asks the host for the "Log → SQL" payload; the
-        // reply re-pushes state, but the row signature is unchanged so the list
-        // (and its scroll position) is left alone.
-        if (changed && line != null) { post({ op: 'log-to-sql', line: line }); }
+        // The two input tabs are standalone panes (L33): selecting a row no
+        // longer feeds them, so no state round-trip is asked for here.
       }
 
       // Lane L26: at the bottom means `scrollTop + clientHeight >= scrollHeight
@@ -1485,68 +1566,114 @@
         return parts.join('|');
       }
 
-      function confidenceLabel(value) {
-        if (value === 'exact') { return L.tabConfidenceExact || ''; }
-        if (value === 'partial') { return L.tabConfidencePartial || ''; }
-        if (value === 'unresolved') { return L.tabConfidenceUnresolved || ''; }
-        return '';
+      // "Log → SQL" (L33) ---------------------------------------------------
+      // The tab's own input pane converts whatever is pasted there; the host
+      // keeps the converted output and the status line. `l2sMulti` is the
+      // multi-line output the host pushed; the compact form is derived here,
+      // because 压缩↔多行 is a display switch and never asks the host.
+      var l2sOutputSig = null;
+      var l2sMulti = '';
+      var l2sCompact = false;
+
+      // Collapse the formatter's line breaks, keeping `-- SQL #N` group
+      // headers on their own lines. The host's output and the compact form
+      // differ only in whitespace between tokens.
+      function compactSql(text) {
+        var out = [];
+        var current = '';
+        var lines = (text || '').split('\n');
+        for (var i = 0; i < lines.length; i++) {
+          var trimmed = lines[i].trim();
+          if (trimmed === '') {
+            if (current) { out.push(current); current = ''; }
+            // Keep one blank line between groups (the host joins them with
+            // two newlines, the reference keeps that gap in compact form too).
+            if (out.length && out[out.length - 1] !== '') { out.push(''); }
+            continue;
+          }
+          if (trimmed.indexOf('--') === 0) {
+            if (current) { out.push(current); current = ''; }
+            out.push(trimmed);
+            continue;
+          }
+          current = current ? (current + ' ' + trimmed) : trimmed;
+        }
+        if (current) { out.push(current); }
+        return out.join('\n');
       }
 
-      function confidenceText(value) {
-        var label = confidenceLabel(value);
-        if (!label) { return ''; }
-        return ((L.tabConfidencePrefix || '') + ' ' + label).replace(/\s+/g, ' ').trim();
+      function renderLogOutput() {
+        $('l2sOutput').value = l2sCompact ? compactSql(l2sMulti) : l2sMulti;
+        $('l2sCopy').disabled = !$('l2sOutput').value;
       }
 
-      function showConfidence(node, value) {
-        var text = confidenceText(value);
-        node.hidden = !text;
-        setText(node, text);
-        node.classList.toggle('warn', value === 'unresolved');
-      }
-
-      // "Log → SQL" ---------------------------------------------------------
       function applyLogToSql(tab) {
         tab = tab || {};
-        var empty = !!tab.empty;
-        logToSqlLine = (tab.line == null) ? null : tab.line;
-        $('l2sRaw').hidden = empty;
-        $('l2sParams').hidden = empty;
-        $('l2sRestored').hidden = empty;
-        $('l2sRawCaption').hidden = empty;
-        $('l2sParamsCaption').hidden = empty;
-        $('l2sRestoredCaption').hidden = empty;
-        setText($('l2sRaw'), empty ? '' : (tab.rawSql || ''));
-        var params = (!empty && tab.params) ? tab.params : [];
-        setText($('l2sParams'), params.length ? params.join(', ') : '-');
-        setText($('l2sRestored'), empty ? '' : (tab.restored || ''));
-        $('l2sEmpty').hidden = !empty;
-        setText($('l2sEmpty'), L.tabLogToSqlEmpty || '');
-        $('l2sCopyBtn').disabled = empty;
-        $('l2sSendBtn').disabled = empty;
-        showConfidence($('l2sConfidence'), empty ? '' : (tab.confidence || ''));
+        var output = tab.output || '';
+        // Only a new conversion rewrites the result pane: a state push from
+        // the capture lane must not throw away edits the user made.
+        if (output !== l2sOutputSig) {
+          l2sOutputSig = output;
+          l2sMulti = output;
+          renderLogOutput();
+        }
+        if (tab.replaceInput) { $('l2sInput').value = tab.input || ''; }
+        var status = tab.status || '';
+        var node = $('l2sStatus');
+        setText(node, status);
+        node.hidden = !status;
+        node.classList.toggle('error', tab.statusKind === 'error');
       }
 
-      // "SQL → Java" --------------------------------------------------------
+      // "SQL → Java" (L33) --------------------------------------------------
+      var s2jCodeSig = null;
+      var s2jOptionsSig = null;
+
+      function setOptionField(id, value) {
+        var node = $(id);
+        if (!node || document.activeElement === node) { return; }
+        var next = value || '';
+        if (node.value !== next) { node.value = next; }
+      }
+
+      // A non-default option cannot change the code this build generates, so
+      // the row states that once, next to itself, instead of a dead control.
+      function updateSqlToJavaOptionHint() {
+        var custom = $('s2jFormatMode').value !== 'lambda' ||
+          $('s2jCaller').value.trim() !== '' ||
+          $('s2jReturnType').value.trim() !== '';
+        var node = $('s2jOptionHint');
+        node.hidden = !custom;
+        setText(node, custom ? (L.tabSqlToJavaFixedLambda || '') : '');
+      }
+
       function applySqlToJava(tab) {
         tab = tab || {};
-        var ran = !!tab.ran;
         var code = tab.code || '';
-        var reason = tab.reason || '';
-        $('s2jOutput').hidden = !code;
-        $('s2jOutputCaption').hidden = !code;
-        setText($('s2jOutput'), code);
-        $('s2jReason').hidden = !(reason && !code);
-        setText($('s2jReason'), (reason && !code) ?
-          ((L.tabSqlToJavaReason || '') + ': ' + reason) : '');
-        var params = tab.params || [];
-        $('s2jParams').hidden = params.length === 0;
-        setText($('s2jParams'), params.length ?
-          ((L.tabSqlToJavaParams || '') + ': ' + params.join(', ')) : '');
-        $('s2jEmpty').hidden = ran;
-        setText($('s2jEmpty'), L.tabSqlToJavaEmpty || '');
-        $('s2jCopyBtn').disabled = !code;
-        showConfidence($('s2jConfidence'), tab.confidence || '');
+        if (code !== s2jCodeSig) {
+          s2jCodeSig = code;
+          $('s2jOutput').value = code;
+        }
+        $('s2jCopy').disabled = !$('s2jOutput').value;
+        if (tab.replaceInput) { $('s2jInput').value = tab.input || ''; }
+        var options = tab.options || {};
+        var sig = [options.format || '', options.entity || '', options.caller || '',
+          options.returnType || ''].join('\u0000');
+        if (sig !== s2jOptionsSig) {
+          s2jOptionsSig = sig;
+          if (document.activeElement !== $('s2jFormatMode')) {
+            $('s2jFormatMode').value = options.format === 'stringColumns' ? 'stringColumns' : 'lambda';
+          }
+          setOptionField('s2jEntity', options.entity);
+          setOptionField('s2jCaller', options.caller);
+          setOptionField('s2jReturnType', options.returnType);
+        }
+        updateSqlToJavaOptionHint();
+        var status = tab.status || '';
+        var node = $('s2jStatus');
+        setText(node, status);
+        node.hidden = !status;
+        node.classList.toggle('error', tab.statusKind === 'error');
       }
 
       // "SQL history" -------------------------------------------------------
@@ -1877,11 +2004,23 @@
         // in the state until the page reports the tab it shows (the `tab`
         // message below does exactly that).
         if (state.selectTab) { selectTab(state.selectTab, true); }
-        // "发送到 …" (L32): the tab that received the row comes forward. The
-        // text rides along as `state.sendToTab.text`; filling the input pane is
-        // the tab's own work, so the page only reports the switch here.
-        if (state.sendToTab && state.sendToTab.selectTab) {
-          selectTab(state.sendToTab.tab, true);
+        // "发送到 …" (L32/L33): prefill the target tab's input pane, bring that tab
+        // forward, and report the hand-off as consumed (`tab`). A hand-off
+        // without `selectTab` still pre-fills and still reports, so it is
+        // consumed exactly once (the host drops it on `tab`).
+        if (state.sendToTab) {
+          var send = state.sendToTab;
+          var sendText = send.text || '';
+          if (send.tab === 'logToSql') {
+            if (sendText) { $('l2sInput').value = sendText; }
+          } else if (send.tab === 'sqlToJava') {
+            if (sendText) { $('s2jInput').value = sendText; }
+          }
+          if (send.selectTab) {
+            selectTab(send.tab, true);
+          } else {
+            post({ op: 'tab', tab: send.tab });
+          }
         }
       }
 
@@ -1969,16 +2108,117 @@
           }
         })(TAB_IDS[tabIndex]);
       }
-      $('l2sCopyBtn').addEventListener('click', function () {
-        if (logToSqlLine != null) { post({ op: 'copy-line', line: logToSqlLine }); }
+      // "日志 → SQL" (L33): each button is one op; the result pane's copy sends the
+      // text the user sees (it is editable), not a host-side draft.
+      $('l2sConvert').addEventListener('click', function () {
+        post({ op: 'log-to-sql-convert', text: $('l2sInput').value });
       });
-      $('l2sSendBtn').addEventListener('click', function () {
-        if (logToSqlLine != null) { post({ op: 'open-line', line: logToSqlLine }); }
+      $('l2sReadClipboard').addEventListener('click', function () {
+        post({ op: 'log-to-sql-read-clipboard' });
       });
-      $('s2jRunBtn').addEventListener('click', function () {
-        post({ op: 'sql-to-java', text: $('s2jInput').value, entity: $('s2jEntity').value });
+      $('l2sClearInput').addEventListener('click', function () {
+        $('l2sInput').value = '';
       });
-      $('s2jCopyBtn').addEventListener('click', function () { post({ op: 'copy-code' }); });
+      $('l2sCopy').addEventListener('click', function () {
+        var text = $('l2sOutput').value;
+        if (text) { post({ op: 'copy-text', tab: 'logToSql', text: text }); }
+      });
+      // 压缩↔多行: a pure display switch, both forms come from the pushed
+      // output — no host round-trip.
+      $('l2sToggleFormat').addEventListener('click', function () {
+        l2sCompact = !l2sCompact;
+        renderLogOutput();
+      });
+      $('l2sClearResult').addEventListener('click', function () {
+        post({ op: 'log-to-sql-clear' });
+      });
+
+      // "SQL → Java" (L33).
+      function postSqlToJavaConvert() {
+        post({
+          op: 'sql-to-java-convert',
+          text: $('s2jInput').value,
+          format: $('s2jFormatMode').value,
+          entity: $('s2jEntity').value,
+          caller: $('s2jCaller').value,
+          returnType: $('s2jReturnType').value
+        });
+      }
+      $('s2jConvert').addEventListener('click', postSqlToJavaConvert);
+      $('s2jFormatSql').addEventListener('click', function () {
+        post({ op: 'sql-to-java-format', text: $('s2jInput').value });
+      });
+      $('s2jClearInput').addEventListener('click', function () {
+        $('s2jInput').value = '';
+      });
+      $('s2jCopy').addEventListener('click', function () {
+        var code = $('s2jOutput').value;
+        if (code) { post({ op: 'copy-text', tab: 'sqlToJava', text: code }); }
+      });
+      $('s2jClearResult').addEventListener('click', function () {
+        post({ op: 'sql-to-java-clear' });
+      });
+      $('s2jFormatMode').addEventListener('change', updateSqlToJavaOptionHint);
+      $('s2jCaller').addEventListener('input', updateSqlToJavaOptionHint);
+      $('s2jReturnType').addEventListener('input', updateSqlToJavaOptionHint);
+      $('s2jInput').addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          postSqlToJavaConvert();
+        }
+      });
+
+      // Vertical editor splitters (the reference uses a Splitter for both input
+      // tabs; the preview tab's pointer-drag pattern is reused here).
+      function bindEditorSplitter(splitterId, panelId, topSelector) {
+        var splitter = $(splitterId);
+        var panel = $(panelId);
+        if (!splitter || !panel) { return; }
+        var top = panel.querySelector(topSelector);
+        var dragging = false;
+        function fraction() {
+          var rect = panel.getBoundingClientRect();
+          if (!top || rect.height <= 0) { return 0.42; }
+          return top.getBoundingClientRect().height / rect.height;
+        }
+        function setFraction(value) {
+          if (!top) { return; }
+          var clamped = Math.min(0.8, Math.max(0.15, value));
+          top.style.flexBasis = (clamped * 100) + '%';
+        }
+        splitter.addEventListener('pointerdown', function (event) {
+          dragging = true;
+          splitter.classList.add('dragging');
+          if (splitter.setPointerCapture) { splitter.setPointerCapture(event.pointerId); }
+          event.preventDefault();
+        });
+        splitter.addEventListener('pointermove', function (event) {
+          if (!dragging) { return; }
+          var rect = panel.getBoundingClientRect();
+          if (rect.height > 0) { setFraction((event.clientY - rect.top) / rect.height); }
+        });
+        function stop(event) {
+          if (!dragging) { return; }
+          dragging = false;
+          splitter.classList.remove('dragging');
+          if (splitter.releasePointerCapture && event.pointerId !== undefined) {
+            try {
+              splitter.releasePointerCapture(event.pointerId);
+            } catch (error) {
+              /* the capture was already released */
+            }
+          }
+        }
+        splitter.addEventListener('pointerup', stop);
+        splitter.addEventListener('pointercancel', stop);
+        splitter.addEventListener('keydown', function (event) {
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') { return; }
+          setFraction(fraction() + (event.key === 'ArrowDown' ? 0.02 : -0.02));
+          event.preventDefault();
+        });
+      }
+      bindEditorSplitter('l2sSplitter', 'panelLogToSql', '.p-top');
+      bindEditorSplitter('s2jSplitter', 'panelSqlToJava', '.p-top');
       $('histSearchBtn').addEventListener('click', function () {
         post({ op: 'history', keyword: $('histKw').value });
       });

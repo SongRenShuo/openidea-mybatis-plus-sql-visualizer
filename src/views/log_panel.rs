@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 use crate::commands::common;
 use crate::core::log::{
     DuplicateGroup, EntryClass, LineSource, LogAnalysis, LogEntry, LogSources, NPlusOneGroup,
-    ParseOptions, SourceRef, parse_with_sources, restore_rendered,
+    ParseOptions, SourceRef, parse, parse_with_sources,
 };
 use crate::i18n::t;
 use crate::indexer;
@@ -832,9 +832,10 @@ struct Store {
     follow: bool,
     /// The display order (`time` / `duration`), lane L26.
     sort: SortMode,
-    /// Line the "Log → SQL" tab restores (the page's selection; `None` means
-    /// "last statement"), kept so a later state push does not drop the tab.
-    log_to_sql_line: Option<usize>,
+    /// The "Log → SQL" tab (lane L33): its own input pane and the last
+    /// conversion, carried in `tabs.logToSql`. Independent of the log list's
+    /// selection — the tab is a standalone paste-and-convert panel.
+    log_to_sql: LogToSqlTab,
     /// Last "SQL → Java" conversion, carried in `tabs.sqlToJava`.
     sql_to_java: SqlToJavaTab,
     /// Last history search over the buffered log text, carried in
@@ -860,19 +861,74 @@ struct SendToTab {
     select_tab: bool,
 }
 
-/// Result of one "SQL → Java" conversion (the tab keeps it across pushes).
-#[derive(Debug, Clone, Default, PartialEq)]
+/// State of the "Log → SQL" tab (lane L33).
+///
+/// The reference panel is a self-contained input pane: the user pastes MyBatis
+/// (or Hibernate / JdbcTemplate) log lines, clicks Convert, and gets every
+/// statement in the paste back as SQL. The input text belongs to the page; the
+/// host keeps only what a state push has to restore — the result and the
+/// status line.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct LogToSqlTab {
+    /// Converted SQL: `-- SQL #N` headers between groups, formatted for the
+    /// configured dialect. The page derives the compact form itself.
+    output: String,
+    /// One line under the two panes.
+    status: String,
+    /// `info` (muted) or `error` (red); the page colours the line.
+    status_kind: String,
+    /// Input text written by "从剪贴板读取"; one-shot (see `replaceInput`).
+    input: String,
+    /// Set when the host, not the user, filled the input pane.
+    replace_input: bool,
+}
+
+/// The "SQL → Java" tab's option row.
+///
+/// `entity` is what the generator needs (`sqlv_reverse_sql` takes
+/// `{sql, entity}`); `format` / `caller` / `return_type` are carried and
+/// echoed, but this build's generator only emits the Lambda form, so they
+/// never change the code — the tab says so in its status line instead of
+/// pretending (see `docs/registration/L33.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SqlToJavaOptions {
+    /// `lambda` | `stringColumns`.
+    format: String,
+    /// Java entity class name; empty yields `unresolved`.
+    entity: String,
+    /// Caller class (Service/Mapper); recorded, not applied.
+    caller: String,
+    /// Return type declaration; recorded, not applied.
+    return_type: String,
+}
+
+impl Default for SqlToJavaOptions {
+    fn default() -> Self {
+        Self {
+            format: "lambda".to_string(),
+            entity: String::new(),
+            caller: String::new(),
+            return_type: String::new(),
+        }
+    }
+}
+
+/// State of the "SQL → Java" tab (lane L33).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct SqlToJavaTab {
-    /// Generated code; `None` for `unresolved` and before the first run.
-    code: Option<String>,
-    /// `exact` / `partial` / `unresolved`; empty before the first run.
-    confidence: String,
-    /// Why no code was produced (message keys, one per line).
-    reason: String,
-    /// Java identifiers the generated chain expects, in order.
-    params: Vec<String>,
-    /// False until the page asks for a conversion.
-    ran: bool,
+    /// Generated code; empty for `unresolved` and before the first run.
+    code: String,
+    /// One line under the two panes (the generator's reason when no code).
+    status: String,
+    /// `info` / `error`.
+    status_kind: String,
+    /// The option row's last values, echoed so the page can restore them.
+    options: SqlToJavaOptions,
+    /// Input text after an op that rewrote it (formatting): the page replaces
+    /// the editor with it once, then the text belongs to the user again.
+    input: String,
+    /// One-shot flag consumed by [`sql_to_java_state`].
+    replace_input: bool,
 }
 
 /// One line the history search matched, enriched from the parsed entries.
@@ -913,7 +969,7 @@ impl Default for Store {
             paused: false,
             follow: true,
             sort: SortMode::Time,
-            log_to_sql_line: None,
+            log_to_sql: LogToSqlTab::default(),
             sql_to_java: SqlToJavaTab::default(),
             history: HistoryTab::default(),
             send_to_tab: None,
@@ -978,7 +1034,9 @@ pub fn clear() {
     state.blocked.clear();
     state.filter.focus = None;
     state.dirty = false;
-    state.log_to_sql_line = None;
+    // The two input tabs are standalone panes (lane L33): their text and
+    // results do not come from the buffer, so clearing the log leaves them
+    // alone. The history tab searched the buffer, so it goes.
     state.history = HistoryTab::default();
 }
 
@@ -1170,8 +1228,8 @@ fn build_state() -> Value {
     let follow = state.follow;
     let sort = state.sort;
     let blocked_keys: Vec<String> = state.blocked.iter().cloned().collect();
-    let log_to_sql = log_to_sql_payload(&state.analysis, state.log_to_sql_line);
-    let sql_to_java = sql_to_java_state(&state.sql_to_java);
+    let log_to_sql = log_to_sql_state(&mut state.log_to_sql);
+    let sql_to_java = sql_to_java_state(&mut state.sql_to_java);
     let history = history_state(&state.history);
     let send_to_tab = state.send_to_tab.clone();
     drop(state);
@@ -1449,42 +1507,306 @@ fn help_text() -> String {
 /// Matches one history search returns (the handler's own default).
 const HISTORY_LIMIT: usize = 20;
 
-/// `tabs.logToSql`: the selected statement (or the last one when nothing is
-/// selected) in `?` form, its rendered parameters and the executable result.
-fn log_to_sql_payload(analysis: &LogAnalysis, line: Option<usize>) -> Value {
-    let entry = line
-        .and_then(|line| analysis.entries.iter().find(|entry| entry.line_no == line))
-        .filter(|entry| entry.has_sql())
-        .or_else(|| analysis.entries.iter().rev().find(|entry| entry.has_sql()));
-    let Some(entry) = entry else {
-        return json!({
-            "empty": true,
-            "line": null,
-            "rawSql": "",
-            "params": [],
-            "restored": "",
-            "confidence": "",
-        });
-    };
+/// `tabs.logToSql`: the tab's result and status line (lane L33).
+///
+/// `replaceInput` is one-shot: only the clipboard op makes the host fill the
+/// page's input pane, so an ordinary push never overwrites what the user typed.
+fn log_to_sql_state(tab: &mut LogToSqlTab) -> Value {
+    let replace_input = std::mem::take(&mut tab.replace_input);
     json!({
-        "empty": false,
-        "line": entry.line_no,
-        "rawSql": entry.raw_sql,
-        "params": entry.params,
-        "restored": restore_rendered(&entry.raw_sql, &entry.params),
-        "confidence": entry.confidence,
+        "output": tab.output,
+        "status": tab.status,
+        "statusKind": tab.status_kind,
+        "input": tab.input,
+        "replaceInput": replace_input,
     })
 }
 
-/// `tabs.sqlToJava`: the last conversion (absent until the page asks).
-fn sql_to_java_state(tab: &SqlToJavaTab) -> Value {
+/// Outcome of one "Log → SQL" conversion (pure, testable).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LogConversion {
+    /// Executable statements, `\n\n`-separated with `-- SQL #N` headers when
+    /// the paste held more than one.
+    output: String,
+    /// Statements recovered.
+    groups: usize,
+    /// Statements that still carry a `?` placeholder (parameters missing).
+    unresolved: usize,
+}
+
+/// Converts a pasted log text with the same parser and prefix settings the
+/// capture lane uses, and formats each statement for the configured dialect.
+///
+/// A paste may hold several `Preparing:`/`Parameters:` groups (or a mix of
+/// MyBatis / Hibernate / JdbcTemplate lines): every recovered statement is
+/// included, and groups are separated by `-- SQL #N` comments. The page
+/// derives the compact form from this one output.
+fn convert_log_text(text: &str) -> LogConversion {
+    let analysis = parse(text, &parse_options());
+    let entries: Vec<&LogEntry> = analysis
+        .entries
+        .iter()
+        .filter(|entry| entry.has_sql())
+        .collect();
+    if entries.is_empty() {
+        return LogConversion {
+            output: String::new(),
+            groups: 0,
+            unresolved: 0,
+        };
+    }
+    let (dialect_name, _) = crate::views::workbench::configured_dialect();
+    let dialect = crate::core::dialect::by_name(&dialect_name);
+    let multi = entries.len() > 1;
+    let mut unresolved = 0;
+    let mut parts: Vec<String> = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let base = with_terminator(&entry.sql);
+        if count_placeholders(&base) > 0 {
+            unresolved += 1;
+        }
+        let body = match dialect {
+            Some(found) => crate::core::format::format(&base, found),
+            None => base,
+        };
+        parts.push(if multi {
+            format!("-- SQL #{}\n{}", index + 1, body)
+        } else {
+            body
+        });
+    }
+    LogConversion {
+        output: parts.join("\n\n"),
+        groups: entries.len(),
+        unresolved,
+    }
+}
+
+/// Appends the statement terminator the reference adds to every result
+/// (already-terminated and empty statements are left alone).
+fn with_terminator(sql: &str) -> String {
+    if sql.trim_end().ends_with(';') {
+        sql.to_string()
+    } else {
+        format!("{sql};")
+    }
+}
+
+/// Counts `?` placeholders outside quoted strings and comments.
+///
+/// `core::log` counts placeholders while restoring, but that scanner is
+/// private to the core module (which this lane must not touch); the status
+/// line only needs the count, so the same skipping rules live here.
+fn count_placeholders(sql: &str) -> usize {
+    let bytes = sql.as_bytes();
+    let mut index = 0;
+    let mut count = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            quote @ (b'\'' | b'"' | b'`') => {
+                index += 1;
+                while index < bytes.len() {
+                    if bytes[index] == quote {
+                        // A doubled quote is an escaped one inside the literal.
+                        if index + 1 < bytes.len() && bytes[index + 1] == quote {
+                            index += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    index += 1;
+                }
+                index = (index + 1).min(bytes.len());
+            }
+            b'-' if index + 1 < bytes.len() && bytes[index + 1] == b'-' => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+            }
+            b'/' if index + 1 < bytes.len() && bytes[index + 1] == b'*' => {
+                index += 2;
+                while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
+                {
+                    index += 1;
+                }
+                index = (index + 2).min(bytes.len());
+            }
+            b'?' => {
+                count += 1;
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    count
+}
+
+/// Runs one "Log → SQL" conversion and keeps its result and status line.
+fn run_log_to_sql(text: &str) {
+    let mut state = store();
+    state.log_to_sql.input = text.to_string();
+    if text.trim().is_empty() {
+        // Like the reference, a failed conversion states the reason and
+        // leaves the previous result alone.
+        state.log_to_sql.status = t("view.logs.tab.log_to_sql.empty");
+        state.log_to_sql.status_kind = "error".to_string();
+        return;
+    }
+    let conversion = convert_log_text(text);
+    if conversion.groups == 0 {
+        state.log_to_sql.status = t("view.logs.tab.log_to_sql.no_entry");
+        state.log_to_sql.status_kind = "error".to_string();
+        return;
+    }
+    let (status, kind) = if conversion.unresolved > 0 {
+        (
+            t("view.logs.tab.log_to_sql.unresolved")
+                .replace("{0}", &conversion.unresolved.to_string()),
+            "error",
+        )
+    } else {
+        (
+            t("view.logs.tab.log_to_sql.converted").replace("{0}", &conversion.groups.to_string()),
+            "info",
+        )
+    };
+    state.log_to_sql.output = conversion.output;
+    state.log_to_sql.status = status;
+    state.log_to_sql.status_kind = kind.to_string();
+}
+
+/// "从剪贴板读取": fills the input pane from the clipboard and converts at
+/// once, the same "fill then convert" the reference does. An empty clipboard
+/// and a refused capability are status-line hints, never error dialogs.
+fn read_log_clipboard() {
+    let text = match host::read_clipboard() {
+        Ok(content) => content.text.unwrap_or_default(),
+        // The capability (`clipboard.read`) is optional and this build does
+        // not declare it yet; say so instead of pretending the clipboard is
+        // empty (see `docs/registration/L33.md`).
+        Err(_) => {
+            let mut state = store();
+            state.log_to_sql.status = t("view.logs.tab.log_to_sql.clipboard_denied");
+            state.log_to_sql.status_kind = "error".to_string();
+            return;
+        }
+    };
+    if text.trim().is_empty() {
+        let mut state = store();
+        state.log_to_sql.status = t("view.logs.tab.log_to_sql.clipboard_empty");
+        state.log_to_sql.status_kind = "error".to_string();
+        return;
+    }
+    run_log_to_sql(&text);
+    store().log_to_sql.replace_input = true;
+}
+
+/// Clears the tab's result and status line; the input pane is the page's.
+fn clear_log_to_sql() {
+    store().log_to_sql = LogToSqlTab::default();
+}
+
+/// `tabs.sqlToJava`: the last conversion, the status line and the option row.
+///
+/// `replaceInput` is one-shot: it is taken on the way out, so a later push
+/// (capture refresh, filter change) never overwrites what the user typed.
+fn sql_to_java_state(tab: &mut SqlToJavaTab) -> Value {
+    let replace_input = std::mem::take(&mut tab.replace_input);
     json!({
-        "ran": tab.ran,
         "code": tab.code,
-        "confidence": tab.confidence,
-        "reason": tab.reason,
-        "params": tab.params,
+        "status": tab.status,
+        "statusKind": tab.status_kind,
+        "options": {
+            "format": tab.options.format,
+            "entity": tab.options.entity,
+            "caller": tab.options.caller,
+            "returnType": tab.options.return_type,
+        },
+        "input": tab.input,
+        "replaceInput": replace_input,
     })
+}
+
+/// Normalises the wrapper-form value the page sends.
+fn normalize_wrapper_format(value: &str) -> String {
+    match value.trim() {
+        "stringColumns" | "string-columns" | "string_columns" | "columns" => {
+            "stringColumns".to_string()
+        }
+        _ => "lambda".to_string(),
+    }
+}
+
+/// Runs the `sqlv_reverse_sql` handler for the page and keeps the result.
+///
+/// The handler takes `{sql, entity}` and refuses unsupported shapes with an
+/// `unresolved` result; that verdict is passed through as a status line
+/// instead of guessing.
+fn run_sql_to_java(sql: &str, options: SqlToJavaOptions) {
+    let mut state = store();
+    state.sql_to_java.options = options.clone();
+    if sql.trim().is_empty() {
+        state.sql_to_java.code.clear();
+        state.sql_to_java.status = t("view.logs.tab.sql_to_java.empty");
+        state.sql_to_java.status_kind = "error".to_string();
+        return;
+    }
+    let arguments = json!({ "sql": sql.trim(), "entity": options.entity }).to_string();
+    let raw = crate::mcp::handlers::reverse_sql::run(&arguments);
+    let value: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+    if value.get("ok").and_then(Value::as_bool) != Some(true) {
+        state.sql_to_java.code.clear();
+        state.sql_to_java.status = t(value
+            .pointer("/error/message_key")
+            .and_then(Value::as_str)
+            .unwrap_or("mcp.error.unknown_tool"));
+        state.sql_to_java.status_kind = "error".to_string();
+        return;
+    }
+    let data = &value["data"];
+    let code = data.get("code").and_then(Value::as_str).unwrap_or("");
+    if code.trim().is_empty() {
+        state.sql_to_java.code.clear();
+        let reason = reason_lines(data);
+        state.sql_to_java.status = if reason.is_empty() {
+            t("view.logs.tab.sql_to_java.no_code")
+        } else {
+            reason
+        };
+        state.sql_to_java.status_kind = "error".to_string();
+        return;
+    }
+    state.sql_to_java.code = code.to_string();
+    // The option row is echoed for parity with the reference, but this build's
+    // generator only emits the Lambda form; the page shows a persistent hint
+    // next to the option row instead of pretending the choice changed the code
+    // (`docs/registration/L33.md`).
+    state.sql_to_java.status = t("view.logs.tab.sql_to_java.generated");
+    state.sql_to_java.status_kind = "info".to_string();
+}
+
+/// Formats the tab's input SQL for the configured dialect; the page replaces
+/// its editor with the result once (`replaceInput`).
+fn format_sql_input(text: &str) {
+    let (dialect_name, _) = crate::views::workbench::configured_dialect();
+    let formatted = match crate::core::dialect::by_name(&dialect_name) {
+        Some(found) => crate::core::format::format(text, found),
+        None => text.to_string(),
+    };
+    let mut state = store();
+    state.sql_to_java.input = formatted;
+    state.sql_to_java.replace_input = true;
+}
+
+/// Clears the result and status line; the option row survives (the user's
+/// choices are not a result), and so does the input pane (page-owned).
+fn clear_sql_to_java() {
+    let mut state = store();
+    let options = state.sql_to_java.options.clone();
+    state.sql_to_java = SqlToJavaTab {
+        options,
+        ..SqlToJavaTab::default()
+    };
 }
 
 /// `tabs.history`: the last search over the buffered log text.
@@ -1509,67 +1831,6 @@ fn history_state(tab: &HistoryTab) -> Value {
         "truncated": tab.truncated,
         "matches": matches,
     })
-}
-
-/// Runs the `sqlv_reverse_sql` handler for the page and keeps the result.
-fn run_sql_to_java(sql: &str, entity: &str) {
-    let sql = sql.trim();
-    if sql.is_empty() {
-        store().sql_to_java = SqlToJavaTab::default();
-        return;
-    }
-    let arguments = json!({ "sql": sql, "entity": entity }).to_string();
-    let raw = crate::mcp::handlers::reverse_sql::run(&arguments);
-    store().sql_to_java = sql_to_java_tab(&raw);
-}
-
-/// The tab result of one handler envelope. `unresolved` keeps no code and
-/// reports why; the confidence is passed through, never upgraded.
-fn sql_to_java_tab(raw: &str) -> SqlToJavaTab {
-    let value: Value = serde_json::from_str(raw).unwrap_or(Value::Null);
-    if value.get("ok").and_then(Value::as_bool) != Some(true) {
-        return SqlToJavaTab {
-            ran: true,
-            code: None,
-            confidence: "unresolved".to_string(),
-            reason: value
-                .pointer("/error/message_key")
-                .and_then(Value::as_str)
-                .unwrap_or("mcp.error.unknown_tool")
-                .to_string(),
-            params: Vec::new(),
-        };
-    }
-    let data = &value["data"];
-    let confidence = value
-        .get("confidence")
-        .and_then(Value::as_str)
-        .unwrap_or("unresolved")
-        .to_string();
-    let code = data.get("code").and_then(Value::as_str).map(str::to_string);
-    let reason = if code.is_some() {
-        String::new()
-    } else {
-        reason_lines(data)
-    };
-    let params = data
-        .get("params")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
-    SqlToJavaTab {
-        code,
-        confidence,
-        reason,
-        params,
-        ran: true,
-    }
 }
 
 /// `unresolved[]` of a generator result, one line per entry. A key without a
@@ -1764,20 +2025,42 @@ fn labels_tabs() -> Value {
         "tabHistory": t("view.logs.tab.history"),
         // Fifth tab, the preview workbench (lane L23).
         "tabPreview": t("view.logs.tab.preview"),
-        "tabLogToSqlRaw": t("view.logs.tab.log_to_sql.raw"),
-        "tabLogToSqlParams": t("view.logs.tab.log_to_sql.params"),
-        "tabLogToSqlRestored": t("view.logs.tab.log_to_sql.restored"),
-        "tabLogToSqlEmpty": t("view.logs.tab.log_to_sql.empty"),
+        // The two input tabs (lane L33): each is a standalone pane with an
+        // input editor on top, a result editor below and a status line.
+        "tabLogToSqlConvert": t("view.logs.tab.log_to_sql.convert"),
+        "tabLogToSqlReadClipboard": t("view.logs.tab.log_to_sql.read_clipboard"),
+        "tabLogToSqlClearInput": t("view.logs.tab.log_to_sql.clear_input"),
+        "tabLogToSqlHintInput": t("view.logs.tab.log_to_sql.hint_input"),
+        "tabLogToSqlHintResult": t("view.logs.tab.log_to_sql.hint_result"),
         "tabLogToSqlCopy": t("view.logs.tab.log_to_sql.copy"),
-        "tabLogToSqlSend": t("view.logs.tab.log_to_sql.send"),
-        "tabSqlToJavaInput": t("view.logs.tab.sql_to_java.input"),
-        "tabSqlToJavaEntity": t("view.logs.tab.sql_to_java.entity"),
-        "tabSqlToJavaRun": t("view.logs.tab.sql_to_java.run"),
+        "tabLogToSqlToggleFormat": t("view.logs.tab.log_to_sql.toggle_format"),
+        "tabLogToSqlClearResult": t("view.logs.tab.log_to_sql.clear_result"),
+        "tabLogToSqlEmpty": t("view.logs.tab.log_to_sql.empty"),
+        "tabLogToSqlNoEntry": t("view.logs.tab.log_to_sql.no_entry"),
+        "tabLogToSqlConverted": t("view.logs.tab.log_to_sql.converted"),
+        "tabLogToSqlUnresolved": t("view.logs.tab.log_to_sql.unresolved"),
+        "tabLogToSqlCopied": t("view.logs.tab.log_to_sql.copied"),
+        "tabSqlToJavaConvert": t("view.logs.tab.sql_to_java.convert"),
+        "tabSqlToJavaFormat": t("view.logs.tab.sql_to_java.format"),
+        "tabSqlToJavaClearInput": t("view.logs.tab.sql_to_java.clear_input"),
+        "tabSqlToJavaHintInput": t("view.logs.tab.sql_to_java.hint_input"),
+        "tabSqlToJavaHintResult": t("view.logs.tab.sql_to_java.hint_result"),
         "tabSqlToJavaCopy": t("view.logs.tab.sql_to_java.copy"),
+        "tabSqlToJavaClearResult": t("view.logs.tab.sql_to_java.clear_result"),
+        "tabSqlToJavaFormatLabel": t("view.logs.tab.sql_to_java.format_label"),
+        "tabSqlToJavaFormatLambda": t("view.logs.tab.sql_to_java.format_lambda"),
+        "tabSqlToJavaFormatString": t("view.logs.tab.sql_to_java.format_string"),
+        "tabSqlToJavaEntityLabel": t("view.logs.tab.sql_to_java.entity_label"),
+        "tabSqlToJavaEntityHint": t("view.logs.tab.sql_to_java.entity_hint"),
+        "tabSqlToJavaCallerLabel": t("view.logs.tab.sql_to_java.caller_label"),
+        "tabSqlToJavaCallerHint": t("view.logs.tab.sql_to_java.caller_hint"),
+        "tabSqlToJavaReturnLabel": t("view.logs.tab.sql_to_java.return_label"),
+        "tabSqlToJavaReturnHint": t("view.logs.tab.sql_to_java.return_hint"),
         "tabSqlToJavaEmpty": t("view.logs.tab.sql_to_java.empty"),
-        "tabSqlToJavaParams": t("view.logs.tab.sql_to_java.params"),
-        "tabSqlToJavaReason": t("view.logs.tab.sql_to_java.reason"),
-        "tabSqlToJavaOutput": t("view.logs.tab.sql_to_java.output"),
+        "tabSqlToJavaGenerated": t("view.logs.tab.sql_to_java.generated"),
+        "tabSqlToJavaFixedLambda": t("view.logs.tab.sql_to_java.fixed_lambda"),
+        "tabSqlToJavaNoCode": t("view.logs.tab.sql_to_java.no_code"),
+        "tabSqlToJavaCopied": t("view.logs.tab.sql_to_java.copied"),
         "tabHistoryKeyword": t("view.logs.tab.history.keyword"),
         "tabHistorySearch": t("view.logs.tab.history.search"),
         "tabHistoryEmpty": t("view.logs.tab.history.empty"),
@@ -1785,10 +2068,6 @@ fn labels_tabs() -> Value {
         "tabHistoryCountSuffix": t("view.logs.tab.history.count_suffix"),
         "tabHistorySource": t("view.logs.tab.history.source"),
         "tabHistoryTruncated": t("view.logs.tab.history.truncated"),
-        "tabConfidencePrefix": t("view.logs.tab.confidence_prefix"),
-        "tabConfidenceExact": t("view.logs.tab.confidence.exact"),
-        "tabConfidencePartial": t("view.logs.tab.confidence.partial"),
-        "tabConfidenceUnresolved": t("view.logs.tab.confidence.unresolved"),
     })
 }
 
@@ -1981,24 +2260,104 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
                 }
             }
         }
-        // "Log → SQL" tab: remember which line the page selected and re-push
-        // the tab payload (the page keeps its list, so nothing is lost).
-        "log-to-sql" => {
-            store().log_to_sql_line = message_line(&message);
+        // "Log → SQL" tab (lane L33): the tab's own input pane converts the pasted
+        // log text; the list's selection plays no part any more.
+        "log-to-sql-convert" => {
+            let text = message.get("text").and_then(Value::as_str).unwrap_or("");
+            run_log_to_sql(text);
             let _ = push_state();
         }
-        // "SQL → Java" tab: the input comes from the page, the conversion is
-        // the `sqlv_reverse_sql` handler.
-        "sql-to-java" => {
+        "log-to-sql-clear" => {
+            // The input pane belongs to the page (it clears that field itself);
+            // this clears the result and the status line.
+            clear_log_to_sql();
+            let _ = push_state();
+        }
+        "log-to-sql-read-clipboard" => {
+            read_log_clipboard();
+            let _ = push_state();
+        }
+        // "SQL → Java" tab (lane L33): the input and the option row come from
+        // the page, the conversion is the `sqlv_reverse_sql` handler.
+        "sql-to-java-convert" => {
             // `text` is the page's field; `sql` stays accepted for direct calls.
             let sql = message
                 .get("text")
                 .or_else(|| message.get("sql"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            let entity = message.get("entity").and_then(Value::as_str).unwrap_or("");
-            run_sql_to_java(sql, entity);
+            let options = SqlToJavaOptions {
+                format: normalize_wrapper_format(
+                    message
+                        .get("format")
+                        .and_then(Value::as_str)
+                        .unwrap_or("lambda"),
+                ),
+                entity: message
+                    .get("entity")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
+                caller: message
+                    .get("caller")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
+                return_type: message
+                    .get("returnType")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
+            };
+            run_sql_to_java(sql, options);
             let _ = push_state();
+        }
+        // Format the input pane's SQL for the configured dialect; the page
+        // replaces its editor once (`replaceInput`).
+        "sql-to-java-format" => {
+            let sql = message
+                .get("text")
+                .or_else(|| message.get("sql"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if !sql.trim().is_empty() {
+                format_sql_input(sql);
+                let _ = push_state();
+            }
+        }
+        "sql-to-java-clear" => {
+            clear_sql_to_java();
+            let _ = push_state();
+        }
+        // Copy from either tab's result pane: the page owns the (editable)
+        // text, so it sends exactly what the user sees; the host has no access
+        // to the browser clipboard. `tab` picks the status line that confirms.
+        "copy-text" => {
+            let text = message.get("text").and_then(Value::as_str).unwrap_or("");
+            if !text.is_empty() {
+                host::copy_to_clipboard(text)?;
+                let tab = message.get("tab").and_then(Value::as_str).unwrap_or("");
+                let key = match tab {
+                    "sqlToJava" => "view.logs.tab.sql_to_java.copied",
+                    "logToSql" => "view.logs.tab.log_to_sql.copied",
+                    _ => "",
+                };
+                if !key.is_empty() {
+                    let mut state = store();
+                    if tab == "sqlToJava" {
+                        state.sql_to_java.status = t(key);
+                        state.sql_to_java.status_kind = "info".to_string();
+                    } else {
+                        state.log_to_sql.status = t(key);
+                        state.log_to_sql.status_kind = "info".to_string();
+                    }
+                    drop(state);
+                    let _ = push_state();
+                }
+            }
         }
         // "SQL history" tab: the handler searches the buffered log text.
         "history" => {
@@ -2035,13 +2394,6 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
                         }
                     }
                 }
-            }
-        }
-        // "SQL → Java" copy: the page cannot reach the clipboard itself.
-        "copy-code" => {
-            let code = store().sql_to_java.code.clone();
-            if let Some(code) = code {
-                host::copy_to_clipboard(&code)?;
             }
         }
         // Row actions (lane L28): jump to the method / to the mapper XML, drop
@@ -2399,6 +2751,13 @@ mod tests {
         let guard = super::super::test_state_lock();
         let host = MockHost::install();
         clear();
+        // The two input tabs are independent of the buffer (lane L33), so a
+        // test starts them from a clean state explicitly.
+        {
+            let mut state = store();
+            state.log_to_sql = LogToSqlTab::default();
+            state.sql_to_java = SqlToJavaTab::default();
+        }
         set_filter(Filter::default());
         set_paused(false);
         // The location indexes are process-wide too (lane L28).
@@ -2926,92 +3285,276 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
 
     // Tabs (lane L22) -----------------------------------------------------
 
-    fn line_of(kind: EntryClass) -> usize {
-        snapshot()
-            .entries
-            .iter()
-            .find(|entry| entry.class == kind)
-            .unwrap()
-            .line_no
+    // Log → SQL (lane L33) ------------------------------------------------
+
+    /// Two MyBatis groups; the second has no `Parameters:` row.
+    const MULTI_LOG: &str = "\
+Preparing: SELECT id FROM users WHERE id = ?
+Parameters: 1(Long)
+Preparing: DELETE FROM users WHERE id = ?
+";
+
+    fn send(host: &MockHost, message: Value) {
+        handle_panel_message(host, &message.to_string()).unwrap();
+    }
+
+    fn flat(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
     #[test]
-    fn log_to_sql_message_restores_the_selected_line() {
+    fn log_to_sql_converts_every_group_with_headers() {
         let (host, _guard) = test_host();
-        set_log_text(MIXED_LOG);
-        let line = line_of(EntryClass::Select);
-        handle_panel_message(&host, &format!("{{\"op\":\"log-to-sql\",\"line\":{line}}}")).unwrap();
-        let tab = &state_of(&host)["tabs"]["logToSql"];
-        assert_eq!(tab["line"], json!(line));
-        assert_eq!(tab["empty"], false);
-        assert_eq!(tab["rawSql"], "SELECT id FROM users WHERE id = ?");
-        assert_eq!(tab["params"], json!(["1"]));
-        assert_eq!(tab["restored"], "SELECT id FROM users WHERE id = 1");
-        assert_eq!(tab["confidence"], "exact");
-    }
-
-    #[test]
-    fn log_to_sql_falls_back_to_the_last_statement() {
-        let (host, _guard) = test_host();
-        set_log_text(MIXED_LOG);
-        let last = line_of(EntryClass::Update);
-        handle_panel_message(&host, "{\"op\":\"log-to-sql\"}").unwrap();
-        let tab = &state_of(&host)["tabs"]["logToSql"];
-        assert_eq!(
-            tab["line"],
-            json!(last),
-            "no selection shows the last statement"
+        send(
+            &host,
+            json!({
+                "op": "log-to-sql-convert",
+                "text": "Preparing: SELECT id FROM users WHERE id = ?\nParameters: 1(Long)\nPreparing: DELETE FROM users WHERE id = ?\nParameters: 2(Long)\n",
+            }),
+        );
+        let tab = state_of(&host)["tabs"]["logToSql"].clone();
+        assert_eq!(tab["statusKind"], "info", "{tab}");
+        let output = tab["output"].as_str().unwrap_or_default();
+        assert!(output.contains("-- SQL #1"), "{output}");
+        assert!(output.contains("-- SQL #2"), "{output}");
+        let flat_output = flat(output);
+        assert!(
+            flat_output.contains("SELECT id FROM users WHERE id = 1"),
+            "{output}"
         );
         assert!(
-            tab["restored"]
-                .as_str()
-                .is_some_and(|sql| sql.contains("= 3")),
-            "{tab}"
+            flat_output.contains("DELETE FROM users WHERE id = 2"),
+            "{output}"
+        );
+        assert_eq!(
+            tab["status"],
+            json!(t("view.logs.tab.log_to_sql.converted").replace("{0}", "2"))
         );
     }
 
     #[test]
-    fn log_to_sql_is_empty_when_nothing_was_captured() {
+    fn log_to_sql_counts_statements_that_still_hold_placeholders() {
         let (host, _guard) = test_host();
-        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
-        let tab = &state_of(&host)["tabs"]["logToSql"];
-        assert_eq!(tab["empty"], true);
-        assert_eq!(tab["line"], Value::Null);
-        assert_eq!(tab["restored"], "");
+        send(
+            &host,
+            json!({"op": "log-to-sql-convert", "text": MULTI_LOG}),
+        );
+        let tab = state_of(&host)["tabs"]["logToSql"].clone();
+        // The second statement's `?` has no parameter: red status, count 1 —
+        // and the statements that did convert are still shown.
+        assert_eq!(tab["statusKind"], "error", "{tab}");
+        assert_eq!(
+            tab["status"],
+            json!(t("view.logs.tab.log_to_sql.unresolved").replace("{0}", "1"))
+        );
+        let output = tab["output"].as_str().unwrap_or_default();
+        assert!(output.contains("-- SQL #2"), "{output}");
+        assert!(flat(output).contains("WHERE id = 1"), "{output}");
     }
 
     #[test]
-    fn sql_to_java_message_reports_exact_and_unresolved_code() {
+    fn log_to_sql_empty_and_unparsed_input_are_errors() {
         let (host, _guard) = test_host();
-        // `text` is the field the page sends.
-        let exact = r#"{"op":"sql-to-java","text":"SELECT id, name FROM user WHERE id = ?","entity":"User"}"#;
-        handle_panel_message(&host, exact).unwrap();
+        send(&host, json!({"op": "log-to-sql-convert", "text": "   "}));
+        let tab = state_of(&host)["tabs"]["logToSql"].clone();
+        assert_eq!(tab["statusKind"], "error");
+        assert_eq!(tab["status"], json!(t("view.logs.tab.log_to_sql.empty")));
+        assert_eq!(tab["output"], "");
+
+        send(
+            &host,
+            json!({"op": "log-to-sql-convert", "text": "nothing to parse here"}),
+        );
+        let tab = state_of(&host)["tabs"]["logToSql"].clone();
+        assert_eq!(tab["status"], json!(t("view.logs.tab.log_to_sql.no_entry")));
+        assert_eq!(tab["output"], "");
+    }
+
+    #[test]
+    fn log_to_sql_clear_resets_output_and_status() {
+        let (host, _guard) = test_host();
+        send(
+            &host,
+            json!({"op": "log-to-sql-convert", "text": MULTI_LOG}),
+        );
+        handle_panel_message(&host, "{\"op\":\"log-to-sql-clear\"}").unwrap();
+        let tab = state_of(&host)["tabs"]["logToSql"].clone();
+        assert_eq!(tab["output"], "");
+        assert_eq!(tab["status"], "");
+        assert_eq!(tab["statusKind"], "");
+    }
+
+    #[test]
+    fn log_to_sql_clipboard_fills_the_input_and_converts() {
+        let (host, _guard) = test_host();
+        host.set_clipboard(
+            Some("Preparing: SELECT id FROM users WHERE id = ?\nParameters: 7(Long)\n"),
+            None,
+        );
+        handle_panel_message(&host, "{\"op\":\"log-to-sql-read-clipboard\"}").unwrap();
+        let tab = state_of(&host)["tabs"]["logToSql"].clone();
+        assert_eq!(tab["replaceInput"], true, "{tab}");
+        assert!(
+            tab["input"]
+                .as_str()
+                .is_some_and(|text| text.contains("Preparing")),
+            "{tab}"
+        );
+        assert!(
+            flat(tab["output"].as_str().unwrap_or_default()).contains("WHERE id = 7"),
+            "{tab}"
+        );
+        // `replaceInput` is one-shot: the next push must not refill the pane.
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["tabs"]["logToSql"]["replaceInput"], false);
+    }
+
+    #[test]
+    fn log_to_sql_clipboard_without_text_says_so() {
+        let (host, _guard) = test_host();
+        host.set_clipboard(None, None);
+        handle_panel_message(&host, "{\"op\":\"log-to-sql-read-clipboard\"}").unwrap();
+        let tab = state_of(&host)["tabs"]["logToSql"].clone();
+        assert_eq!(tab["statusKind"], "error");
+        assert_eq!(
+            tab["status"],
+            json!(t("view.logs.tab.log_to_sql.clipboard_empty"))
+        );
+    }
+
+    #[test]
+    fn placeholder_counting_skips_literals_and_comments() {
+        assert_eq!(
+            count_placeholders("SELECT * FROM t WHERE a = ? AND b = ?"),
+            2
+        );
+        assert_eq!(count_placeholders("SELECT '?' AS q FROM t WHERE a = ?"), 1);
+        assert_eq!(count_placeholders("SELECT \"?\" FROM t"), 0);
+        assert_eq!(count_placeholders("SELECT * FROM t -- ?\nWHERE a = ?"), 1);
+        assert_eq!(count_placeholders("SELECT * FROM t /* ? */ WHERE a = ?"), 1);
+        assert_eq!(count_placeholders("SELECT 'it''s ?' FROM t"), 0);
+    }
+
+    #[test]
+    fn one_statement_gets_no_group_header() {
+        let (_host, _guard) = test_host();
+        let out =
+            convert_log_text("Preparing: SELECT id FROM users WHERE id = ?\nParameters: 1(Long)\n");
+        assert_eq!(out.groups, 1);
+        assert_eq!(out.unresolved, 0);
+        assert!(!out.output.contains("-- SQL #1"), "{}", out.output);
+        assert!(out.output.trim_end().ends_with(';'), "{}", out.output);
+    }
+
+    // SQL → Java (lane L33) -----------------------------------------------
+
+    #[test]
+    fn sql_to_java_converts_exact_and_reports_unresolved() {
+        let (host, _guard) = test_host();
+        send(
+            &host,
+            json!({
+                "op": "sql-to-java-convert",
+                "text": "SELECT id, name FROM user WHERE id = ?",
+                "format": "lambda",
+                "entity": "User",
+            }),
+        );
         let tab = state_of(&host)["tabs"]["sqlToJava"].clone();
-        assert_eq!(tab["ran"], true);
-        assert_eq!(tab["confidence"], "exact");
+        assert_eq!(tab["statusKind"], "info", "{tab}");
         assert!(
             tab["code"]
                 .as_str()
                 .is_some_and(|code| code.contains("LambdaQueryWrapper<User>")),
             "{tab}"
         );
-        assert_eq!(tab["params"], json!(["param1"]));
-        assert_eq!(tab["reason"], "");
+        assert_eq!(tab["options"]["entity"], "User");
 
-        // An empty entity name cannot produce code: unresolved, no code, a reason.
-        // (`sql` stays accepted as an alias of `text`.)
-        let unresolved =
-            r#"{"op":"sql-to-java","sql":"SELECT id, name FROM user WHERE id = ?","entity":""}"#;
-        handle_panel_message(&host, unresolved).unwrap();
+        // No entity name: the generator refuses, the tab shows its reason.
+        send(
+            &host,
+            json!({
+                "op": "sql-to-java-convert",
+                "text": "SELECT id, name FROM user WHERE id = ?",
+                "entity": "",
+            }),
+        );
         let tab = state_of(&host)["tabs"]["sqlToJava"].clone();
-        assert_eq!(tab["confidence"], "unresolved");
-        assert_eq!(tab["code"], Value::Null, "unresolved ships no code");
+        assert_eq!(tab["statusKind"], "error");
+        assert_eq!(tab["code"], "", "unresolved ships no code");
         assert!(
-            tab["reason"]
+            tab["status"]
                 .as_str()
-                .is_some_and(|reason| reason.contains("entity_required")),
+                .is_some_and(|status| status.contains("entity_required")),
             "{tab}"
         );
+    }
+
+    #[test]
+    fn sql_to_java_echoes_the_option_row_and_keeps_it_after_clear() {
+        let (host, _guard) = test_host();
+        send(
+            &host,
+            json!({
+                "op": "sql-to-java-convert",
+                "text": "SELECT id FROM user WHERE id = ?",
+                "entity": "User",
+                "format": "stringColumns",
+                "caller": "UserMapper",
+                "returnType": "List<User>",
+            }),
+        );
+        let tab = state_of(&host)["tabs"]["sqlToJava"].clone();
+        assert_eq!(tab["options"]["format"], "stringColumns");
+        assert_eq!(tab["options"]["caller"], "UserMapper");
+        assert_eq!(tab["options"]["returnType"], "List<User>");
+
+        handle_panel_message(&host, "{\"op\":\"sql-to-java-clear\"}").unwrap();
+        let tab = state_of(&host)["tabs"]["sqlToJava"].clone();
+        assert_eq!(tab["code"], "");
+        assert_eq!(tab["status"], "");
+        assert_eq!(
+            tab["options"]["entity"], "User",
+            "the option row is not a result: a clear keeps it"
+        );
+    }
+
+    #[test]
+    fn sql_to_java_format_rewrites_the_input_once() {
+        let (host, _guard) = test_host();
+        let original = "select id,name from user where id=1";
+        send(&host, json!({"op": "sql-to-java-format", "text": original}));
+        let tab = state_of(&host)["tabs"]["sqlToJava"].clone();
+        assert_eq!(tab["replaceInput"], true, "{tab}");
+        let formatted = tab["input"].as_str().unwrap_or_default();
+        assert_ne!(formatted, original, "{tab}");
+        assert!(
+            formatted.contains('\n'),
+            "the formatter breaks clauses: {formatted}"
+        );
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["tabs"]["sqlToJava"]["replaceInput"], false);
+    }
+
+    #[test]
+    fn copy_text_reaches_the_clipboard_and_confirms_in_that_tab() {
+        let (host, _guard) = test_host();
+        send(
+            &host,
+            json!({"op": "copy-text", "tab": "logToSql", "text": "SELECT 1;"}),
+        );
+        assert_eq!(host.clipboard().as_deref(), Some("SELECT 1;"));
+        let tab = state_of(&host)["tabs"]["logToSql"].clone();
+        assert_eq!(tab["status"], json!(t("view.logs.tab.log_to_sql.copied")));
+        assert_eq!(tab["statusKind"], "info");
+
+        send(
+            &host,
+            json!({"op": "copy-text", "tab": "sqlToJava", "text": "wrapper.eq(...)"}),
+        );
+        assert_eq!(host.clipboard().as_deref(), Some("wrapper.eq(...)"));
+        let tab = state_of(&host)["tabs"]["sqlToJava"].clone();
+        assert_eq!(tab["status"], json!(t("view.logs.tab.sql_to_java.copied")));
     }
 
     #[test]
@@ -3152,8 +3695,19 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             page.contains("scrollIntoView({ inline: 'nearest', block: 'nearest' })"),
             "the active tab is scrolled into view"
         );
-        assert!(page.contains("op: 'log-to-sql'"), "log-to-sql op");
-        assert!(page.contains("op: 'sql-to-java'"), "sql-to-java op");
+        // The two input tabs' ops (lane L33): each tab converts its own pane,
+        // clears its own result, and copies exactly what the page shows.
+        for op in [
+            "log-to-sql-convert",
+            "log-to-sql-clear",
+            "log-to-sql-read-clipboard",
+            "sql-to-java-convert",
+            "sql-to-java-format",
+            "sql-to-java-clear",
+            "copy-text",
+        ] {
+            assert!(page.contains(op), "missing op {op}");
+        }
         assert!(page.contains("op: 'history'"), "history op");
         // The preview tab's ops carry the `preview-` prefix (lane L23), so the
         // log panel can route them without colliding with its own names.
@@ -3178,10 +3732,107 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             "tabLogToSqlEmpty",
             "tabSqlToJavaEmpty",
             "tabHistoryEmpty",
-            "tabConfidenceUnresolved",
+            "tabLogToSqlConvert",
+            "tabLogToSqlReadClipboard",
+            "tabLogToSqlToggleFormat",
+            "tabLogToSqlNoEntry",
+            "tabLogToSqlCopied",
+            "tabSqlToJavaConvert",
+            "tabSqlToJavaFormat",
+            "tabSqlToJavaFormatLabel",
+            "tabSqlToJavaEntityHint",
+            "tabSqlToJavaFixedLambda",
+            "tabSqlToJavaCopied",
         ] {
             assert!(labels.get(key).is_some(), "missing label {key}");
         }
+    }
+
+    #[test]
+    fn the_two_input_tabs_have_two_editors_and_a_status_line() {
+        // Lane L33: the reference's LogToSqlPanel / SqlToJavaPanel are two
+        // editor panes stacked with a splitter between them and one status
+        // line under both; each pane carries its own toolbar.
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+
+        // 日志 → SQL: input pane (convert / clipboard / clear) over the result
+        // pane (copy / single↔multi line / clear).
+        for id in [
+            "l2sInput",
+            "l2sOutput",
+            "l2sConvert",
+            "l2sReadClipboard",
+            "l2sClearInput",
+            "l2sCopy",
+            "l2sToggleFormat",
+            "l2sClearResult",
+            "l2sStatus",
+            "l2sSplitter",
+        ] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        // SQL → Java: the same two-pane shape, plus its option row (wrapper
+        // form, entity, caller, result type) as a row of its own.
+        for id in [
+            "s2jInput",
+            "s2jOutput",
+            "s2jConvert",
+            "s2jFormatSql",
+            "s2jClearInput",
+            "s2jCopy",
+            "s2jClearResult",
+            "s2jStatus",
+            "s2jSplitter",
+            "s2jFormatMode",
+            "s2jEntity",
+            "s2jCaller",
+            "s2jReturnType",
+        ] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        // The option row offers both wrapper forms.
+        assert!(page.contains("value=\"lambda\""));
+        assert!(page.contains("value=\"stringColumns\""));
+
+        // Red / grey status line: one class, toggled by `statusKind`.
+        assert!(
+            page.contains(".statusline.error"),
+            "the error state has a rule"
+        );
+        assert!(
+            page.contains("node.classList.toggle('error', tab.statusKind === 'error')"),
+            "the status line follows statusKind"
+        );
+
+        // 压缩↔多行 is a pure display switch: its handler must not post.
+        let start = page
+            .find("$('l2sToggleFormat').addEventListener")
+            .expect("the toggle handler");
+        let end = start + page[start..].find("});").expect("the handler ends");
+        let handler = &page[start..end];
+        assert!(
+            !handler.contains("post("),
+            "the single/multi-line toggle never asks the host: {handler}"
+        );
+        assert!(
+            handler.contains("renderLogOutput"),
+            "it re-renders from the pushed output: {handler}"
+        );
+        assert!(
+            page.contains("function compactSql("),
+            "the compact form is derived on the page"
+        );
+
+        // "发送到 …" reaches the input panes (L32 hand-off), not just the tab.
+        assert!(
+            page.contains("$('l2sInput').value = sendText"),
+            "the log hand-off fills the log input pane"
+        );
+        assert!(
+            page.contains("$('s2jInput').value = sendText"),
+            "the SQL hand-off fills the SQL input pane"
+        );
     }
 
     #[test]
