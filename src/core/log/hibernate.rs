@@ -12,6 +12,17 @@
 //!   2026-11-26 10:00:01.123 DEBUG 4242 --- [nio-8080-exec-1] org.hibernate.SQL : select …
 //!   2026-11-26 10:00:01.124 TRACE 4242 --- [nio-8080-exec-1] org.hibernate.orm.jdbc.bind : binding parameter [1] as [BIGINT] - [42]
 //!   ```
+//!
+//! Not covered:
+//! - schema/DML-DDL rows (`org.hibernate.tool.schema…`), and DDL through the
+//!   SQL logger in general: a logback row is opened only by a
+//!   SELECT/INSERT/UPDATE/DELETE/MERGE/WITH/CALL/REPLACE body.
+//! - Hibernate 6.4+ binding syntax `binding parameter (1:BIGINT) -> [42]`; the
+//!   row is consumed as Hibernate noise, so the statement stays `partial`.
+//! - Patterns without a level token (`%d %logger - %msg`): such a row cannot be
+//!   told apart from a business log line that happens to mention SQL.
+//! - A logger row whose message body is empty and whose SQL starts on the next
+//!   (unprefixed) line: only the bare-row rule sees that SQL.
 
 use super::model::{Confidence, Family, ParseOptions, message_keys};
 use super::params::{Param, parse_binding, render_param};
@@ -372,6 +383,18 @@ mod tests {
         ]);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sql, "select id from users where id = 7");
+    }
+
+    #[test]
+    fn logback_padded_logger_column_is_recognized() {
+        // Spring Boot 默认 pattern 把 logger 右补空格成 `%-40.40logger{39}` 一列。
+        let entries = run(&[
+            "2026-11-26 10:00:06.001  DEBUG 4242 --- [nio-8080-exec-4] org.hibernate.SQL                       : select id from users where id = ?",
+            "2026-11-26 10:00:06.002  TRACE 4242 --- [nio-8080-exec-4] org.hibernate.orm.jdbc.bind              : binding parameter [1] as [BIGINT] - [9]",
+        ]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].sql, "select id from users where id = 9");
+        assert_eq!(entries[0].confidence, Confidence::Exact);
     }
 
     #[test]
