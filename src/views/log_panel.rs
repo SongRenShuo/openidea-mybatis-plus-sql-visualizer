@@ -297,6 +297,10 @@ pub enum FocusKind {
     Method,
     /// The row's correlation id (`traceId=…`).
     Request,
+    /// The statement's structure key (lane L32, "按模板聚焦"): every row that
+    /// shares the same shape, literals aside — the same key the `×N` badge
+    /// counts, so the menu entry and the badge describe one concept.
+    Template,
 }
 
 impl FocusKind {
@@ -304,6 +308,7 @@ impl FocusKind {
         match self {
             FocusKind::Method => "method",
             FocusKind::Request => "request",
+            FocusKind::Template => "template",
         }
     }
 
@@ -311,6 +316,7 @@ impl FocusKind {
         match token {
             "method" => Some(FocusKind::Method),
             "request" => Some(FocusKind::Request),
+            "template" => Some(FocusKind::Template),
             _ => None,
         }
     }
@@ -333,6 +339,7 @@ impl Focus {
         match self.kind {
             FocusKind::Method => row.focus_key().is_some_and(|key| key == self.value),
             FocusKind::Request => !self.value.is_empty() && row.request_id() == self.value,
+            FocusKind::Template => !self.value.is_empty() && row.n_plus_one_key == self.value,
         }
     }
 }
@@ -833,6 +840,24 @@ struct Store {
     /// Last history search over the buffered log text, carried in
     /// `tabs.history`.
     history: HistoryTab,
+    /// A "发送到 SQL→Java" / "发送到 日志→SQL" hand-off (lane L32), carried in
+    /// `sendToTab` until the page reports the tab it now shows.
+    send_to_tab: Option<SendToTab>,
+}
+
+/// One row handed to one of the two input tabs (lane L32).
+///
+/// The tabs' own input panes belong to the next lane; this build only carries
+/// the text and the tab to show, which is what the reference's
+/// `SendToSqlToJavaAction` / `SendToLogToSqlAction` put in the input area.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SendToTab {
+    /// `sqlToJava` or `logToSql`.
+    tab: String,
+    /// The SQL (→ SQL→Java) or the original log line (→ 日志→SQL).
+    text: String,
+    /// Whether the page should bring that tab forward.
+    select_tab: bool,
 }
 
 /// Result of one "SQL → Java" conversion (the tab keeps it across pushes).
@@ -891,6 +916,7 @@ impl Default for Store {
             log_to_sql_line: None,
             sql_to_java: SqlToJavaTab::default(),
             history: HistoryTab::default(),
+            send_to_tab: None,
         }
     }
 }
@@ -1147,6 +1173,7 @@ fn build_state() -> Value {
     let log_to_sql = log_to_sql_payload(&state.analysis, state.log_to_sql_line);
     let sql_to_java = sql_to_java_state(&state.sql_to_java);
     let history = history_state(&state.history);
+    let send_to_tab = state.send_to_tab.clone();
     drop(state);
 
     // The fifth tab (lane L23) is the preview workbench: the model and the
@@ -1156,6 +1183,24 @@ fn build_state() -> Value {
     // reports the tab it shows.
     let preview = crate::views::workbench::preview_tab();
     let select_tab = crate::views::workbench::select_tab();
+    // The engine half of the row's database badge (lane L32). It is the same
+    // configured dialect the preview tab states, so the two never disagree; a
+    // row that states no database still gets the engine only — this build
+    // captures no connection name and never invents one.
+    let dialect_name = preview
+        .get("dialect")
+        .and_then(|dialect| dialect.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let send_to_tab_json = match &send_to_tab {
+        Some(send) => json!({
+            "tab": send.tab,
+            "text": send.text,
+            "selectTab": send.select_tab,
+        }),
+        None => Value::Null,
+    };
 
     let stats = crate::capture::bridge::Stats::current();
 
@@ -1163,6 +1208,8 @@ fn build_state() -> Value {
         "op": "state",
         "rows": rows_json,
         "selectTab": select_tab,
+        "dialect": dialect_name,
+        "sendToTab": send_to_tab_json,
         "tabs": {
             "logToSql": log_to_sql,
             "sqlToJava": sql_to_java,
@@ -1628,8 +1675,10 @@ fn history_match(item: &Value, analysis: &LogAnalysis) -> HistoryMatch {
 /// single `labels` object.
 fn labels_json() -> Value {
     let mut base = labels_base();
-    if let (Some(target), Value::Object(extra)) = (base.as_object_mut(), labels_actions()) {
-        target.extend(extra);
+    for extra in [labels_actions(), labels_tabs()] {
+        if let (Some(target), Value::Object(extra)) = (base.as_object_mut(), extra) {
+            target.extend(extra);
+        }
     }
     base
 }
@@ -1644,6 +1693,10 @@ fn labels_base() -> Value {
         "selectNone": t("view.logs.filter.select_none"),
         "slowOnly": t("view.logs.filter.slow_only"),
         "search": t("view.logs.filter.search"),
+        // Row fragments (lane L32): the duration unit and the affected-row
+        // suffix the reference prints as `12ms` and `(3 rows)`.
+        "durationUnit": t("view.logs.row.duration_suffix"),
+        "rowsSuffix": t("view.logs.row.rows_suffix"),
         // The page draws its own action row: a packaged view gets no host toolbar.
         "pause": t("view.logs.button.pause"),
         "resume": t("view.logs.button.resume"),
@@ -1678,10 +1731,15 @@ fn labels_base() -> Value {
         "menuJumpXml": t("view.logs.menu.jump_xml"),
         "menuFocusMethod": t("view.logs.menu.focus_method"),
         "menuFocusRequest": t("view.logs.menu.focus_request"),
+        "menuFocusTemplate": t("view.logs.menu.focus_template"),
         "menuDelete": t("view.logs.menu.delete"),
         "menuBlockMethod": t("view.logs.menu.block_method"),
+        // Lane L32: the two "发送到" hand-offs into the input tabs.
+        "menuSendSqlToJava": t("view.logs.menu.send_sql_to_java"),
+        "menuSendLogToSql": t("view.logs.menu.send_log_to_sql"),
         "focusMethodPrefix": t("view.logs.focus.method_prefix"),
         "focusRequestPrefix": t("view.logs.focus.request_prefix"),
+        "focusTemplatePrefix": t("view.logs.focus.template_prefix"),
         "focusClear": t("view.logs.focus.clear"),
         "blockedPrefix": t("view.logs.blocked.prefix"),
         "blockedClear": t("view.logs.blocked.clear"),
@@ -1691,6 +1749,14 @@ fn labels_base() -> Value {
         "typeDelete": t("view.logs.type.delete"),
         "typeCreate": t("view.logs.type.create"),
         "typeDrop": t("view.logs.type.drop"),
+    })
+}
+
+/// Tab strip and per-tab captions (lanes L22/L23), split out of
+/// [`labels_base`] so no single `json!` call outgrows the macro's recursion
+/// budget — the merge in [`labels_json`] puts every entry in one object.
+fn labels_tabs() -> Value {
+    json!({
         // Tabs (lane L22).
         "tabLogs": t("view.logs.tab.logs"),
         "tabLogToSql": t("view.logs.tab.log_to_sql"),
@@ -1733,13 +1799,19 @@ fn labels_actions() -> Value {
         "captureStop": t("view.logs.button.capture_stop"),
         "scrollEnd": t("view.logs.button.scroll_end"),
         "sortDuration": t("view.logs.button.sort_duration"),
+        "sortTime": t("view.logs.menu.sort_time"),
         "sortTimeTitle": t("view.logs.sort.time_title"),
         "sortDurationTitle": t("view.logs.sort.duration_title"),
         "blocked": t("view.logs.button.blocked"),
         "blockedTitle": t("view.logs.blocked.title"),
         "blockedEmpty": t("view.logs.blocked.empty"),
         "settings": t("view.logs.button.settings"),
+        "menuSettingsPage": t("view.logs.menu.settings_page"),
         "help": t("view.logs.button.help"),
+        // Lane L32: the two toolbar entries the reference has and this build
+        // gained — quick preview and the community page.
+        "preview": t("view.logs.button.preview"),
+        "community": t("view.logs.button.community"),
         "followOn": t("view.logs.status.follow_on"),
         "followOff": t("view.logs.status.follow_off"),
         "groupExpand": t("view.logs.group.expand"),
@@ -1865,8 +1937,50 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
             }
         }
         // Tab strip: the page reports the tab it now shows, which closes a
-        // pending "switch to the preview tab" request.
-        "tab" => crate::views::workbench::note_page_tab(),
+        // pending "switch to the preview tab" request and any pending
+        // "send to a tab" hand-off (lane L32).
+        "tab" => {
+            crate::views::workbench::note_page_tab();
+            store().send_to_tab = None;
+        }
+        // Lane L32: "发送到 SQL→Java" / "发送到 日志→SQL". The two tabs' input
+        // panes are the next lane's work; what this lane owes them is the
+        // hand-off itself (which tab, what text), which stays in the state
+        // until the page reports the tab it now shows — a push sent before the
+        // page finished loading must not be the only chance it gets.
+        "send-to-tab" => {
+            let target = match message.get("tab").and_then(Value::as_str) {
+                Some("sqlToJava") => "sqlToJava",
+                Some("logToSql") => "logToSql",
+                _ => "",
+            };
+            if !target.is_empty()
+                && let Some(line) = message_line(&message)
+            {
+                let text = if target == "sqlToJava" {
+                    sql_of_line(line).unwrap_or_default()
+                } else {
+                    store()
+                        .text
+                        .lines()
+                        .nth(line.saturating_sub(1))
+                        .unwrap_or("")
+                        .to_string()
+                };
+                if !text.is_empty() {
+                    let select_tab = message
+                        .get("selectTab")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true);
+                    store().send_to_tab = Some(SendToTab {
+                        tab: target.to_string(),
+                        text,
+                        select_tab,
+                    });
+                    let _ = push_state();
+                }
+            }
+        }
         // "Log → SQL" tab: remember which line the page selected and re-push
         // the tab payload (the page keeps its list, so nothing is lost).
         "log-to-sql" => {
@@ -2029,6 +2143,22 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
         // channel.
         "help" => {
             common::emit(&help_text())?;
+        }
+        // Community (L32): the toolbar's 交流群 entry. This build ships no QR
+        // asset and the platform has no dialog API for one, so the entry points
+        // at the project's community page the way the settings entry points at
+        // the settings page, instead of doing nothing.
+        "community" => {
+            host::notify(
+                NotificationLevel::Info,
+                &t("view.logs.community.title"),
+                &t("view.logs.community.guide"),
+            );
+            common::emit(&format!(
+                "-- {}\n{}\n",
+                t("view.logs.community.title"),
+                t("view.logs.community.guide")
+            ))?;
         }
         // The preview tab (lane L23): the page prefixes its ops so they cannot
         // collide with this panel's own `clear` / `export` / `copy`; the model
@@ -2589,42 +2719,75 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
 
     #[test]
     fn the_packaged_page_draws_its_own_action_row() {
-        // A `web =` view gets no host toolbar, so the page must offer pause,
-        // clear and copy itself — as IDE-style icon buttons (L24): a 24×24
-        // hit area, an inline SVG from icons/toolbar/, and the Chinese label
-        // in `title` + `aria-label` instead of visible text.
+        // A `web =` view gets no host toolbar, so the page draws the reference's
+        // eleven toolbar actions itself (lane L32), in the reference order
+        // (`SqlLogPanel.toolbarGroup`): capture, capture-pause, clear, settings,
+        // block list, search, quick preview, scroll to end, sort, community,
+        // help. Each is an IDE icon button: a 24×24 hit area, an inline SVG, and
+        // the label in `title` + `aria-label` instead of visible text.
         let (_host, _guard) = test_host();
         let page = include_str!("../../web/log-panel.html");
-        for (id, op) in [
-            ("pauseBtn", "'toggle-pause'"),
-            ("clearBtn", "'clear'"),
-            ("copyAllBtn", "'copy-all'"),
-            // Lane L26 toolbar actions.
-            ("captureBtn", "'capture-start'"),
-            ("scrollEndBtn", "'scroll-end'"),
-            ("sortBtn", "'sort'"),
-            ("blockedBtn", "'clear-blocked'"),
-            ("settingsBtn", "'settings'"),
-            ("helpBtn", "'help'"),
-        ] {
-            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
-            assert!(page.contains(op), "missing op {op}");
-            assert!(
-                page.contains(&format!("id=\"{id}\" class=\"iconbtn\"")),
-                "{id} is an icon button"
-            );
-        }
-        // The action row draws pause + resume (one is hidden by the state),
-        // clear, copy, capture run + stop, scroll-to-bottom, sort, blocked,
-        // settings and help: eleven SVG bodies, no text buttons left.
         let bar_start = page.find("class=\"actionbar\"").expect("action row");
         let bar_end = page.find("class=\"filterbar\"").expect("filter row");
         let actionbar = &page[bar_start..bar_end];
-        assert_eq!(actionbar.matches("<svg").count(), 11, "{actionbar}");
+
+        // The reference's `agentPause` is permanently hidden (the agent channel
+        // is the default one); this build has no agent-pause op, so that slot
+        // carries the panel's own refresh pause instead of an empty space.
+        let order = [
+            "captureBtn",
+            "pauseBtn",
+            "clearBtn",
+            "settingsBtn",
+            "blockedBtn",
+            "searchBtn",
+            "previewBtn",
+            "scrollEndBtn",
+            "sortBtn",
+            "communityBtn",
+            "helpBtn",
+        ];
+        let mut previous = 0;
+        for id in order {
+            let at = actionbar
+                .find(&format!("id=\"{id}\" class=\"iconbtn\""))
+                .unwrap_or_else(|| panic!("missing icon button {id}"));
+            assert!(at >= previous, "{id} is out of the reference order");
+            previous = at;
+        }
+        assert_eq!(
+            actionbar.matches("class=\"iconbtn\"").count(),
+            order.len(),
+            "the action row holds exactly these buttons: {order:?}"
+        );
         assert!(
             !actionbar.contains("class=\"btn\""),
             "the action row has no text buttons"
         );
+        // The ops the entries post. The settings gear opens a popup whose items
+        // post the L26 `settings` / `help` ops; "copy SQL" is not a toolbar
+        // action in the reference (it lives in the row menu).
+        for op in [
+            "'capture-start'",
+            "'capture-stop'",
+            "'toggle-pause'",
+            "'clear'",
+            "'settings'",
+            "'clear-blocked'",
+            "'open-line'",
+            "'scroll-end'",
+            "'sort'",
+            "'community'",
+            "'help'",
+        ] {
+            assert!(page.contains(op), "missing op {op}");
+        }
+        // The gear opens the L32 popup rather than firing the op on the spot.
+        for id in ["settingsMenu", "settingsPageItem", "settingsHelpItem"] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        assert!(page.contains("openSettingsMenu($('settingsMenu').hidden)"));
+        // Both icons of the state-dependent entries are in the page.
         for id in [
             "pauseIcon",
             "resumeIcon",
@@ -2633,6 +2796,15 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         ] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
+        // The right edge, in the reference order (`SqlLogPanel.kt`): the slow
+        // count, then the SQL-type selector, then the dedupe box.
+        let right = actionbar.find("class=\"rightgroup\"").expect("right group");
+        let group = &actionbar[right..];
+        let slow = group.find("id=\"slowBadge\"").expect("slow count");
+        let types = group.find("id=\"typeBtn\"").expect("type selector");
+        let dedupe = group.find("id=\"dedupe\"").expect("dedupe box");
+        assert!(slow < types, "the slow count comes first");
+        assert!(types < dedupe, "the dedupe box comes last");
         // The label binds through `title` and `aria-label`, both fed by the
         // state's `labels`.
         assert!(
@@ -2645,14 +2817,17 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             "pause",
             "resume",
             "clear",
-            "copyAll",
             "captureStart",
             "captureStop",
             "scrollEnd",
             "sortDuration",
+            "sortTime",
             "blocked",
             "settings",
+            "menuSettingsPage",
             "help",
+            "preview",
+            "community",
             "followOn",
             "followOff",
             "groupExpand",
@@ -2942,23 +3117,41 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         );
         assert!(page.contains("rowsSig"), "rows are signature guarded");
         assert!(page.contains("event.key === 'Tab'"), "Ctrl+Tab cycling");
-        // Tab strip (L24): JBTabs-style cards instead of the underline. The
-        // selected tab is a raised page with a 4px top radius, and a narrow
-        // strip scrolls it into view (the host can switch to the fifth tab).
+        // Tab strip (L32): the new-UI **underline** tabs — every tab is a
+        // borderless label on the strip's rule and the selected one wears a
+        // 2px accent underline instead of a raised card. A narrow strip still
+        // scrolls the active tab into view (the host can switch to the fifth).
         assert!(
             page.contains(".tab.active"),
             "the selected tab has its own state class"
         );
+        let active_start = page.find(".tab.active {").expect("the active rule");
+        let active_end = active_start + page[active_start..].find('}').expect("the rule ends");
+        let active_rule = &page[active_start..active_end];
         assert!(
-            page.contains("border-radius: 4px 4px 0 0"),
-            "the selected tab is a card"
+            active_rule.contains("border-bottom-color: var(--openidea-accent)"),
+            "the selected tab wears the accent underline: {active_rule}"
         );
-        assert!(!page.contains(".tab.sel"), "the underline tab is gone");
+        assert!(
+            active_rule.contains("color: var(--openidea-fg-strong)"),
+            "the selected label uses the strong foreground: {active_rule}"
+        );
+        assert!(
+            !page.contains("border-radius: 4px 4px 0 0"),
+            "the card tabs are gone"
+        );
+        assert!(
+            !page.contains(".tab.sel"),
+            "tab selection stays on `.active`"
+        );
+        assert!(
+            page.contains("height: 32px; padding: 0 10px"),
+            "32px tabs with 10px side padding"
+        );
         assert!(
             page.contains("scrollIntoView({ inline: 'nearest', block: 'nearest' })"),
             "the active tab is scrolled into view"
         );
-        assert!(!page.contains("border-bottom-color: var(--openidea-accent)"));
         assert!(page.contains("op: 'log-to-sql'"), "log-to-sql op");
         assert!(page.contains("op: 'sql-to-java'"), "sql-to-java op");
         assert!(page.contains("op: 'history'"), "history op");
@@ -3055,13 +3248,15 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             !page.contains(".meta .dur { margin-left"),
             "the duration stays in the flow"
         );
+        // The slow count is no longer pushed right inside a filter row: it is the
+        // first control of the toolbar's right edge (lane L32).
         assert!(
-            page.contains("#slowBadge { margin-left: auto; }"),
-            "the slow capsule is the one right-aligned element"
+            !page.contains("#slowBadge { margin-left: auto; }"),
+            "the slow count lives in the toolbar's right group"
         );
 
         let build_start = page
-            .find("function buildRow(row, slowThreshold, isMember)")
+            .find("function buildRow(row, slowThreshold, isMember, dialect)")
             .unwrap();
         let build_end = page.find("function formatMs(ms)").unwrap();
         let build = &page[build_start..build_end];
@@ -3078,6 +3273,173 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         assert!(dur < badge, "badges after the duration");
         assert!(badge < source, "the source comes after the badges");
         assert!(source < method, "[file:line] before [Class#method]");
+    }
+
+    #[test]
+    fn the_row_header_matches_the_reference_shape() {
+        // `SqlEntryPresentation.headerFragments` (lane L32): the sequence bare,
+        // the timestamp bracketed, the duration with its unit, then the database
+        // badge; the statement folds to three lines with `… (+N)` on the third.
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        assert!(
+            page.contains("makePart('seq', '#' + row.seq)"),
+            "the sequence is bare"
+        );
+        assert!(
+            page.contains("makePart('part time', '[' + (row.time || '-') + ']')"),
+            "the timestamp is bracketed"
+        );
+        // `12ms`: the unit comes from the locale, and an unknown duration draws
+        // the reference's em dash.
+        assert!(
+            page.contains("formatMs(row.duration_ms) + (L.durationUnit || 'ms')"),
+            "the duration carries its unit"
+        );
+        assert!(page.contains("? '—'"), "unknown duration is an em dash");
+        // The database badge states the configured engine and appends the
+        // database only when the row carries one — never a guessed connection.
+        assert!(page.contains("var dbText = dbBadge(row.db, dialect);"));
+        assert!(
+            page.contains("var name = db || '';"),
+            "no invented database"
+        );
+        // Folding: three lines, a muted `… (+N)` tail, the full SQL in the tip.
+        assert!(page.contains("var SQL_MAX_LINES = 3;"), "sql-lines-3");
+        assert!(
+            page.contains("tail: ' … (+' + rest + ')'"),
+            "the dropped-line tail"
+        );
+        assert!(
+            page.contains("sql.title = row.sql;"),
+            "the whole statement stays in the tooltip"
+        );
+        assert!(
+            page.contains(".sql .sqlTail { color: var(--openidea-fg-muted); }"),
+            "the tail is muted"
+        );
+        // `(N rows)`, the reference's affected-row fragment.
+        assert!(page.contains("'(' + row.rows_affected + ' ' + (L.rowsSuffix || 'rows') + ')'"));
+    }
+
+    #[test]
+    fn the_status_line_uses_the_reference_wording() {
+        // `CaptureStatusBar` (lane L32): the left segment is the console channel
+        // (`控制台：已扫描 N 行`) and the right one the enhanced channel
+        // (`增强：未开启` while it is off). The attached-console count that the
+        // reference prints first is not available to this build, so it is not
+        // printed rather than guessed.
+        let (_host, _guard) = test_host();
+        use crate::i18n::t_in;
+        assert_eq!(
+            t_in("zh-CN", "view.logs.status.console_prefix"),
+            "控制台：已扫描"
+        );
+        assert_eq!(
+            t_in("en", "view.logs.status.console_prefix"),
+            "Console: scanned"
+        );
+        assert_eq!(t_in("zh-CN", "view.logs.status.agent_off"), "增强：未开启");
+        assert_eq!(
+            t_in("en", "view.logs.status.agent_events_prefix"),
+            "Enhanced: received"
+        );
+        let labels = labels_json();
+        for key in [
+            "statusConsolePrefix",
+            "statusConsoleSuffix",
+            "statusAgentOff",
+            "statusAgentEventsPrefix",
+        ] {
+            assert!(labels.get(key).is_some(), "missing label {key}");
+        }
+        let page = include_str!("../../web/log-panel.html");
+        assert!(
+            page.contains("(L.statusConsolePrefix || '') + ' ' + (s.console_lines || 0)"),
+            "the console segment is prefix + scanned count"
+        );
+    }
+
+    #[test]
+    fn send_to_tab_hands_the_row_text_to_the_input_tab() {
+        // Lane L32: "发送到 SQL→Java" hands the statement over, "发送到 日志→SQL"
+        // the original log line; the tab that received it comes forward and the
+        // hand-off clears once the page reports the tab it shows.
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        let line = snapshot()
+            .entries
+            .iter()
+            .find(|entry| entry.has_sql())
+            .unwrap()
+            .line_no;
+        handle_panel_message(
+            &host,
+            &format!("{{\"op\":\"send-to-tab\",\"tab\":\"sqlToJava\",\"line\":{line}}}"),
+        )
+        .unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sendToTab"]["tab"], "sqlToJava");
+        assert_eq!(state["sendToTab"]["selectTab"], true);
+        assert!(
+            state["sendToTab"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("SELECT") || text.contains("DELETE")),
+            "{:?}",
+            state["sendToTab"]
+        );
+
+        handle_panel_message(
+            &host,
+            &format!("{{\"op\":\"send-to-tab\",\"tab\":\"logToSql\",\"line\":{line}}}"),
+        )
+        .unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sendToTab"]["tab"], "logToSql");
+        assert!(
+            state["sendToTab"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Preparing")),
+            "the raw log line, not the SQL: {:?}",
+            state["sendToTab"]
+        );
+
+        handle_panel_message(&host, "{\"op\":\"tab\"}").unwrap();
+        assert!(
+            store().send_to_tab.is_none(),
+            "hand-off is one-shot: the page reporting its tab consumes it"
+        );
+    }
+
+    #[test]
+    fn focus_by_template_keeps_only_that_structure() {
+        // Lane L32's "按模板聚焦": the chip filters on the same structure key
+        // the `×N` badge counts, so rows of other shapes drop out.
+        let mut text = String::new();
+        for id in 0..5 {
+            text.push_str(&format!(
+                "==>  Preparing: SELECT * FROM t WHERE id = ?\n==> Parameters: {id}(Integer)\n"
+            ));
+        }
+        text.push_str(
+            "==>  Preparing: SELECT * FROM other WHERE id = ?\n==> Parameters: 9(Integer)\n",
+        );
+        let rows = build_rows(&analysis_of(&text), false, 1000.0);
+        let key = rows[0].n_plus_one_key.clone();
+        assert!(!key.is_empty(), "the group row carries its template key");
+        let filter = Filter {
+            focus: Some(Focus {
+                kind: FocusKind::Template,
+                value: key.clone(),
+            }),
+            ..Filter::default()
+        };
+        let kept = filter_rows(&rows, &filter, 1000.0);
+        assert_eq!(kept.len(), 5, "{:?}", kept.len());
+        assert!(kept.iter().all(|row| row.n_plus_one_key == key));
+        // The chip's kind survives the round trip the page uses.
+        assert_eq!(FocusKind::Template.token(), "template");
+        assert_eq!(FocusKind::parse("template"), Some(FocusKind::Template));
     }
 
     #[test]
@@ -3131,10 +3493,13 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             "jump-xml",
             "focus-method",
             "focus-request",
+            "focus-template",
             "delete-line",
             "block-method",
             "copy-sql",
             "copy-time",
+            "send-sql-to-java",
+            "send-log-to-sql",
             "export",
         ] {
             assert!(
@@ -3142,6 +3507,33 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
                 "missing menu item {act}"
             );
         }
+        // The reference's twelve row actions in its order
+        // (`SqlLogPanelActions.showContextMenu`).
+        let menu_start = page.find("id=\"ctxMenu\"").expect("context menu");
+        let menu_end = menu_start + page[menu_start..].find("</div>").expect("menu ends");
+        let menu = &page[menu_start..menu_end];
+        let mut previous = 0;
+        for act in [
+            "copy-sql",
+            "copy-time",
+            "delete-line",
+            "block-method",
+            "send-sql-to-java",
+            "send-log-to-sql",
+            "jump-java",
+            "jump-xml",
+            "focus-method",
+            "focus-request",
+            "focus-template",
+            "export",
+        ] {
+            let at = menu
+                .find(&format!("data-act=\"{act}\""))
+                .unwrap_or_else(|| panic!("missing {act}"));
+            assert!(at >= previous, "{act} is out of the reference order");
+            previous = at;
+        }
+        assert_eq!(menu.matches("<button").count(), 12, "twelve row actions");
         // An item is disabled exactly when the row does not state the dimension.
         assert!(page.contains("enableItem('jump-java', !!(row && row.jump_file))"));
         assert!(page.contains("enableItem('jump-xml', !!(row && row.xml_file))"));
