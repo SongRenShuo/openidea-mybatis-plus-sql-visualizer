@@ -49,13 +49,11 @@ fn keyword_ms(lower: &str, keyword: &str) -> Option<f64> {
         let before_ok = start == 0
             || !lower.as_bytes()[start - 1].is_ascii_alphanumeric()
                 && lower.as_bytes()[start - 1] != b'_';
-        if before_ok {
-            if let Some((value, rest)) = number_after(lower, start + keyword.len()) {
-                let tail = &lower[rest..];
-                let tail = tail.trim_start();
-                if tail.starts_with("ms") {
-                    return Some(value);
-                }
+        if before_ok && let Some((value, rest)) = number_after(lower, start + keyword.len()) {
+            let tail = &lower[rest..];
+            let tail = tail.trim_start();
+            if tail.starts_with("ms") {
+                return Some(value);
             }
         }
         from = start + keyword.len();
@@ -83,10 +81,10 @@ fn labelled_number(lower: &str, label: &str, require_ms: bool) -> Option<f64> {
                 while i < b.len() && b[i] == b' ' {
                     i += 1;
                 }
-                if let Some((value, rest)) = number_at(lower, i) {
-                    if !require_ms || lower[rest..].trim_start().starts_with("ms") {
-                        return Some(value);
-                    }
+                if let Some((value, rest)) = number_at(lower, i)
+                    && (!require_ms || lower[rest..].trim_start().starts_with("ms"))
+                {
+                    return Some(value);
                 }
             }
         }
@@ -118,10 +116,10 @@ fn generic_time(lower: &str) -> Option<f64> {
                 while i < b.len() && b[i] == b' ' {
                     i += 1;
                 }
-                if let Some((value, rest)) = number_at(lower, i) {
-                    if lower[rest..].trim_start().starts_with("ms") {
-                        return Some(value);
-                    }
+                if let Some((value, rest)) = number_at(lower, i)
+                    && lower[rest..].trim_start().starts_with("ms")
+                {
+                    return Some(value);
                 }
             }
         }
