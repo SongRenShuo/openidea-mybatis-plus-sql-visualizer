@@ -42,18 +42,20 @@ fn start(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     // Subscribe before connecting: the first `websocket-ready` can arrive with
     // the very first frame, and an unsubscribed event is lost.
     let subscribed = bridge::ensure_websocket_subscription();
+    let subscription = if subscribed {
+        "subscribed"
+    } else if bridge::websocket_subscription_active() {
+        "already subscribed"
+    } else {
+        "unavailable (events denied?)"
+    };
 
     let mut out = String::new();
     match bridge::connect(&project, &url) {
         Ok(socket) => {
             let _ = writeln!(
                 out,
-                "-- capture-start: connected {url} (socket {socket}, websocket-ready: {})",
-                if subscribed {
-                    "subscribed"
-                } else {
-                    "already active"
-                }
+                "-- capture-start: connected {url} (socket {socket}, websocket-ready: {subscription})"
             );
             let _ = writeln!(
                 out,

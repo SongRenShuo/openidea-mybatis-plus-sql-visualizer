@@ -308,6 +308,12 @@ pub fn ensure_websocket_subscription() -> bool {
     }
 }
 
+/// Whether `websocket-ready` is currently subscribed (a failed subscription
+/// stays `false`, so the command can tell failure from "already active").
+pub fn websocket_subscription_active() -> bool {
+    *subscribed()
+}
+
 /// Asks the agent to stop, closes the socket and returns the final statistics.
 pub fn disconnect() -> Result<Stats, BridgeError> {
     let mut guard = slot();
