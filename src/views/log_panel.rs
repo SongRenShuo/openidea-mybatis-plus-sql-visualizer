@@ -3190,7 +3190,10 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             "pvFormatPreview",
             "pvMode",
             "pvExport",
-            "pvParams",
+            "pvParamsList",
+            "pvRebindBtn",
+            "pvImportBtn",
+            "pvRollback",
             "pvTabBody",
             "pvExecute",
             "pvCopySql",
@@ -3204,6 +3207,23 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
                 "missing inner tab {tab}"
             );
         }
+        // Lane L27: the parameter column is editable, rebinds through the host
+        // and imports a comma/newline separated list from the clipboard; when
+        // the clipboard API is absent the import button is greyed with the
+        // reason, and the rollback entry explains why it is disabled.
+        assert!(page.contains("pv-param-input"), "editable parameter inputs");
+        assert!(page.contains("op: 'preview-params'"), "the rebind op");
+        assert!(
+            page.contains("navigator.clipboard.readText()"),
+            "the clipboard read"
+        );
+        assert!(page.contains("importBtn.disabled"), "the degrade branch");
+        assert!(
+            page.contains("split(/[\\r\\n,]+/)"),
+            "comma/newline parsing"
+        );
+        assert!(page.contains("op: 'preview-rollback'"), "the rollback op");
+        assert!(page.contains("labels.rollbackNote"), "the rollback note");
         // Execute stays disabled with the reason in its tooltip; the page has
         // no external link, no storage and builds no markup from data.
         assert!(page.contains("pvSig"), "the tab body is signature guarded");
