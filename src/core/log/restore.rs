@@ -13,6 +13,14 @@ pub(crate) struct Restored {
 /// Replace the first `params.len()` placeholders in order. Extra parameters are
 /// ignored; missing ones stay `?`.
 pub(crate) fn restore(sql: &str, params: &[Param]) -> Restored {
+    let literals: Vec<String> = params.iter().map(render_param).collect();
+    restore_literals(sql, &literals)
+}
+
+/// The same substitution for callers that already hold rendered SQL literals
+/// (`LogEntry::params`): placeholder order and the string/comment scanner are
+/// shared with [`restore`], so no quoting happens twice.
+pub(crate) fn restore_literals(sql: &str, literals: &[String]) -> Restored {
     let positions = placeholder_positions(sql);
     if positions.is_empty() {
         return Restored {
@@ -21,15 +29,15 @@ pub(crate) fn restore(sql: &str, params: &[Param]) -> Restored {
             used: 0,
         };
     }
-    let mut out = String::with_capacity(sql.len() + params.len() * 8);
+    let mut out = String::with_capacity(sql.len() + literals.len() * 8);
     let mut prev = 0usize;
     let mut used = 0usize;
     for pos in &positions {
-        if used >= params.len() {
+        if used >= literals.len() {
             break;
         }
         out.push_str(&sql[prev..*pos]);
-        out.push_str(&render_param(&params[used]));
+        out.push_str(&literals[used]);
         prev = pos + 1;
         used += 1;
     }
@@ -120,5 +128,16 @@ mod tests {
         let r = restore("select ? , ?", &[p("1", "Long")]);
         assert_eq!(r.sql, "select 1 , ?");
         assert_eq!(r.used, 1);
+    }
+
+    #[test]
+    fn rendered_literals_are_substituted_without_requoting() {
+        let literals = vec!["1".to_string(), "'a''b'".to_string()];
+        let r = restore_literals("select ? as a, ? as b, ? as c", &literals);
+        assert_eq!(r.sql, "select 1 as a, 'a''b' as b, ? as c");
+        assert_eq!(r.placeholders, 3);
+        assert_eq!(r.used, 2);
+        // Already-rendered text is never quoted a second time.
+        assert!(!r.sql.contains("'''"));
     }
 }

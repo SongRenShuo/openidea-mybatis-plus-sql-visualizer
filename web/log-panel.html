@@ -127,10 +127,77 @@
       color: var(--openidea-fg); padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px;
     }
     .ctxmenu button:hover { background: var(--openidea-bg-hover); }
+    /* Tab strip (L22): one row, IDE-like underline, scrolls when it overflows */
+    .tabstrip {
+      display: flex; align-items: stretch; flex: 0 0 auto;
+      overflow-x: auto; overflow-y: hidden; white-space: nowrap;
+      border-bottom: 1px solid var(--openidea-border);
+      background: var(--openidea-bg-elevated);
+    }
+    .tab {
+      flex: 0 0 auto; background: none; border: none; cursor: pointer;
+      padding: 5px 10px 4px; font-size: 12px; color: var(--openidea-fg-muted);
+      border-bottom: 2px solid transparent;
+    }
+    .tab:hover { background: var(--openidea-bg-hover); color: var(--openidea-fg); }
+    .tab.sel {
+      color: var(--openidea-fg-strong); border-bottom-color: var(--openidea-accent);
+      background: var(--openidea-bg);
+    }
+
+    /* One panel per tab; only the selected one is visible */
+    .panel {
+      display: flex; flex-direction: column; flex: 1 1 auto;
+      min-height: 0; min-width: 0;
+    }
+
+    /* Shared body of the three auxiliary tabs */
+    .tabbody {
+      flex: 1 1 auto; overflow: auto; padding: 8px;
+      display: flex; flex-direction: column; gap: 6px; min-height: 0;
+    }
+    .caption { font-size: 11px; color: var(--openidea-fg-muted); margin-top: 2px; }
+    .code {
+      margin: 0; padding: 6px; border-radius: 3px;
+      background: var(--openidea-bg-input); border: 1px solid var(--openidea-border);
+      color: var(--openidea-fg); font-family: var(--openidea-font-mono, monospace);
+      white-space: pre-wrap; word-break: break-word; font-size: 12px;
+    }
+    .codeinput {
+      flex: 0 0 auto; min-height: 104px; resize: vertical;
+      background: var(--openidea-bg-input); color: var(--openidea-fg);
+      border: 1px solid var(--openidea-border); border-radius: 3px;
+      padding: 4px 6px; font-family: var(--openidea-font-mono, monospace); font-size: 12px;
+    }
+    .tabactions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .tabactions .spacer { margin-left: auto; }
+    .tabempty {
+      flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+      color: var(--openidea-fg-muted); padding: 16px 8px; text-align: center;
+    }
+    .btn[disabled] { opacity: 0.5; cursor: default; }
+    .badge.warn { background: var(--openidea-bg-selected); color: var(--openidea-danger); }
+    .entity { flex: 0 1 180px; }
+    .histlist { flex: 1 1 auto; overflow: auto; min-height: 0; }
+    .histrow {
+      border-bottom: 1px solid var(--openidea-border); padding: 4px 8px;
+      cursor: pointer;
+    }
+    .histrow:hover { background: var(--openidea-bg-hover); }
+    .histrow .sql { margin-top: 2px; }
+
     [hidden] { display: none !important; }
   </style>
 </head>
 <body>
+  <div class="tabstrip" id="tabStrip" role="tablist">
+    <button class="tab sel" type="button" role="tab" aria-selected="true" data-tab="logs" id="tab-logs"></button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-tab="logToSql" id="tab-logToSql"></button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-tab="sqlToJava" id="tab-sqlToJava"></button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-tab="history" id="tab-history"></button>
+  </div>
+
+  <div class="panel" id="panelLogs">
   <div class="actionbar">
     <button id="pauseBtn" class="btn" type="button"></button>
     <button id="clearBtn" class="btn" type="button"></button>
@@ -174,6 +241,59 @@
     <span id="statusMid"></span>
     <span id="statusRight"></span>
   </div>
+  </div>
+
+  <!-- 日志 → SQL -->
+  <div class="panel" id="panelLogToSql" hidden>
+    <div class="tabbody">
+      <div class="tabactions">
+        <button id="l2sCopyBtn" class="btn" type="button"></button>
+        <button id="l2sSendBtn" class="btn" type="button"></button>
+        <span class="spacer"></span>
+        <span id="l2sConfidence" class="badge" hidden></span>
+      </div>
+      <div class="caption" id="l2sRawCaption"></div>
+      <pre class="code" id="l2sRaw"></pre>
+      <div class="caption" id="l2sParamsCaption"></div>
+      <pre class="code" id="l2sParams"></pre>
+      <div class="caption" id="l2sRestoredCaption"></div>
+      <pre class="code" id="l2sRestored"></pre>
+      <div id="l2sEmpty" class="tabempty" hidden></div>
+    </div>
+  </div>
+
+  <!-- SQL → Java -->
+  <div class="panel" id="panelSqlToJava" hidden>
+    <div class="tabbody">
+      <div class="caption" id="s2jInputCaption"></div>
+      <textarea id="s2jInput" class="codeinput" spellcheck="false" autocomplete="off"></textarea>
+      <div class="tabactions">
+        <input id="s2jEntity" class="kw entity" type="text" autocomplete="off" spellcheck="false">
+        <button id="s2jRunBtn" class="btn" type="button"></button>
+        <button id="s2jCopyBtn" class="btn" type="button"></button>
+        <span class="spacer"></span>
+        <span id="s2jConfidence" class="badge" hidden></span>
+      </div>
+      <div id="s2jReason" class="danger" hidden></div>
+      <div class="caption" id="s2jParams"></div>
+      <div class="caption" id="s2jOutputCaption" hidden></div>
+      <pre class="code" id="s2jOutput" hidden></pre>
+      <div id="s2jEmpty" class="tabempty" hidden></div>
+    </div>
+  </div>
+
+  <!-- SQL 历史 -->
+  <div class="panel" id="panelHistory" hidden>
+    <div class="tabbody">
+      <div class="tabactions">
+        <input id="histKw" class="kw" type="text" autocomplete="off" spellcheck="false">
+        <button id="histSearchBtn" class="btn" type="button"></button>
+      </div>
+      <div id="histCount" class="muted"></div>
+      <div id="histList" class="histlist"></div>
+      <div id="histEmpty" class="tabempty" hidden></div>
+    </div>
+  </div>
 
   <div id="ctxMenu" class="ctxmenu" hidden>
     <button type="button" data-act="copy-sql"></button>
@@ -200,6 +320,18 @@
       var selectedLine = null;
       var ctxLine = null;
       var typeMenuBuilt = false;
+      // Tab strip (L22). Selection is DOM-only: no state request on switch.
+      var TAB_IDS = ['logs', 'logToSql', 'sqlToJava', 'history'];
+      var PANELS = {
+        logs: 'panelLogs', logToSql: 'panelLogToSql',
+        sqlToJava: 'panelSqlToJava', history: 'panelHistory'
+      };
+      var activeTab = 'logs';
+      // Line the "Log → SQL" tab shows (null = nothing to restore yet).
+      var logToSqlLine = null;
+      // Signature of the rendered log rows: a state push that does not change
+      // them must not rebuild the list (scroll and selection survive).
+      var rowsSig = null;
       var ui = {
         types: { select: true, insert: true, update: true, delete: true, create: true, drop: true },
         slowOnly: false, dedupe: true, matchCase: false, regex: false, keyword: ''
@@ -291,7 +423,29 @@
         setText($('ctxMenu').querySelector('[data-act="copy-time"]'), L.menuCopyTime);
         setText($('ctxMenu').querySelector('[data-act="export"]'), L.menuExport);
         setText($('empty'), L.empty);
+        updateTabLabels();
         updateTypeButton();
+      }
+
+      function updateTabLabels() {
+        setText($('tab-logs'), L.tabLogs || 'SQL Logs');
+        setText($('tab-logToSql'), L.tabLogToSql || 'Log -> SQL');
+        setText($('tab-sqlToJava'), L.tabSqlToJava || 'SQL -> Java');
+        setText($('tab-history'), L.tabHistory || 'SQL History');
+        setText($('l2sRawCaption'), L.tabLogToSqlRaw);
+        setText($('l2sParamsCaption'), L.tabLogToSqlParams);
+        setText($('l2sRestoredCaption'), L.tabLogToSqlRestored);
+        setText($('l2sCopyBtn'), L.tabLogToSqlCopy);
+        setText($('l2sSendBtn'), L.tabLogToSqlSend);
+        setText($('s2jInputCaption'), L.tabSqlToJavaInput);
+        $('s2jInput').placeholder = L.tabSqlToJavaInput || '';
+        $('s2jEntity').placeholder = L.tabSqlToJavaEntity || '';
+        $('s2jEntity').title = L.tabSqlToJavaEntity || '';
+        setText($('s2jRunBtn'), L.tabSqlToJavaRun);
+        setText($('s2jCopyBtn'), L.tabSqlToJavaCopy);
+        setText($('s2jOutputCaption'), L.tabSqlToJavaOutput);
+        $('histKw').placeholder = L.tabHistoryKeyword || '';
+        setText($('histSearchBtn'), L.tabHistorySearch);
       }
 
       function updateTypeButton() {
@@ -433,12 +587,17 @@
       }
 
       function selectLine(line) {
+        var changed = selectedLine !== line;
         selectedLine = line;
         var rows = $('list').querySelectorAll('.row');
         for (var i = 0; i < rows.length; i++) {
           if (rows[i].getAttribute('data-line') === String(line)) { rows[i].classList.add('sel'); }
           else { rows[i].classList.remove('sel'); }
         }
+        // Only a real change asks the host for the "Log → SQL" payload; the
+        // reply re-pushes state, but the row signature is unchanged so the list
+        // (and its scroll position) is left alone.
+        if (changed && line != null) { post({ op: 'log-to-sql', line: line }); }
       }
 
       function renderList(state) {
@@ -501,6 +660,163 @@
         }
       }
 
+      // Tabs ----------------------------------------------------------------
+      function tabButton(tab) { return $('tab-' + tab); }
+      function tabPanel(tab) { return $(PANELS[tab]); }
+
+      function selectTab(tab, notify) {
+        if (TAB_IDS.indexOf(tab) < 0) { return; }
+        activeTab = tab;
+        for (var i = 0; i < TAB_IDS.length; i++) {
+          var id = TAB_IDS[i];
+          var on = id === tab;
+          var btn = tabButton(id);
+          if (btn) {
+            btn.classList.toggle('sel', on);
+            btn.setAttribute('aria-selected', on ? 'true' : 'false');
+          }
+          var panel = tabPanel(id);
+          if (panel) { panel.hidden = !on; }
+        }
+        // `tab` is a hint only: the host does not answer it, so switching
+        // never re-requests state.
+        if (notify) { post({ op: 'tab', tab: tab }); }
+      }
+
+      function cycleTab(delta) {
+        var index = TAB_IDS.indexOf(activeTab);
+        if (index < 0) { index = 0; }
+        var next = (index + delta + TAB_IDS.length) % TAB_IDS.length;
+        selectTab(TAB_IDS[next], true);
+      }
+
+      // A cheap identity for the pushed rows: same signature => same list, so
+      // the DOM is not rebuilt and scroll/selection survive.
+      function rowsSignature(rows) {
+        var parts = [];
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          parts.push(r.line + '/' + r.seq + '/' + r.sql_type + '/' + r.category + '/' +
+            r.dedupe_count + '/' + r.group_count + '/' + (r.n_plus_one ? 1 : 0));
+        }
+        return parts.join('|');
+      }
+
+      function confidenceLabel(value) {
+        if (value === 'exact') { return L.tabConfidenceExact || ''; }
+        if (value === 'partial') { return L.tabConfidencePartial || ''; }
+        if (value === 'unresolved') { return L.tabConfidenceUnresolved || ''; }
+        return '';
+      }
+
+      function confidenceText(value) {
+        var label = confidenceLabel(value);
+        if (!label) { return ''; }
+        return ((L.tabConfidencePrefix || '') + ' ' + label).replace(/\s+/g, ' ').trim();
+      }
+
+      function showConfidence(node, value) {
+        var text = confidenceText(value);
+        node.hidden = !text;
+        setText(node, text);
+        node.classList.toggle('warn', value === 'unresolved');
+      }
+
+      // "Log → SQL" ---------------------------------------------------------
+      function applyLogToSql(tab) {
+        tab = tab || {};
+        var empty = !!tab.empty;
+        logToSqlLine = (tab.line == null) ? null : tab.line;
+        $('l2sRaw').hidden = empty;
+        $('l2sParams').hidden = empty;
+        $('l2sRestored').hidden = empty;
+        $('l2sRawCaption').hidden = empty;
+        $('l2sParamsCaption').hidden = empty;
+        $('l2sRestoredCaption').hidden = empty;
+        setText($('l2sRaw'), empty ? '' : (tab.rawSql || ''));
+        var params = (!empty && tab.params) ? tab.params : [];
+        setText($('l2sParams'), params.length ? params.join(', ') : '-');
+        setText($('l2sRestored'), empty ? '' : (tab.restored || ''));
+        $('l2sEmpty').hidden = !empty;
+        setText($('l2sEmpty'), L.tabLogToSqlEmpty || '');
+        $('l2sCopyBtn').disabled = empty;
+        $('l2sSendBtn').disabled = empty;
+        showConfidence($('l2sConfidence'), empty ? '' : (tab.confidence || ''));
+      }
+
+      // "SQL → Java" --------------------------------------------------------
+      function applySqlToJava(tab) {
+        tab = tab || {};
+        var ran = !!tab.ran;
+        var code = tab.code || '';
+        var reason = tab.reason || '';
+        $('s2jOutput').hidden = !code;
+        $('s2jOutputCaption').hidden = !code;
+        setText($('s2jOutput'), code);
+        $('s2jReason').hidden = !(reason && !code);
+        setText($('s2jReason'), (reason && !code) ?
+          ((L.tabSqlToJavaReason || '') + ': ' + reason) : '');
+        var params = tab.params || [];
+        $('s2jParams').hidden = params.length === 0;
+        setText($('s2jParams'), params.length ?
+          ((L.tabSqlToJavaParams || '') + ': ' + params.join(', ')) : '');
+        $('s2jEmpty').hidden = ran;
+        setText($('s2jEmpty'), L.tabSqlToJavaEmpty || '');
+        $('s2jCopyBtn').disabled = !code;
+        showConfidence($('s2jConfidence'), tab.confidence || '');
+      }
+
+      // "SQL history" -------------------------------------------------------
+      function buildHistoryRow(item) {
+        var el = document.createElement('div');
+        el.className = 'histrow';
+        var meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.appendChild(makePart('seq', '#' + item.line));
+        meta.appendChild(makePart('part time', item.time || '-'));
+        // This build captures no source file for a log line (see LIMITS.md).
+        meta.appendChild(makePart('part src', '[' + (L.tabHistorySource || '') + ': -]'));
+        el.appendChild(meta);
+        var sql = document.createElement('div');
+        sql.className = 'sql';
+        sql.textContent = item.sql || item.text || '';
+        el.appendChild(sql);
+        el.title = item.text || '';
+        el.addEventListener('click', function () {
+          post({ op: 'history-open', line: item.line });
+        });
+        return el;
+      }
+
+      function applyHistory(tab) {
+        tab = tab || {};
+        var list = $('histList');
+        while (list.firstChild) { list.removeChild(list.firstChild); }
+        var matches = tab.matches || [];
+        if (matches.length === 0) {
+          list.hidden = true;
+          $('histEmpty').hidden = false;
+          setText($('histEmpty'), tab.ran ? (L.tabHistoryNoMatch || '') : (L.tabHistoryEmpty || ''));
+        } else {
+          list.hidden = false;
+          $('histEmpty').hidden = true;
+          var frag = document.createDocumentFragment();
+          for (var i = 0; i < matches.length; i++) { frag.appendChild(buildHistoryRow(matches[i])); }
+          list.appendChild(frag);
+        }
+        var count = '';
+        if (tab.ran && tab.total > 0) {
+          count = tab.total + ' ' + (L.tabHistoryCountSuffix || '');
+        }
+        if (tab.truncated) {
+          count += (count ? ' · ' : '') + (L.tabHistoryTruncated || '');
+        }
+        setText($('histCount'), count.replace(/\s+/g, ' ').trim());
+        if (document.activeElement !== $('histKw')) {
+          $('histKw').value = tab.keyword || '';
+        }
+      }
+
       function applyState(state) {
         current = state;
         L = state.labels || L;
@@ -509,9 +825,17 @@
         syncFromState(state);
         syncTypeCheckboxes();
         updateTypeButton();
-        renderList(state);
+        var sig = rowsSignature(state.rows || []);
+        if (sig !== rowsSig) {
+          rowsSig = sig;
+          renderList(state);
+        }
         updateCounts(state);
         updateStatus(state);
+        var tabs = state.tabs || {};
+        applyLogToSql(tabs.logToSql);
+        applySqlToJava(tabs.sqlToJava);
+        applyHistory(tabs.history);
       }
 
       // Type popup ----------------------------------------------------------
@@ -533,6 +857,31 @@
       function closeCtx() { $('ctxMenu').hidden = true; ctxLine = null; }
 
       // Wiring --------------------------------------------------------------
+      for (var tabIndex = 0; tabIndex < TAB_IDS.length; tabIndex++) {
+        (function (tab) {
+          var btn = tabButton(tab);
+          if (btn) {
+            btn.addEventListener('click', function () { selectTab(tab, true); });
+          }
+        })(TAB_IDS[tabIndex]);
+      }
+      $('l2sCopyBtn').addEventListener('click', function () {
+        if (logToSqlLine != null) { post({ op: 'copy-line', line: logToSqlLine }); }
+      });
+      $('l2sSendBtn').addEventListener('click', function () {
+        if (logToSqlLine != null) { post({ op: 'open-line', line: logToSqlLine }); }
+      });
+      $('s2jRunBtn').addEventListener('click', function () {
+        post({ op: 'sql-to-java', text: $('s2jInput').value, entity: $('s2jEntity').value });
+      });
+      $('s2jCopyBtn').addEventListener('click', function () { post({ op: 'copy-code' }); });
+      $('histSearchBtn').addEventListener('click', function () {
+        post({ op: 'history', keyword: $('histKw').value });
+      });
+      $('histKw').addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') { event.preventDefault(); $('histSearchBtn').click(); }
+      });
+
       $('typeBtn').addEventListener('click', function (event) {
         event.stopPropagation();
         openTypeMenu($('typeMenu').hidden);
@@ -576,6 +925,14 @@
 
       document.addEventListener('click', function () { openTypeMenu(false); closeCtx(); });
       document.addEventListener('keydown', function (event) {
+        // Ctrl+Tab / Ctrl+Shift+Tab cycle the four tabs. The IDE may consume
+        // this chord before the page sees it; the mouse always works.
+        var isCycle = (event.ctrlKey || event.metaKey) && event.key === 'Tab';
+        if (isCycle) {
+          event.preventDefault();
+          cycleTab(event.shiftKey ? -1 : 1);
+          return;
+        }
         var isFind = (event.ctrlKey || event.metaKey) && (event.key === 'f' || event.key === 'F');
         if (isFind) {
           event.preventDefault();
@@ -603,6 +960,7 @@
           } catch (error) { /* ignore malformed */ }
         });
       }
+      selectTab('logs', false);
       post({ op: 'ready' });
     })();
   </script>
