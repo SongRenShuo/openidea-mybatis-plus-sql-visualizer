@@ -156,6 +156,162 @@ pub(crate) fn is_log_framework_line(line: &str) -> bool {
         .any(|level| head.contains(level))
 }
 
+// ---------------------------------------------------------------------------
+// Hibernate logback rows (`org.hibernate.SQL : select …`, `… jdbc.bind : …`)
+// ---------------------------------------------------------------------------
+
+/// Level keywords of logback / Spring Boot patterns. A row that carries one in
+/// its prefix came out of a logging framework, not a bare console writer.
+const LEVEL_TOKENS: [&str; 6] = ["DEBUG", "TRACE", "INFO", "WARN", "ERROR", "FATAL"];
+
+/// Last segment of the Hibernate loggers that print the statement itself.
+/// Logback shortens leading packages to fit `%logger{36}`
+/// (`org.hibernate.engine.jdbc.spi.SqlStatementLogger` → `o.h.e.jdbc.spi.…`),
+/// so only the tail is stable.
+const HIBERNATE_SQL_LOGGER_TAILS: [&str; 2] = ["SQL", "SqlStatementLogger"];
+
+/// `org.hibernate.orm.jdbc.bind` — one row per bound parameter.
+const HIBERNATE_BIND_LOGGER_TAIL: &str = "bind";
+
+/// SQL keywords that may open a Hibernate message body.
+const SQL_MESSAGE_KEYWORDS: [&str; 8] = [
+    "select", "insert", "update", "delete", "merge", "with", "call", "replace",
+];
+
+/// Which message body a Hibernate logger row carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HibernateLoggerKind {
+    /// `org.hibernate.SQL` / `… SqlStatementLogger`: the body is SQL.
+    Statement,
+    /// `org.hibernate.orm.jdbc.bind`: the body is one `binding parameter` row.
+    Parameter,
+}
+
+/// A `logger : message` row written by a Hibernate logger under logback.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HibernateLoggerRow {
+    pub kind: HibernateLoggerKind,
+    /// Byte offset where the message body starts (after `logger : `).
+    pub message_start: usize,
+}
+
+/// Recognise a logback-prefixed Hibernate row.
+///
+/// ```text
+/// 2026-11-26 10:00:01.123 DEBUG 4242 --- [nio-8080-exec-1] org.hibernate.SQL : select …
+/// 2026-11-26 10:00:01.124 TRACE 4242 --- [nio-8080-exec-1] org.hibernate.orm.jdbc.bind : binding parameter [1] as [BIGINT] - [42]
+/// ```
+///
+/// The row is accepted only when all three hold: a level token in the prefix
+/// (so a business line that merely contains `x.y : select …` is not mistaken
+/// for SQL), a dotted logger token right before the message, and that token's
+/// last segment being one of the Hibernate loggers above.
+pub(crate) fn hibernate_logger_row(line: &str) -> Option<HibernateLoggerRow> {
+    let statement = message_body_start(line).filter(|&at| is_sql_logger_row(line, at));
+    let parameter = find_ci(line, "binding parameter").filter(|&at| is_bind_logger_row(line, at));
+    match (statement, parameter) {
+        (Some(statement), Some(parameter)) if parameter < statement => Some(HibernateLoggerRow {
+            kind: HibernateLoggerKind::Parameter,
+            message_start: parameter,
+        }),
+        (Some(statement), _) => Some(HibernateLoggerRow {
+            kind: HibernateLoggerKind::Statement,
+            message_start: statement,
+        }),
+        (None, Some(parameter)) => Some(HibernateLoggerRow {
+            kind: HibernateLoggerKind::Parameter,
+            message_start: parameter,
+        }),
+        (None, None) => None,
+    }
+}
+
+fn is_sql_logger_row(line: &str, at: usize) -> bool {
+    is_framework_prefixed(&line[..at])
+        && logger_tail_before(line, at)
+            .is_some_and(|tail| HIBERNATE_SQL_LOGGER_TAILS.contains(&tail))
+}
+
+fn is_bind_logger_row(line: &str, at: usize) -> bool {
+    is_framework_prefixed(&line[..at])
+        && logger_tail_before(line, at) == Some(HIBERNATE_BIND_LOGGER_TAIL)
+}
+
+fn is_framework_prefixed(prefix: &str) -> bool {
+    prefix
+        .split(|c: char| c.is_whitespace() || c == '[' || c == ']' || c == ':')
+        .any(|token| {
+            LEVEL_TOKENS
+                .iter()
+                .any(|level| token.eq_ignore_ascii_case(level))
+        })
+}
+
+/// Last segment of the logger token immediately before `at`, when that text is
+/// `<logger> : ` or `<logger> - ` (logback default / Spring Boot pattern).
+fn logger_tail_before(line: &str, at: usize) -> Option<&str> {
+    let head = line.get(..at)?.trim_end();
+    let head = head
+        .strip_suffix(':')
+        .or_else(|| head.strip_suffix('-'))?
+        .trim_end();
+    let token = head.rsplit(char::is_whitespace).next()?;
+    if !token.contains('.')
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'$'))
+    {
+        return None;
+    }
+    token.rsplit('.').next()
+}
+
+/// Earliest position of a SQL message body: a statement keyword, or the `/*`
+/// of a `/* load com.example.User */` comment.
+fn message_body_start(line: &str) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    let mut consider = |at: usize| {
+        if best.is_none_or(|current| at < current) {
+            best = Some(at);
+        }
+    };
+    let mut from = 0;
+    while let Some(rel) = line[from..].find("/*") {
+        let at = from + rel;
+        if at == 0 || line.as_bytes()[at - 1].is_ascii_whitespace() {
+            consider(at);
+        }
+        from = at + 2;
+    }
+    for keyword in SQL_MESSAGE_KEYWORDS {
+        let mut from = 0;
+        while let Some(rel) = find_ci(&line[from..], keyword) {
+            let at = from + rel;
+            if sql_word_boundary(line, at, keyword.len()) {
+                consider(at);
+            }
+            from = at + keyword.len();
+        }
+    }
+    best
+}
+
+/// `at..at + len` is a whole word: whitespace or `(` before it, and whitespace,
+/// `(` `)` `,` or end of line after it.
+fn sql_word_boundary(line: &str, at: usize, len: usize) -> bool {
+    let b = line.as_bytes();
+    if at > 0 {
+        let prev = b[at - 1];
+        if !(prev.is_ascii_whitespace() || prev == b'(') {
+            return false;
+        }
+    }
+    match b.get(at + len) {
+        None => true,
+        Some(next) => next.is_ascii_whitespace() || matches!(*next, b'(' | b')' | b',' | b';'),
+    }
+}
+
 /// SQL error vocabulary, ported from the reference `SqlErrorLineRecognizer`.
 ///
 /// Deliberately signature-based (class names and `###` blocks), not a generic
