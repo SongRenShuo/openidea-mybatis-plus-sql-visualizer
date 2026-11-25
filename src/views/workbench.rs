@@ -1,39 +1,89 @@
 //! Preview workbench (T2-2).
 //!
-//! The workbench is a self-contained page: SQL, parameters, copy, export and a
-//! dialect switch. XML rendering is wired in by the lanes that produce it
-//! (L8/L9) through [`set_model`]; the page itself does no I/O, no network and
-//! no local storage, and talks to the plugin only with `ViewEvent::Message`.
+//! The workbench mirrors the IntelliJ edition's "SQL preview" panel
+//! (`SqlStandalonePreviewPanel` + `SqlPreviewPanel`): an input pane on top, a
+//! preview pane below, a parameter column beside the SQL column, and the tabs
+//! SQL / 原文 / 列信息.
 //!
-//! Registered with `web = "web/workbench.html"`; [`push_model`] posts the model
-//! to that page, and [`render_workbench`] produces the same content as an
+//! The page itself does no I/O, no network and no local storage: it talks to
+//! the plugin with `ViewEvent::Message` only. Registered with
+//! `web = "web/workbench.html"`; [`push_state`] posts the model, the labels and
+//! the status line to it. [`render_workbench`] produces the same content as an
 //! inline `Body::Html` for hosts/tests that do not load the packaged page.
+//!
+//! Two facts of the OpenIDEA platform shape this panel:
+//!
+//! - the dialect comes from the settings page, so the panel shows a read-only
+//!   label (the IntelliJ panel has no dialect picker either);
+//! - the plugin never executes user SQL, so "Execute SQL" stays disabled with
+//!   the reason in its tooltip.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use openidea_plugin::views::{Body, Button, View, ViewEvent};
-use openidea_plugin::{Error, host};
+use openidea_plugin::{Error, PickItem, host};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
+use crate::core::perf::{self, Severity};
+use crate::core::xml::{Confidence, MapperSet, RenderOutput};
 use crate::core::{dialect, format};
 use crate::i18n::t;
 
 /// The id declared in `[[contributes.views]]`.
 pub const VIEW_ID: &str = "sqlv-workbench";
 
+/// The input is SQL text, used verbatim.
+pub const KIND_SQL: &str = "sql";
+/// The input is a mapper XML fragment and is rendered into statements.
+pub const KIND_XML: &str = "xml";
+
+/// The schema-declared setting the dialect comes from (`settings.schema.json`).
+const DIALECT_SETTING: &str = "dialect.default";
+/// The key `commands::common` still reads; kept as a second source so a value
+/// stored under either name is honoured.
+const DIALECT_SETTING_LEGACY: &str = "sql.dialect";
+/// Used when neither setting holds a value.
+const FALLBACK_DIALECT: &str = "MySQL";
+
+/// How many project files one "load from file" pick lists.
+const PICK_LIMIT: u32 = 200;
+
+/// The document name a pasted fragment is rendered under; it only shows up in
+/// load diagnostics.
+const FRAGMENT_DOC: &str = "<workbench>";
+
 /// What the workbench shows: one statement with its restored parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkbenchModel {
+    /// The executable SQL; empty for `unresolved` renders.
     pub sql: String,
     #[serde(default)]
     pub params: Vec<String>,
     pub dialect: String,
-    /// `exact` / `partial` / `unresolved`; empty when the caller did not say.
+    /// `exact` / `partial` / `unresolved`; empty when nothing was rendered.
     #[serde(default)]
     pub confidence: String,
-    /// Where the statement came from (mapper path, log line, …), for the header.
+    /// Where the statement came from (mapper path, statement id), for the header.
     #[serde(default)]
     pub source: String,
+    /// The text the user typed or loaded, verbatim (the "原文" tab).
+    #[serde(default)]
+    pub raw: String,
+    /// Column names, when whatever produced the render supplied them; empty
+    /// means "not available", never "no columns".
+    #[serde(default)]
+    pub columns: Vec<String>,
+    /// `sql` or `xml`; empty before the first render.
+    #[serde(default)]
+    pub kind: String,
+    /// Why an `unresolved`/`partial` render is what it is, one line per
+    /// key/detail pair. Empty when the render was clean.
+    #[serde(default)]
+    pub reason: String,
+    /// Localised performance-advice line for the rendered SQL.
+    #[serde(default)]
+    pub advice: String,
 }
 
 impl Default for WorkbenchModel {
@@ -41,9 +91,14 @@ impl Default for WorkbenchModel {
         Self {
             sql: String::new(),
             params: Vec::new(),
-            dialect: "MySQL".to_string(),
+            dialect: FALLBACK_DIALECT.to_string(),
             confidence: String::new(),
             source: String::new(),
+            raw: String::new(),
+            columns: Vec::new(),
+            kind: String::new(),
+            reason: String::new(),
+            advice: String::new(),
         }
     }
 }
@@ -76,8 +131,25 @@ impl WorkbenchModel {
         }
     }
 
+    /// The formatted form of the executable SQL for an explicit dialect name;
+    /// empty when there is no SQL to format.
+    pub fn formatted_sql(&self, dialect_name: &str) -> String {
+        if !self.has_sql() {
+            return String::new();
+        }
+        match dialect::by_name(dialect_name) {
+            Some(found) => format::format(&self.sql, found),
+            None => self.sql.clone(),
+        }
+    }
+
     pub fn has_sql(&self) -> bool {
         !self.sql.trim().is_empty()
+    }
+
+    /// The column tab's text; empty means the render carried no column info.
+    pub fn columns_text(&self) -> String {
+        self.columns.join("\n")
     }
 
     /// All fifteen dialect names, in the order `core::dialect` lists them.
@@ -89,7 +161,8 @@ impl WorkbenchModel {
     }
 
     /// Switches the dialect; returns false (and keeps the old one) when the
-    /// name is unknown.
+    /// name is unknown. The page cannot call this: the dialect is read-only
+    /// and comes from the settings page.
     pub fn with_dialect(&mut self, name: &str) -> bool {
         if dialect::by_name(name).is_none() {
             return false;
@@ -114,13 +187,7 @@ impl WorkbenchModel {
 
     /// Localised confidence badge, empty when the caller did not set one.
     pub fn confidence_label(&self) -> String {
-        match self.confidence.as_str() {
-            "exact" => t("view.workbench.confidence.exact"),
-            "partial" => t("view.workbench.confidence.partial"),
-            "unresolved" => t("view.workbench.confidence.unresolved"),
-            "" => String::new(),
-            _ => t("view.workbench.confidence.unknown"),
-        }
+        confidence_label(&self.confidence)
     }
 
     /// `(label, value)` rows for a declarative form rendering.
@@ -148,6 +215,200 @@ pub struct DialectDisplay {
     pub keyword_case: String,
 }
 
+// ---------------------------------------------------------------------------
+// The dialect the settings page decides
+// ---------------------------------------------------------------------------
+
+/// The configured dialect and whether it is only the fallback.
+///
+/// `true` means the user never set a value, so the page shows `MySQL（默认）`
+/// and the hint pointing at the settings page.
+pub fn configured_dialect() -> (String, bool) {
+    for key in [DIALECT_SETTING, DIALECT_SETTING_LEGACY] {
+        if let Some(value) = host::setting_string(key) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return (value.to_string(), false);
+            }
+        }
+    }
+    (FALLBACK_DIALECT.to_string(), true)
+}
+
+/// The dialect's capability summary, for the meta line's tooltip.
+pub fn capabilities_text(name: &str) -> String {
+    let Some(found) = dialect::by_name(name) else {
+        return t("view.workbench.no_dialect");
+    };
+    let capabilities = &found.capabilities;
+    [
+        t("view.workbench.cap.quote")
+            .replace("{0}", &capabilities.quote_open.to_string())
+            .replace("{1}", &capabilities.quote_close.to_string()),
+        t("view.workbench.cap.pagination")
+            .replace("{0}", &format!("{:?}", capabilities.pagination)),
+        t("view.workbench.cap.keyword_case")
+            .replace("{0}", &format!("{:?}", capabilities.keyword_case)),
+    ]
+    .join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// Rendering the input
+// ---------------------------------------------------------------------------
+
+/// Guesses the input kind the way the IntelliJ panel does: a mapper fragment
+/// is anything that opens a `<mapper>` root or a statement tag.
+pub fn detect_kind(text: &str) -> &'static str {
+    for needle in [
+        "<mapper", "<select", "<insert", "<update", "<delete", "<sql ",
+    ] {
+        if text.contains(needle) {
+            return KIND_XML;
+        }
+    }
+    KIND_SQL
+}
+
+/// Renders `text` (of `kind`, or auto-detected when `kind` is not one of the
+/// two known values) into the workbench model. Pure: no `host::` calls.
+pub fn render_input(text: &str, kind: &str, dialect_name: &str) -> WorkbenchModel {
+    let kind = match kind {
+        KIND_SQL | KIND_XML => kind,
+        _ => detect_kind(text),
+    };
+    if kind == KIND_XML {
+        render_mapper(text, dialect_name)
+    } else {
+        plain_sql(text, dialect_name)
+    }
+}
+
+/// Plain SQL is used verbatim: nothing is inferred, so the render is `exact`.
+fn plain_sql(text: &str, dialect_name: &str) -> WorkbenchModel {
+    let sql = text.trim_end().to_string();
+    let mut model = WorkbenchModel::new(&sql, Vec::new(), dialect_name);
+    model.raw = text.to_string();
+    model.kind = KIND_SQL.to_string();
+    model.confidence = if sql.trim().is_empty() {
+        String::new()
+    } else {
+        "exact".to_string()
+    };
+    model.advice = advice_text(&sql, dialect_name);
+    model
+}
+
+/// A mapper fragment goes through [`MapperSet`]; only its first statement is
+/// previewed (the reference panel does the same and asks the user to split the
+/// fragment to see the others).
+fn render_mapper(text: &str, dialect_name: &str) -> WorkbenchModel {
+    let mut model = WorkbenchModel::new("", Vec::new(), dialect_name);
+    model.raw = text.to_string();
+    model.kind = KIND_XML.to_string();
+
+    let (set, issues) = MapperSet::load(&[(FRAGMENT_DOC, text)]);
+    let mut reasons: Vec<String> = issues
+        .iter()
+        .map(|issue| format!("[{}] {}: {}", issue.message_key, issue.path, issue.detail))
+        .collect();
+
+    let ids = set.statement_ids();
+    let Some(id) = ids.first() else {
+        model.confidence = "unresolved".to_string();
+        reasons.push(format!("[{}]", crate::core::xml::KEY_STATEMENT_NOT_FOUND));
+        model.reason = reasons.join("\n");
+        return model;
+    };
+
+    let out = set.render(id, &json!({}));
+    model.confidence = confidence_str(out.confidence).to_string();
+    model.source = id.clone();
+    if out.confidence == Confidence::Unresolved {
+        // `unresolved` never carries SQL: only the reason goes to the page.
+        model.sql.clear();
+        model.params.clear();
+    } else {
+        model.sql = out.sql.trim_end().to_string();
+        model.params = out.params.iter().map(param_text).collect();
+    }
+    reasons.extend(reason_lines(&out));
+    model.reason = reasons.join("\n");
+    model.advice = advice_text(&model.sql, dialect_name);
+    model
+}
+
+fn confidence_str(confidence: Confidence) -> &'static str {
+    match confidence {
+        Confidence::Exact => "exact",
+        Confidence::Partial => "partial",
+        Confidence::Unresolved => "unresolved",
+    }
+}
+
+fn confidence_label(confidence: &str) -> String {
+    match confidence {
+        "exact" => t("view.workbench.confidence.exact"),
+        "partial" => t("view.workbench.confidence.partial"),
+        "unresolved" => t("view.workbench.confidence.unresolved"),
+        "" => String::new(),
+        _ => t("view.workbench.confidence.unknown"),
+    }
+}
+
+/// A parameter value as the page shows it: strings bare, everything else as
+/// JSON.
+fn param_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// `[key] detail` lines from a render's notes, plus any key that has no note.
+fn reason_lines(out: &RenderOutput) -> Vec<String> {
+    let mut lines: Vec<String> = out
+        .notes
+        .iter()
+        .map(|note| format!("[{}] {}", note.message_key, note.detail))
+        .collect();
+    for key in &out.message_keys {
+        if !out.notes.iter().any(|note| &note.message_key == key) {
+            lines.push(format!("[{key}]"));
+        }
+    }
+    lines
+}
+
+/// The meta line's advice: counts only, because the individual rules return
+/// message keys this build has no text for. Details come from the
+/// `perf-advice` command.
+fn advice_text(sql: &str, dialect_name: &str) -> String {
+    if sql.trim().is_empty() {
+        return String::new();
+    }
+    let findings = perf::analyze(sql, dialect_name);
+    if findings.is_empty() {
+        return t("view.workbench.advice.none");
+    }
+    let errors = findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::Error)
+        .count();
+    let warns = findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::Warn)
+        .count();
+    t("view.workbench.advice")
+        .replace("{0}", &findings.len().to_string())
+        .replace("{1}", &errors.to_string())
+        .replace("{2}", &warns.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Model store
+// ---------------------------------------------------------------------------
+
 static MODEL: OnceLock<Mutex<WorkbenchModel>> = OnceLock::new();
 
 fn model_store() -> MutexGuard<'static, WorkbenchModel> {
@@ -172,19 +433,23 @@ pub fn clear() {
     *model_store() = WorkbenchModel::default();
 }
 
-/// Posts the current model to the packaged page (web view).
+// ---------------------------------------------------------------------------
+// Messages to the page
+// ---------------------------------------------------------------------------
+
+/// Posts the current model with the legacy `{op:"load"}` shape (the handshake
+/// `commands::open_workbench` relies on).
 pub fn push_model() -> Result<(), Error> {
     let current = model();
-    let confidence = current.confidence_label();
     let mut model_value =
         serde_json::to_value(&current).map_err(|error| Error::Invalid(error.to_string()))?;
     if let Some(object) = model_value.as_object_mut() {
         object.insert(
             "dialects".to_string(),
-            serde_json::json!(WorkbenchModel::dialect_options()),
+            json!(WorkbenchModel::dialect_options()),
         );
     }
-    let payload = serde_json::json!({
+    let payload = json!({
         "op": "load",
         "model": model_value,
         "labels": {
@@ -194,11 +459,103 @@ pub fn push_model() -> Result<(), Error> {
             "copy": t("view.workbench.copy"),
             "export": t("view.workbench.export"),
             "empty": t("view.workbench.empty"),
-            "confidence": confidence,
+            "confidence": current.confidence_label(),
         }
     });
     host::post_view_message(VIEW_ID, &payload.to_string())
 }
+
+/// Posts the full state the packaged page renders: the model (with the three
+/// tabs), the labels, the read-only dialect block and one status line.
+pub fn push_state(status: &str) -> Result<(), Error> {
+    let payload = state_payload(&model(), status, false);
+    host::post_view_message(VIEW_ID, &payload.to_string())
+}
+
+/// The same, plus whether this op rewrote the input textarea (render, format,
+/// load-file, clear). The page only overwrites what the user typed when the
+/// host says so.
+pub fn push_state_with(status: &str, replace_input: bool) -> Result<(), Error> {
+    let payload = state_payload(&model(), status, replace_input);
+    host::post_view_message(VIEW_ID, &payload.to_string())
+}
+
+fn state_payload(current: &WorkbenchModel, status: &str, replace_input: bool) -> Value {
+    let (dialect_name, is_default) = configured_dialect();
+    // Callers that only have the statement (`commands::open_workbench`, the
+    // capture bridge) leave `raw` empty; the input pane then starts from the
+    // statement itself instead of an empty box.
+    let raw = if current.raw.is_empty() && !current.sql.is_empty() {
+        &current.sql
+    } else {
+        &current.raw
+    };
+    json!({
+        "op": "state",
+        "replaceInput": replace_input,
+        "model": {
+            "sql": &current.sql,
+            "params": &current.params,
+            "dialect": &dialect_name,
+            "confidence": &current.confidence,
+            "source": &current.source,
+            "kind": &current.kind,
+            "reason": &current.reason,
+            "advice": &current.advice,
+            "tabs": {
+                "sql": &current.sql,
+                "formatted": current.formatted_sql(&dialect_name),
+                "raw": raw,
+                "columns": current.columns_text(),
+            },
+        },
+        "dialect": {
+            "name": &dialect_name,
+            "isDefault": is_default,
+            "capabilities": capabilities_text(&dialect_name),
+        },
+        "labels": labels(&current.confidence),
+        "status": { "text": status },
+    })
+}
+
+fn labels(confidence: &str) -> Value {
+    json!({
+        "title": t("view.workbench.title"),
+        "hintInput": t("view.workbench.hint.input"),
+        "empty": t("view.workbench.empty"),
+        "resolve": t("view.workbench.action.resolve"),
+        "format": t("view.workbench.action.format"),
+        "loadFile": t("view.workbench.action.load_file"),
+        "clear": t("view.workbench.action.clear"),
+        "openDialog": t("view.workbench.action.open_dialog"),
+        "openDialogNote": t("view.workbench.open_dialog.note"),
+        "copy": t("view.workbench.copy"),
+        "copySql": t("view.workbench.action.copy_sql"),
+        "export": t("view.workbench.export"),
+        "execute": t("view.workbench.action.execute"),
+        "executeNote": t("view.workbench.execute.note"),
+        "mode": t("view.workbench.mode"),
+        "modeNormal": t("view.workbench.mode.normal"),
+        "modeFormatted": t("view.workbench.mode.formatted"),
+        "params": t("view.workbench.params"),
+        "sql": t("view.workbench.sql"),
+        "tabSql": t("view.workbench.tab.sql"),
+        "tabRaw": t("view.workbench.tab.raw"),
+        "tabColumns": t("view.workbench.tab.columns"),
+        "columnsEmpty": t("view.workbench.columns.empty"),
+        "reasonTitle": t("view.workbench.reason.title"),
+        "dialect": t("view.workbench.dialect"),
+        "dialectDefault": t("view.workbench.dialect.default_suffix"),
+        "dialectHint": t("view.workbench.dialect.hint"),
+        "confidence": t("view.workbench.confidence"),
+        "confidenceLabel": confidence_label(confidence),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// View and events
+// ---------------------------------------------------------------------------
 
 /// Builds the inline `Body::Html` variant of the workbench.
 pub fn render_workbench() -> View {
@@ -215,14 +572,8 @@ pub fn render_workbench() -> View {
 /// Toolbar buttons and messages posted by the page.
 pub fn handle_workbench_event(event: ViewEvent) -> Result<(), Error> {
     match event {
-        ViewEvent::Button(id) if id == "copy" => {
-            let text = model().copy_text();
-            host::copy_to_clipboard(&text)?;
-        }
-        ViewEvent::Button(id) if id == "export" => {
-            let text = model().export_text();
-            host::copy_to_clipboard(&text)?;
-        }
+        ViewEvent::Button(id) if id == "copy" => copy_sql()?,
+        ViewEvent::Button(id) if id == "export" => export_sql()?,
         ViewEvent::Message(text) => handle_message(&text)?,
         _ => {}
     }
@@ -230,90 +581,257 @@ pub fn handle_workbench_event(event: ViewEvent) -> Result<(), Error> {
 }
 
 fn handle_message(text: &str) -> Result<(), Error> {
-    let message: serde_json::Value =
+    let message: Value =
         serde_json::from_str(text).map_err(|error| Error::Invalid(error.to_string()))?;
-    match message
+    let op = message
         .get("op")
         .and_then(|value| value.as_str())
-        .unwrap_or("")
-    {
-        // The packaged page asks for the model once its script is ready.
-        "ready" => push_model()?,
-        "copy" => {
-            let text = model().copy_text();
-            host::copy_to_clipboard(&text)?;
+        .unwrap_or("");
+    match op {
+        // The packaged page asks for the state once its script is ready.
+        // The packaged page asks for the state once its script is ready. The
+        // input pane starts from the model (nothing has been typed yet).
+        "ready" => {
+            let current = model();
+            let has_content = !current.raw.trim().is_empty() || !current.sql.trim().is_empty();
+            push_state_with("", has_content)?;
         }
-        "export" => {
-            let text = model().export_text();
-            host::copy_to_clipboard(&text)?;
+        "render" => {
+            let input = message.get("text").and_then(Value::as_str).unwrap_or("");
+            let kind = message.get("kind").and_then(Value::as_str).unwrap_or("");
+            render_and_push(input, kind)?;
         }
-        "dialect" => {
-            let Some(name) = message.get("value").and_then(|value| value.as_str()) else {
-                return Ok(());
-            };
-            let mut current = model();
-            if current.with_dialect(name) {
-                set_model(current);
-                push_model()?;
-                host::refresh_view(VIEW_ID);
-            }
+        "format" => {
+            let input = message.get("text").and_then(Value::as_str).unwrap_or("");
+            format_and_push(input)?;
         }
+        "load-file" => load_file_and_push()?,
+        "clear" => {
+            clear();
+            push_state_with(&t("view.workbench.status.cleared"), true)?;
+        }
+        "copy" => copy_sql()?,
+        "export" => export_sql()?,
+        // The dialect is read-only: it comes from the settings page. The op is
+        // still answered so an older page does not wait for a reply.
+        "dialect" => push_state(&t("view.workbench.status.dialect_readonly"))?,
         _ => {}
     }
     Ok(())
 }
 
+fn render_and_push(input: &str, kind: &str) -> Result<(), Error> {
+    let (dialect_name, _) = configured_dialect();
+    let mut next = if input.trim().is_empty() {
+        let mut empty = WorkbenchModel::new("", Vec::new(), &dialect_name);
+        empty.raw = input.to_string();
+        empty
+    } else {
+        render_input(input, kind, &dialect_name)
+    };
+    next.dialect = dialect_name;
+    let status = status_for(&next);
+    set_model(next);
+    push_state_with(&status, true)
+}
+
+fn format_and_push(input: &str) -> Result<(), Error> {
+    let (dialect_name, _) = configured_dialect();
+    if detect_kind(input) == KIND_XML {
+        let mut next = render_input(input, KIND_XML, &dialect_name);
+        next.dialect = dialect_name;
+        set_model(next);
+        return push_state_with(&t("view.workbench.status.format_xml_skipped"), true);
+    }
+    let Some(found) = dialect::by_name(&dialect_name) else {
+        let mut next = render_input(input, KIND_SQL, &dialect_name);
+        next.dialect = dialect_name;
+        set_model(next);
+        return push_state_with(&t("view.workbench.status.format_unknown_dialect"), true);
+    };
+    let formatted = format::format(input, found);
+    let unchanged = formatted == input;
+    let mut next = render_input(&formatted, KIND_SQL, &dialect_name);
+    next.dialect = dialect_name;
+    set_model(next);
+    let status = if unchanged {
+        t("view.workbench.status.format_unchanged")
+    } else {
+        t("view.workbench.status.formatted")
+    };
+    push_state_with(&status, true)
+}
+
+fn copy_sql() -> Result<(), Error> {
+    let current = model();
+    if !current.has_sql() {
+        return push_state(&t("view.workbench.status.copy_empty"));
+    }
+    host::copy_to_clipboard(&current.copy_text())?;
+    push_state(&t("view.workbench.copied"))
+}
+
+fn export_sql() -> Result<(), Error> {
+    let current = model();
+    if !current.has_sql() {
+        return push_state(&t("view.workbench.status.export_empty"));
+    }
+    let (dialect_name, _) = configured_dialect();
+    let body = current.formatted_sql(&dialect_name);
+    let confidence = if current.confidence.is_empty() {
+        "n/a"
+    } else {
+        current.confidence.as_str()
+    };
+    let source = if current.source.is_empty() {
+        "pasted"
+    } else {
+        current.source.as_str()
+    };
+    let text = format!(
+        "-- mybatis-sql workbench export (dialect: {dialect_name}, confidence: {confidence})\n-- source: {source}\n{body}\n"
+    );
+    crate::commands::common::emit(&text)?;
+    push_state(&t("view.workbench.status.exported"))
+}
+
+/// Lists the project's SQL and mapper XML files and lets the user pick one.
+///
+/// The SDK has no file-open dialog (only `pick` over a list and
+/// `pick_directory`), and `host::open_editors` would need `editor.read`, which
+/// this plugin does not declare — so "load from file" is a project-file picker.
+fn load_file_and_push() -> Result<(), Error> {
+    let projects = match host::projects() {
+        Ok(projects) => projects,
+        Err(error) => {
+            return push_state(
+                &t("view.workbench.status.load_no_project").replace("{0}", &error.to_string()),
+            );
+        }
+    };
+    let Some(project) = projects.first() else {
+        return push_state(&t("view.workbench.status.load_no_project").replace("{0}", ""));
+    };
+
+    let mut paths: Vec<String> = Vec::new();
+    for glob in ["**/*.xml", "**/*.sql"] {
+        match project.find_files(glob, PICK_LIMIT) {
+            Ok(found) => paths.extend(found),
+            Err(error) => {
+                return push_state(
+                    &t("view.workbench.status.load_failed")
+                        .replace("{0}", glob)
+                        .replace("{1}", &error.to_string()),
+                );
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    if paths.is_empty() {
+        return push_state(&t("view.workbench.status.load_no_files"));
+    }
+
+    let items: Vec<PickItem> = paths.iter().map(|path| PickItem::new(path, path)).collect();
+    let chosen = match host::pick(&t("view.workbench.load_file.title"), &items) {
+        Ok(chosen) => chosen,
+        Err(error) => return push_state(&error.to_string()),
+    };
+    // Cancelled: the previous state stays as it was.
+    let Some(path) = chosen else {
+        return Ok(());
+    };
+
+    let text = match project.read_file(&path) {
+        Ok(text) => text,
+        Err(error) => {
+            return push_state(
+                &t("view.workbench.status.load_failed")
+                    .replace("{0}", &path)
+                    .replace("{1}", &error.to_string()),
+            );
+        }
+    };
+    let (dialect_name, _) = configured_dialect();
+    let mut next = render_input(&text, kind_from_path(&path), &dialect_name);
+    next.dialect = dialect_name;
+    next.source = path.clone();
+    set_model(next);
+    push_state_with(
+        &t("view.workbench.status.loaded").replace("{0}", &path),
+        true,
+    )
+}
+
+fn kind_from_path(path: &str) -> &'static str {
+    if path.to_ascii_lowercase().ends_with(".xml") {
+        KIND_XML
+    } else {
+        KIND_SQL
+    }
+}
+
+fn status_for(current: &WorkbenchModel) -> String {
+    if current.raw.trim().is_empty() && current.sql.trim().is_empty() {
+        return t("view.workbench.status.empty");
+    }
+    match current.confidence.as_str() {
+        "unresolved" => t("view.workbench.status.unresolved"),
+        "partial" => t("view.workbench.status.partial"),
+        _ => {
+            let kind = if current.kind == KIND_XML {
+                t("view.workbench.kind.xml")
+            } else {
+                t("view.workbench.kind.sql")
+            };
+            t("view.workbench.status.resolved")
+                .replace("{0}", &kind)
+                .replace("{1}", &current.params.len().to_string())
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Page
+// Inline page (fallback for hosts that do not load the packaged page)
 // ---------------------------------------------------------------------------
 
 const STYLE: &str = "\
 body{font:var(--openidea-font-size,13px)/1.5 var(--openidea-font-ui,sans-serif);\
 color:var(--openidea-fg);margin:0;padding:8px}\
-.bar{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}\
-select,button{background:var(--openidea-bg-input);color:var(--openidea-fg);\
-border:1px solid var(--openidea-border);border-radius:3px;padding:2px 6px}\
-button{cursor:pointer}\
-label{font-weight:600;display:block;margin:8px 0 4px}\
+.meta{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}\
+.chip{border:1px solid var(--openidea-border);border-radius:3px;padding:0 6px}\
 pre{margin:0;padding:8px;border:1px solid var(--openidea-border);border-radius:4px;\
 background:var(--openidea-bg-elevated);white-space:pre-wrap;word-break:break-word;\
 font-family:var(--openidea-font-mono,monospace)}\
+label{font-weight:600;display:block;margin:8px 0 4px}\
 .badge{padding:0 6px;border-radius:3px;background:var(--openidea-bg-selected);font-size:11px}\
 .badge.partial{color:var(--openidea-warning)}\
 .badge.unresolved{color:var(--openidea-danger)}\
-.muted{color:var(--openidea-fg-muted)}\
-.notice{color:var(--openidea-success);margin-top:8px}";
+.muted{color:var(--openidea-fg-muted)}";
 
 fn build_html(model: &WorkbenchModel) -> String {
+    let (dialect_name, is_default) = configured_dialect();
     let mut html = String::with_capacity(2048);
     html.push_str("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>");
     html.push_str(STYLE);
     html.push_str("</style></head><body>");
 
-    html.push_str("<div class=\"bar\"><label for=\"dialect\">");
+    html.push_str("<div class=\"meta\"><span class=\"chip\">");
     html.push_str(&escape_html(&t("view.workbench.dialect")));
-    html.push_str("</label><select id=\"dialect\">");
-    for name in WorkbenchModel::dialect_options() {
+    html.push_str(": ");
+    html.push_str(&escape_html(&dialect_name));
+    if is_default {
+        html.push_str(&escape_html(&t("view.workbench.dialect.default_suffix")));
+    }
+    html.push_str("</span>");
+    if let Some(display) = model.dialect_display() {
         html.push_str(&format!(
-            "<option value=\"{}\"{}>{}</option>",
-            escape_attr(&name),
-            if name == model.dialect {
-                " selected"
-            } else {
-                ""
-            },
-            escape_html(&name)
+            "<span class=\"muted\" title=\"{}\">{} {}</span>",
+            escape_attr(&capabilities_text(&dialect_name).replace('\n', " · ")),
+            escape_html(&display.quote_open),
+            escape_html(&display.quote_close)
         ));
     }
-    html.push_str("</select>");
-    html.push_str(&format!(
-        "<button id=\"copy\" type=\"button\">{}</button>",
-        escape_html(&t("view.workbench.copy"))
-    ));
-    html.push_str(&format!(
-        "<button id=\"export\" type=\"button\">{}</button>",
-        escape_html(&t("view.workbench.export"))
-    ));
     let confidence = model.confidence_label();
     if !confidence.is_empty() {
         html.push_str(&format!(
@@ -324,16 +842,35 @@ fn build_html(model: &WorkbenchModel) -> String {
     }
     html.push_str("</div>");
 
-    if model.has_sql() {
+    if !model.advice.is_empty() {
         html.push_str(&format!(
-            "<label>{}</label><pre id=\"sql\">{}</pre>",
+            "<p class=\"muted\">{}</p>",
+            escape_html(&model.advice)
+        ));
+    }
+
+    if model.has_sql() {
+        if !model.source.is_empty() {
+            html.push_str(&format!(
+                "<p class=\"muted\">{}</p>",
+                escape_html(&model.source)
+            ));
+        }
+        html.push_str(&format!(
+            "<label>{}</label><pre>{}</pre>",
             escape_html(&t("view.workbench.sql")),
             escape_html(&model.sql)
         ));
         html.push_str(&format!(
-            "<label>{}</label><pre id=\"params\" class=\"muted\">{}</pre>",
+            "<label>{}</label><pre class=\"muted\">{}</pre>",
             escape_html(&t("view.workbench.params")),
             escape_html(&model.params_text())
+        ));
+    } else if !model.reason.is_empty() {
+        html.push_str(&format!(
+            "<label>{}</label><pre class=\"muted\">{}</pre>",
+            escape_html(&t("view.workbench.reason.title")),
+            escape_html(&model.reason)
         ));
     } else {
         html.push_str(&format!(
@@ -342,53 +879,8 @@ fn build_html(model: &WorkbenchModel) -> String {
         ));
     }
 
-    html.push_str("<p id=\"notice\" class=\"notice\" hidden></p>");
-    html.push_str("<script>var MODEL=");
-    html.push_str(&json_for_script(model));
-    html.push(';');
-    html.push_str(
-        "(function(){\
-function post(message){if(window.openidea&&window.openidea.postMessage){\
-window.openidea.postMessage(JSON.stringify(message));}}\
-var copy=document.getElementById('copy');\
-var exportButton=document.getElementById('export');\
-var select=document.getElementById('dialect');\
-var notice=document.getElementById('notice');\
-function flash(text){if(notice){notice.textContent=text;notice.hidden=false;\
-setTimeout(function(){notice.hidden=true;},1500);}}\
-if(copy){copy.addEventListener('click',function(){post({op:'copy'});});}\
-if(exportButton){exportButton.addEventListener('click',function(){post({op:'export'});});}\
-if(select){select.addEventListener('change',function(){\
-post({op:'dialect',value:select.value});});}\
-var params=document.getElementById('params');\
-if(params&&MODEL.params){params.textContent=MODEL.params.join(', ');}\
-function apply(model){\
-if(!model){return;}\
-var sqlNode=document.getElementById('sql');\
-if(sqlNode){sqlNode.textContent=model.sql||'';}\
-if(params){params.textContent=(model.params||[]).join(', ');}\
-if(select&&model.dialect){select.value=model.dialect;}\
-}\
-if(window.openidea&&window.openidea.onMessage){\
-window.openidea.onMessage(function(raw){\
-try{var message=JSON.parse(raw);\
-if(message.op==='load'){apply(message.model);}\
-if(message.op==='copied'){flash('');}\
-}catch(error){}\
-});}\
-post({op:'ready'});\
-})();</script></body></html>",
-    );
+    html.push_str("</body></html>");
     html
-}
-
-fn json_for_script(model: &WorkbenchModel) -> String {
-    let json = serde_json::to_string(model).unwrap_or_else(|_| "null".to_string());
-    json.replace('<', "\\u003c")
-        .replace('>', "\\u003e")
-        .replace('&', "\\u0026")
-        .replace('\u{2028}', "\\u2028")
-        .replace('\u{2029}', "\\u2029")
 }
 
 fn escape_html(text: &str) -> String {
@@ -417,7 +909,9 @@ fn escape_attr(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::common;
     use openidea_plugin::mock::MockHost;
+    use serde_json::json;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -437,7 +931,25 @@ mod tests {
             dialect: "MySQL".to_string(),
             confidence: "exact".to_string(),
             source: "UserMapper.xml#findById".to_string(),
+            raw: "SELECT id, name FROM \"user\" WHERE id = 1".to_string(),
+            ..WorkbenchModel::default()
         }
+    }
+
+    fn message(value: Value) -> ViewEvent {
+        ViewEvent::Message(value.to_string())
+    }
+
+    fn last_state(host: &MockHost) -> Value {
+        let messages = host.view_messages();
+        let (view, payload) = messages.last().expect("a message was posted");
+        assert_eq!(view, VIEW_ID);
+        serde_json::from_str(payload).expect("valid JSON")
+    }
+
+    /// XML text nodes leave runs of whitespace in the rendered SQL.
+    fn compact(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
     #[test]
@@ -521,36 +1033,337 @@ mod tests {
     }
 
     #[test]
+    fn the_packaged_page_uses_only_text_content() {
+        let page = include_str!("../../web/workbench.html");
+        for needle in ["innerHTML", "outerHTML", "insertAdjacentHTML", "eval("] {
+            assert!(
+                !page.contains(needle),
+                "the page must not build markup from data ({needle})"
+            );
+        }
+    }
+
+    #[test]
+    fn a_ready_message_pushes_the_state_to_the_page() {
+        let (host, _guard) = test_host();
+        set_model(sample());
+        handle_workbench_event(message(json!({ "op": "ready" }))).unwrap();
+        let state = last_state(&host);
+        assert_eq!(state["op"], "state");
+        assert_eq!(state["model"]["sql"], sample().sql);
+        assert_eq!(state["model"]["tabs"]["raw"], sample().raw);
+        assert!(state["model"]["tabs"]["formatted"].is_string());
+        assert!(state["labels"]["hintInput"].as_str().is_some());
+        assert!(state["dialect"]["capabilities"].is_string());
+        assert_eq!(state["status"]["text"], "");
+    }
+
+    #[test]
+    fn the_load_shape_still_works_for_older_pages() {
+        let (host, _guard) = test_host();
+        set_model(sample());
+        push_model().unwrap();
+        let payload = &host.view_messages()[0].1;
+        assert!(payload.contains("\"op\":\"load\""));
+        assert!(payload.contains("UserMapper.xml#findById"));
+    }
+
+    #[test]
+    fn the_ready_state_fills_the_input_from_a_statement_only_model() {
+        let (host, _guard) = test_host();
+        // `commands::open_workbench` sets only `sql`; the input pane still has
+        // to start from it instead of an empty box.
+        let mut current = WorkbenchModel::new("select 1", Vec::new(), "MySQL");
+        current.confidence = "exact".to_string();
+        set_model(current);
+        handle_workbench_event(message(json!({ "op": "ready" }))).unwrap();
+        let state = last_state(&host);
+        assert_eq!(state["replaceInput"], true);
+        assert_eq!(state["model"]["tabs"]["raw"], "select 1");
+    }
+
+    #[test]
+    fn render_asks_the_page_to_replace_the_input() {
+        let (host, _guard) = test_host();
+        handle_workbench_event(message(json!({ "op": "render", "text": "select 2" }))).unwrap();
+        assert_eq!(last_state(&host)["replaceInput"], true);
+    }
+
+    #[test]
+    fn copy_and_export_leave_the_typed_input_alone() {
+        let (host, _guard) = test_host();
+        set_model(sample());
+        for op in ["copy", "export"] {
+            handle_workbench_event(message(json!({ "op": op }))).unwrap();
+            assert_eq!(last_state(&host)["replaceInput"], false, "op {op}");
+        }
+    }
+
+    #[test]
+    fn rendering_plain_sql_is_exact_and_keeps_the_text_verbatim() {
+        let (host, _guard) = test_host();
+        let text = "select id from user where id = ?\n";
+        handle_workbench_event(message(
+            json!({ "op": "render", "text": text, "kind": "sql" }),
+        ))
+        .unwrap();
+        let current = model();
+        assert_eq!(current.kind, KIND_SQL);
+        assert_eq!(current.confidence, "exact");
+        assert_eq!(current.raw, text, "the raw tab keeps the input verbatim");
+        assert_eq!(current.sql, "select id from user where id = ?");
+        assert!(current.reason.is_empty());
+        let state = last_state(&host);
+        assert_eq!(
+            state["model"]["tabs"]["sql"],
+            "select id from user where id = ?"
+        );
+        assert_eq!(state["model"]["tabs"]["raw"], text);
+    }
+
+    #[test]
+    fn rendering_a_mapper_fragment_goes_through_the_xml_renderer() {
+        let (_host, _guard) = test_host();
+        let text = r#"<mapper namespace="com.example.UserMapper">
+            <select id="findById">SELECT id, name FROM users WHERE id = #{id}</select>
+        </mapper>"#;
+        handle_workbench_event(message(json!({ "op": "render", "text": text })))
+            .expect("the kind is detected from the fragment");
+        let current = model();
+        assert_eq!(current.kind, KIND_XML);
+        assert_eq!(current.confidence, "exact");
+        assert_eq!(current.source, "findById");
+        assert!(
+            compact(&current.sql).contains("SELECT id, name FROM users WHERE id = ?"),
+            "{}",
+            current.sql
+        );
+    }
+
+    #[test]
+    fn an_unresolved_fragment_ships_no_sql_but_keeps_the_reason() {
+        let (host, _guard) = test_host();
+        let text = r#"<mapper namespace="a">
+            <sql id="one"><include refid="two"/></sql>
+            <sql id="two"><include refid="one"/></sql>
+            <select id="s">SELECT <include refid="one"/> FROM t</select>
+        </mapper>"#;
+        handle_workbench_event(message(
+            json!({ "op": "render", "text": text, "kind": "xml" }),
+        ))
+        .unwrap();
+        let current = model();
+        assert_eq!(current.confidence, "unresolved");
+        assert!(
+            current.sql.trim().is_empty(),
+            "unresolved never carries SQL"
+        );
+        assert!(
+            current.reason.contains("xml.include.cycle"),
+            "{}",
+            current.reason
+        );
+        let state = last_state(&host);
+        assert_eq!(state["model"]["tabs"]["sql"], "");
+        assert!(
+            state["status"]["text"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty())
+        );
+    }
+
+    #[test]
+    fn a_fragment_without_statements_is_unresolved() {
+        let (_host, _guard) = test_host();
+        handle_workbench_event(message(json!({
+            "op": "render",
+            "text": "<mapper namespace=\"a\"/>",
+            "kind": "xml",
+        })))
+        .unwrap();
+        let current = model();
+        assert_eq!(current.confidence, "unresolved");
+        assert!(current.sql.is_empty());
+        assert!(
+            current
+                .reason
+                .contains(crate::core::xml::KEY_STATEMENT_NOT_FOUND)
+        );
+    }
+
+    #[test]
+    fn formatting_rewrites_the_input_and_re_renders_it() {
+        let (_host, _guard) = test_host();
+        handle_workbench_event(message(
+            json!({ "op": "format", "text": "select id from user" }),
+        ))
+        .unwrap();
+        let current = model();
+        assert_eq!(current.kind, KIND_SQL);
+        assert_eq!(current.confidence, "exact");
+        assert_ne!(current.raw, "select id from user", "the input is rewritten");
+        assert!(
+            current.raw.to_uppercase().contains("SELECT"),
+            "{}",
+            current.raw
+        );
+    }
+
+    #[test]
+    fn formatting_leaves_a_mapper_fragment_alone() {
+        let (host, _guard) = test_host();
+        let text = "<mapper namespace=\"a\"><select id=\"s\">select 1</select></mapper>";
+        handle_workbench_event(message(json!({ "op": "format", "text": text }))).unwrap();
+        assert_eq!(model().raw, text, "XML is not SQL-formatted");
+        assert_eq!(
+            last_state(&host)["status"]["text"],
+            t("view.workbench.status.format_xml_skipped")
+        );
+    }
+
+    #[test]
+    fn an_unknown_dialect_setting_falls_back_to_mysql() {
+        let (_host, _guard) = test_host();
+        assert_eq!(configured_dialect(), ("MySQL".to_string(), true));
+    }
+
+    #[test]
+    fn the_dialect_comes_from_the_settings_page_and_is_read_only() {
+        let (host, _guard) = test_host();
+        host.set_setting("dialect.default", "\"PostgreSQL\"");
+        set_model(sample());
+        let (name, is_default) = configured_dialect();
+        assert_eq!(name, "PostgreSQL");
+        assert!(!is_default);
+
+        // A page that still sends the old op cannot change it.
+        handle_workbench_event(message(json!({ "op": "dialect", "value": "Oracle" }))).unwrap();
+        assert_eq!(model().dialect, "MySQL", "the op changes nothing");
+        let state = last_state(&host);
+        assert_eq!(state["dialect"]["name"], "PostgreSQL");
+        assert_eq!(state["dialect"]["isDefault"], false);
+        assert_eq!(
+            state["status"]["text"],
+            t("view.workbench.status.dialect_readonly")
+        );
+        assert_eq!(state["model"]["dialect"], "PostgreSQL");
+    }
+
+    #[test]
+    fn the_legacy_dialect_key_is_honoured_too() {
+        let (host, _guard) = test_host();
+        host.set_setting("sql.dialect", "\"Oracle\"");
+        assert_eq!(configured_dialect(), ("Oracle".to_string(), false));
+    }
+
+    #[test]
     fn the_copy_message_reaches_the_clipboard() {
         let (host, _guard) = test_host();
         set_model(sample());
-        handle_workbench_event(ViewEvent::Message("{\"op\":\"copy\"}".to_string())).unwrap();
+        handle_workbench_event(message(json!({ "op": "copy" }))).unwrap();
         assert_eq!(host.clipboard().as_deref(), Some(sample().sql.as_str()));
+        assert_eq!(
+            last_state(&host)["status"]["text"],
+            t("view.workbench.copied")
+        );
     }
 
     #[test]
-    fn a_ready_message_pushes_the_model_to_the_page() {
+    fn copying_without_sql_reports_the_status_and_leaves_the_clipboard_alone() {
         let (host, _guard) = test_host();
-        set_model(sample());
-        handle_workbench_event(ViewEvent::Message("{\"op\":\"ready\"}".to_string())).unwrap();
-        let messages = host.view_messages();
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].0, VIEW_ID);
-        assert!(messages[0].1.contains("\"op\":\"load\""));
-        assert!(messages[0].1.contains("UserMapper.xml#findById"));
+        handle_workbench_event(message(json!({ "op": "copy" }))).unwrap();
+        assert!(host.clipboard().is_none());
+        assert_eq!(
+            last_state(&host)["status"]["text"],
+            t("view.workbench.status.copy_empty")
+        );
     }
 
     #[test]
-    fn a_dialect_message_switches_and_refreshes() {
+    fn exporting_writes_the_sql_to_the_output_channel() {
         let (host, _guard) = test_host();
         set_model(sample());
-        handle_workbench_event(ViewEvent::Message(
-            "{\"op\":\"dialect\",\"value\":\"PostgreSQL\"}".to_string(),
-        ))
-        .unwrap();
-        assert_eq!(model().dialect, "PostgreSQL");
-        assert_eq!(host.refreshed_views(), vec![VIEW_ID.to_string()]);
-        assert_eq!(host.view_messages().len(), 1);
+        handle_workbench_event(message(json!({ "op": "export" }))).unwrap();
+        let out = &host.output()[common::CHANNEL];
+        assert!(out.contains("mybatis-sql workbench export"), "{out}");
+        assert!(
+            compact(out).contains(&compact(&sample().sql)),
+            "the exported body is the formatted statement: {out}"
+        );
+        assert_eq!(
+            last_state(&host)["status"]["text"],
+            t("view.workbench.status.exported")
+        );
+    }
+
+    #[test]
+    fn exporting_without_sql_reports_the_status() {
+        let (host, _guard) = test_host();
+        handle_workbench_event(message(json!({ "op": "export" }))).unwrap();
+        assert!(host.output().get(common::CHANNEL).is_none());
+        assert_eq!(
+            last_state(&host)["status"]["text"],
+            t("view.workbench.status.export_empty")
+        );
+    }
+
+    #[test]
+    fn clearing_empties_the_model_and_tells_the_page() {
+        let (host, _guard) = test_host();
+        set_model(sample());
+        handle_workbench_event(message(json!({ "op": "clear" }))).unwrap();
+        let current = model();
+        assert!(current.sql.is_empty());
+        assert!(current.raw.is_empty());
+        assert_eq!(current.confidence, "");
+        let state = last_state(&host);
+        assert_eq!(state["model"]["tabs"]["sql"], "");
+        assert_eq!(state["model"]["tabs"]["raw"], "");
+        assert_eq!(state["status"]["text"], t("view.workbench.status.cleared"));
+    }
+
+    #[test]
+    fn loading_a_file_picks_it_from_the_project_and_sets_the_source() {
+        let (host, _guard) = test_host();
+        host.set_project_root(Some("/project"));
+        host.add_file(
+            "/project/UserMapper.xml",
+            "<mapper namespace=\"a\"><select id=\"s\">select 1</select></mapper>",
+        );
+        host.answer_next_prompt(Some(&["/project/UserMapper.xml"]));
+        handle_workbench_event(message(json!({ "op": "load-file" }))).unwrap();
+        let current = model();
+        assert_eq!(current.source, "/project/UserMapper.xml");
+        assert_eq!(current.kind, KIND_XML);
+        assert!(!current.sql.is_empty());
+        assert_eq!(
+            last_state(&host)["status"]["text"],
+            t("view.workbench.status.loaded").replace("{0}", "/project/UserMapper.xml")
+        );
+    }
+
+    #[test]
+    fn a_cancelled_file_pick_changes_nothing() {
+        let (host, _guard) = test_host();
+        host.set_project_root(Some("/project"));
+        host.add_file("/project/a.sql", "select 1");
+        set_model(sample());
+        host.answer_next_prompt(None);
+        handle_workbench_event(message(json!({ "op": "load-file" }))).unwrap();
+        assert_eq!(model(), sample());
+        assert!(host.view_messages().is_empty());
+    }
+
+    #[test]
+    fn loading_without_sql_or_xml_files_reports_it() {
+        let (host, _guard) = test_host();
+        host.set_project_root(Some("/project"));
+        host.add_file("/project/readme.md", "# notes");
+        handle_workbench_event(message(json!({ "op": "load-file" }))).unwrap();
+        assert_eq!(
+            last_state(&host)["status"]["text"],
+            t("view.workbench.status.load_no_files")
+        );
     }
 
     #[test]
@@ -561,8 +1374,10 @@ mod tests {
         assert_eq!(host.clipboard().as_deref(), Some(sample().sql.as_str()));
 
         handle_workbench_event(ViewEvent::Button("export".to_string())).unwrap();
-        let expected = sample().export_text();
-        assert_eq!(host.clipboard().as_deref(), Some(expected.as_str()));
+        assert!(
+            compact(&host.output()[common::CHANNEL]).contains(&compact(&sample().sql)),
+            "export goes to the Output channel"
+        );
     }
 
     #[test]
@@ -573,6 +1388,46 @@ mod tests {
         assert_eq!(fields[0].1, sample().sql);
         assert_eq!(fields[2].0, t("view.workbench.dialect"));
         assert_eq!(fields[3].1, t("view.workbench.confidence.exact"));
+    }
+
+    #[test]
+    fn the_state_carries_the_three_tabs_and_the_advice_line() {
+        let (host, _guard) = test_host();
+        handle_workbench_event(message(json!({
+            "op": "render",
+            "text": "select * from user where name like '%x%'",
+            "kind": "sql",
+        })))
+        .unwrap();
+        let state = last_state(&host);
+        let tabs = &state["model"]["tabs"];
+        for key in ["sql", "formatted", "raw", "columns"] {
+            assert!(tabs.get(key).is_some(), "tabs.{key} is missing");
+        }
+        assert_eq!(tabs["columns"], "");
+        assert!(
+            state["model"]["advice"]
+                .as_str()
+                .is_some_and(|advice| !advice.is_empty()),
+            "the meta line carries an advice line"
+        );
+        assert!(
+            state["labels"]["columnsEmpty"].as_str().is_some(),
+            "the columns tab explains why it is empty"
+        );
+    }
+
+    #[test]
+    fn an_empty_input_reports_the_empty_status_and_keeps_what_was_typed() {
+        let (host, _guard) = test_host();
+        handle_workbench_event(message(json!({ "op": "render", "text": "   " }))).unwrap();
+        let current = model();
+        assert!(current.sql.is_empty());
+        assert_eq!(current.raw, "   ");
+        assert_eq!(
+            last_state(&host)["status"]["text"],
+            t("view.workbench.status.empty")
+        );
     }
 
     #[test]
