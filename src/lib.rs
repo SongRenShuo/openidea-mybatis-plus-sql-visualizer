@@ -52,7 +52,8 @@ register_plugin!(
     providers,
     injections,
     inlay_hints,
-    diagnostics
+    diagnostics,
+    mcp
 );
 
 #[cfg(test)]

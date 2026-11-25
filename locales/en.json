@@ -49,5 +49,12 @@
   "Java executable": "Java executable",
   "Engine restarts before degrading": "Engine restarts before degrading",
   "diag.unknown_column": "Unknown column",
-  "diag.quote_style": "Quote style does not match the dialect"
+  "diag.quote_style": "Quote style does not match the dialect",
+  "mcp.error.invalid_arguments": "Tool arguments are missing, of the wrong type, or over the size limit",
+  "mcp.error.unknown_tool": "Unknown tool name",
+  "check.unbounded_write": "UPDATE or DELETE has no WHERE clause",
+  "check.destructive_ddl": "DROP or TRUNCATE removes data or objects",
+  "mapper.result_map.not_found": "The statement references an undeclared resultMap",
+  "log.parse.no_entries": "No statement could be parsed from the log text",
+  "engine.explain.unavailable": "No EXPLAIN result was supplied; this build does not execute SQL"
 }
