@@ -652,9 +652,7 @@ fn member_spans(text: &str, start: usize, end: usize) -> Vec<(usize, usize)> {
             }
             b'}' => {
                 let body = blocks.pop().unwrap_or(false);
-                if depth > 0 {
-                    depth -= 1;
-                }
+                depth = depth.saturating_sub(1);
                 if depth == 0 && body {
                     out.push((s, i + 1));
                     s = i + 1;
@@ -927,15 +925,14 @@ pub fn index_java(path: &str, text: &str) -> JavaFacts {
                         });
                     }
                 }
-            } else if ann.name == "Results" {
-                if let Some((s, e)) = ann.args {
-                    if let Some((value, ls, le)) = string_arg(&segment[s..e], "id") {
-                        method.result_ids.push(Named {
-                            name: value,
-                            range: positions.range(start + s + ls, start + s + le),
-                        });
-                    }
-                }
+            } else if ann.name == "Results"
+                && let Some((s, e)) = ann.args
+                && let Some((value, ls, le)) = string_arg(&segment[s..e], "id")
+            {
+                method.result_ids.push(Named {
+                    name: value,
+                    range: positions.range(start + s + ls, start + s + le),
+                });
             }
         }
         facts.methods.push(method);
