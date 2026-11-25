@@ -972,6 +972,9 @@ fn log_case(case: &Case) -> Result<Vec<String>, String> {
             if let Some(v) = want.get("affected_rows") {
                 check_json(&mut diffs, "affected_rows", v, &json!(entry.affected_rows));
             }
+            if let Some(v) = want.get("result_rows") {
+                check_json(&mut diffs, "result_rows", v, &json!(entry.result_rows));
+            }
             if let Some(v) = want.get("duration_ms") {
                 check_json(&mut diffs, "duration_ms", v, &json!(entry.duration_ms));
             }
