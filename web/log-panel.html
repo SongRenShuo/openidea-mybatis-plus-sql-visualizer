@@ -832,6 +832,9 @@
         if (state.status && typeof state.status.follow === 'boolean') {
           follow = state.status.follow;
         }
+        // The scroll-to-bottom tooltip names the follow state; the aria-label
+        // (set in updateLabels) stays the action name.
+        $('scrollEndBtn').title = follow ? (L.followOn || '') : (L.scrollEnd || '');
       }
 
       // Icon buttons carry no text: the label lives in title + aria-label so

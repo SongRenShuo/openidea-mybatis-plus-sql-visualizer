@@ -3902,6 +3902,8 @@ public interface UserMapper {
         assert!(page.contains("post({ op: 'help' })"));
         // The status line names the follow state.
         assert!(page.contains("right = L.followOff || ''"));
+        // The scroll-to-bottom tooltip names the follow state too.
+        assert!(page.contains("$('scrollEndBtn').title = follow ? (L.followOn"));
     }
 
     // Helpers -------------------------------------------------------------
