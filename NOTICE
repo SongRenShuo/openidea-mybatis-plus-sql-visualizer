@@ -38,3 +38,12 @@ This product includes software developed by other projects.
    https://github.com/microsoft/mssql-jdbc
 
    Project: https://github.com/OW2/asm
+
+5. IntelliJ expui icon set (Apache-2.0)
+
+   The SVGs under `icons/` (the plugin logo, the two tool-window icons and the
+   toolbar set in `icons/toolbar/`) are taken from the IntelliJ plugin's own
+   resources, which use JetBrains' IntelliJ Platform UI icon set (expui). They
+   are distributed under Apache-2.0; a copy of that text is in LICENSE.
+
+   Project: https://github.com/JetBrains/intellij-community
