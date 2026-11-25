@@ -155,6 +155,7 @@
   "view.logs.tab.log_to_sql": "Log → SQL",
   "view.logs.tab.sql_to_java": "SQL → Java",
   "view.logs.tab.history": "SQL History",
+  "view.logs.tab.preview": "SQL Preview",
   "view.logs.tab.log_to_sql.raw": "Original SQL (placeholder form)",
   "view.logs.tab.log_to_sql.params": "Parameters (in order)",
   "view.logs.tab.log_to_sql.restored": "Restored SQL",

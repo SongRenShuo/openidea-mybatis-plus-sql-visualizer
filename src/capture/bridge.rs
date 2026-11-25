@@ -625,36 +625,6 @@ pub fn panel_page_size() -> usize {
     }
 }
 
-/// The `{op:"load"}` message for the workbench page (T2-2 contract).
-pub fn workbench_payload(sql: &str, dialect: &str, source: Option<&str>) -> String {
-    let confidence = if sql.trim().is_empty() { "" } else { "exact" };
-    let mut model = serde_json::json!({
-        "sql": sql,
-        "params": [],
-        "dialect": dialect,
-        "confidence": confidence,
-    });
-    if let Some(source) = source
-        && let Some(object) = model.as_object_mut()
-    {
-        object.insert("source".to_string(), Value::String(source.to_string()));
-    }
-    serde_json::json!({
-        "op": "load",
-        "model": model,
-        "labels": {
-            "sql": crate::i18n::t("view.workbench.sql"),
-            "params": crate::i18n::t("view.workbench.params"),
-            "dialect": crate::i18n::t("view.workbench.dialect"),
-            "copy": crate::i18n::t("view.workbench.copy"),
-            "export": crate::i18n::t("view.workbench.export"),
-            "empty": crate::i18n::t("view.workbench.empty"),
-            "confidence": crate::i18n::t("view.workbench.confidence"),
-        }
-    })
-    .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -976,36 +946,5 @@ mod tests {
         })
         .to_string()
         .into_bytes()
-    }
-
-    // -- workbench payload -------------------------------------------------
-
-    #[test]
-    fn the_workbench_payload_carries_the_model_and_labels() {
-        let _host = MockHost::install();
-        let payload = workbench_payload(
-            "select * from user",
-            "MySQL",
-            Some("UserMapper.xml#findAll"),
-        );
-        let value: Value = serde_json::from_str(&payload).expect("valid JSON");
-        assert_eq!(value["op"], "load");
-        assert_eq!(value["model"]["sql"], "select * from user");
-        assert_eq!(value["model"]["params"], json!([]));
-        assert_eq!(value["model"]["dialect"], "MySQL");
-        assert_eq!(value["model"]["confidence"], "exact");
-        assert_eq!(value["model"]["source"], "UserMapper.xml#findAll");
-        assert!(value["labels"]["sql"].as_str().is_some());
-        assert!(value["labels"]["confidence"].as_str().is_some());
-    }
-
-    #[test]
-    fn an_empty_workbench_payload_claims_no_confidence() {
-        let _host = MockHost::install();
-        let value: Value =
-            serde_json::from_str(&workbench_payload("", "PostgreSQL", None)).expect("JSON");
-        assert_eq!(value["model"]["sql"], "");
-        assert_eq!(value["model"]["confidence"], "");
-        assert!(value["model"].get("source").is_none());
     }
 }

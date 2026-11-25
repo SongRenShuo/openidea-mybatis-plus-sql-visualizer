@@ -740,15 +740,25 @@ fn build_state() -> Value {
     let history = history_state(&state.history);
     drop(state);
 
+    // The fifth tab (lane L23) is the preview workbench: the model and the
+    // ops live in `views::workbench`, the state, the page and the push channel
+    // are this panel's. `selectTab` is `null` unless something asked for it
+    // (`open-workbench`, a double-click on a row) and stays set until the page
+    // reports the tab it shows.
+    let preview = crate::views::workbench::preview_tab();
+    let select_tab = crate::views::workbench::select_tab();
+
     let stats = crate::capture::bridge::Stats::current();
 
     json!({
         "op": "state",
         "rows": rows_json,
+        "selectTab": select_tab,
         "tabs": {
             "logToSql": log_to_sql,
             "sqlToJava": sql_to_java,
             "history": history,
+            "preview": preview,
         },
         "filter": {
             "types": filter.types.selected_tokens(),
@@ -1061,6 +1071,8 @@ fn labels_json() -> Value {
         "tabLogToSql": t("view.logs.tab.log_to_sql"),
         "tabSqlToJava": t("view.logs.tab.sql_to_java"),
         "tabHistory": t("view.logs.tab.history"),
+        // Fifth tab, the preview workbench (lane L23).
+        "tabPreview": t("view.logs.tab.preview"),
         "tabLogToSqlRaw": t("view.logs.tab.log_to_sql.raw"),
         "tabLogToSqlParams": t("view.logs.tab.log_to_sql.params"),
         "tabLogToSqlRestored": t("view.logs.tab.log_to_sql.restored"),
@@ -1206,9 +1218,9 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
                 }
             }
         }
-        // Tab strip (lane L22): accepted for symmetry only. Switching tabs is
-        // DOM-only on the page, so this pushes nothing back.
-        "tab" => {}
+        // Tab strip: the page reports the tab it now shows, which closes a
+        // pending "switch to the preview tab" request.
+        "tab" => crate::views::workbench::note_page_tab(),
         // "Log → SQL" tab: remember which line the page selected and re-push
         // the tab payload (the page keeps its list, so nothing is lost).
         "log-to-sql" => {
@@ -1271,6 +1283,14 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
             if let Some(code) = code {
                 host::copy_to_clipboard(&code)?;
             }
+        }
+        // The preview tab (lane L23): the page prefixes its ops so they cannot
+        // collide with this panel's own `clear` / `export` / `copy`; the model
+        // and the op handling stay in `views::workbench`, the push is this
+        // panel's state.
+        _ if op.starts_with("preview") => {
+            crate::views::workbench::handle_preview_message(&message)?;
+            let _ = push_state();
         }
         _ => {}
     }
@@ -1456,7 +1476,6 @@ impl Views for crate::Main {
     ) -> Result<View, Error> {
         match view {
             VIEW_ID => Ok(render_panel()),
-            crate::views::workbench::VIEW_ID => Ok(crate::views::workbench::render_workbench()),
             other => Err(Error::NotFound(format!("view {other}"))),
         }
     }
@@ -1464,9 +1483,6 @@ impl Views for crate::Main {
     fn handle(&mut self, view: &str, event: ViewEvent, ctx: &Invocation) -> Result<(), Error> {
         match view {
             VIEW_ID => handle_panel_event(event, ctx),
-            crate::views::workbench::VIEW_ID => {
-                crate::views::workbench::handle_workbench_event(event)
-            }
             other => Err(Error::NotFound(format!("view {other}"))),
         }
     }
@@ -1489,6 +1505,9 @@ mod tests {
         clear();
         set_filter(Filter::default());
         set_paused(false);
+        // The preview tab's model is process-wide too (lane L23).
+        crate::views::workbench::clear();
+        crate::views::workbench::note_page_tab();
         (host, guard)
     }
 
@@ -1840,7 +1859,7 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
     }
 
     #[test]
-    fn open_line_message_reveals_the_workbench() {
+    fn open_line_message_reveals_the_log_panel_on_the_preview_tab() {
         let (host, _guard) = test_host();
         set_log_text(MIXED_LOG);
         let line = snapshot()
@@ -1850,11 +1869,21 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             .unwrap()
             .line_no;
         handle_panel_message(&host, &format!("{{\"op\":\"open-line\",\"line\":{line}}}")).unwrap();
-        assert!(
+        assert_eq!(
             host.revealed_views()
                 .iter()
-                .any(|view| view == crate::views::workbench::VIEW_ID),
-            "double-click opens the workbench"
+                .filter(|view| *view == VIEW_ID)
+                .count(),
+            1,
+            "double-click reveals the log panel, not a separate view"
+        );
+        let state = state_of(&host);
+        assert_eq!(state["selectTab"], "preview");
+        assert!(
+            state["tabs"]["preview"]["model"]["sql"]
+                .as_str()
+                .is_some_and(|sql| !sql.is_empty()),
+            "the statement reaches the preview tab"
         );
     }
 
@@ -2020,16 +2049,19 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
     }
 
     #[test]
-    fn history_open_reveals_the_workbench_or_copies_a_non_statement_line() {
+    fn history_open_reveals_the_log_panel_or_copies_a_non_statement_line() {
         let (host, _guard) = test_host();
         set_log_text(MIXED_LOG);
         handle_panel_message(&host, "{\"op\":\"history-open\",\"line\":1}").unwrap();
-        assert!(
+        assert_eq!(
             host.revealed_views()
                 .iter()
-                .any(|view| view == crate::views::workbench::VIEW_ID),
-            "a parsed statement opens the workbench"
+                .filter(|view| *view == VIEW_ID)
+                .count(),
+            1,
+            "a parsed statement opens the preview tab of the log panel"
         );
+        assert_eq!(state_of(&host)["selectTab"], "preview");
 
         // Line 2 is the Parameters row: not a statement, copied verbatim.
         handle_panel_message(&host, "{\"op\":\"history-open\",\"line\":2}").unwrap();
@@ -2056,7 +2088,7 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
     }
 
     #[test]
-    fn the_page_has_four_tabs_and_keeps_the_log_list() {
+    fn the_page_has_five_tabs_and_keeps_the_log_list() {
         let (_host, _guard) = test_host();
         let page = include_str!("../../web/log-panel.html");
         for id in [
@@ -2064,10 +2096,12 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             "tab-logToSql",
             "tab-sqlToJava",
             "tab-history",
+            "tab-preview",
             "panelLogs",
             "panelLogToSql",
             "panelSqlToJava",
             "panelHistory",
+            "panelPreview",
         ] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
@@ -2086,6 +2120,18 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         assert!(page.contains("op: 'log-to-sql'"), "log-to-sql op");
         assert!(page.contains("op: 'sql-to-java'"), "sql-to-java op");
         assert!(page.contains("op: 'history'"), "history op");
+        // The preview tab's ops carry the `preview-` prefix (lane L23), so the
+        // log panel can route them without colliding with its own names.
+        for op in [
+            "preview-render",
+            "preview-format",
+            "preview-load-file",
+            "preview-clear",
+            "preview-copy",
+            "preview-export",
+        ] {
+            assert!(page.contains(op), "missing op {op}");
+        }
 
         let labels = labels_json();
         for key in [
@@ -2093,6 +2139,7 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             "tabLogToSql",
             "tabSqlToJava",
             "tabHistory",
+            "tabPreview",
             "tabLogToSqlEmpty",
             "tabSqlToJavaEmpty",
             "tabHistoryEmpty",
@@ -2100,6 +2147,168 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         ] {
             assert!(labels.get(key).is_some(), "missing label {key}");
         }
+    }
+
+    #[test]
+    fn the_preview_tab_carries_the_workbench_ui() {
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        // The input pane: statement box plus the four actions the IntelliJ
+        // panel's top half has.
+        for id in [
+            "pvInput",
+            "pvResolve",
+            "pvFormat",
+            "pvLoadFile",
+            "pvClear",
+            "pvOpenDialog",
+        ] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        // The preview pane: read-only dialect label, copy / format / mode /
+        // export, parameters beside the SQL tab, and the disabled Execute.
+        for id in [
+            "pvDialectChip",
+            "pvCopy",
+            "pvFormatPreview",
+            "pvMode",
+            "pvExport",
+            "pvParams",
+            "pvTabBody",
+            "pvExecute",
+            "pvCopySql",
+            "pvStatus",
+        ] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        for tab in ["sql", "raw", "columns"] {
+            assert!(
+                page.contains(&format!("data-pvtab=\"{tab}\"")),
+                "missing inner tab {tab}"
+            );
+        }
+        // Execute stays disabled with the reason in its tooltip; the page has
+        // no external link, no storage and builds no markup from data.
+        assert!(page.contains("id=\"pvExecute\" class=\"btn\" type=\"button\" disabled"));
+        assert!(
+            page.contains("openidea.postMessage"),
+            "the page talks to the plugin only"
+        );
+        for needle in [
+            "http://",
+            "https://",
+            "localStorage",
+            "fetch(",
+            "XMLHttpRequest",
+            "innerHTML",
+            "outerHTML",
+            "insertAdjacentHTML",
+            "eval(",
+        ] {
+            assert!(!page.contains(needle), "web page must not contain {needle}");
+        }
+    }
+
+    // -- preview tab routing (lane L23) ------------------------------------
+
+    #[test]
+    fn a_preview_render_message_reaches_the_workbench_model_and_the_state() {
+        let (host, _guard) = test_host();
+        handle_panel_message(
+            &host,
+            "{\"op\":\"preview-render\",\"text\":\"select 7\",\"kind\":\"sql\"}",
+        )
+        .unwrap();
+        let preview = &state_of(&host)["tabs"]["preview"];
+        assert_eq!(preview["model"]["sql"], "select 7");
+        assert_eq!(preview["model"]["confidence"], "exact");
+        assert_eq!(
+            preview["replaceInput"], true,
+            "the input box follows the render"
+        );
+        assert_eq!(
+            crate::views::workbench::model().sql,
+            "select 7",
+            "the host-side model is the one the ops use"
+        );
+    }
+
+    #[test]
+    fn a_preview_copy_message_reaches_the_clipboard_and_the_state() {
+        let (host, _guard) = test_host();
+        handle_panel_message(
+            &host,
+            "{\"op\":\"preview-render\",\"text\":\"select 8\",\"kind\":\"sql\"}",
+        )
+        .unwrap();
+        handle_panel_message(&host, "{\"op\":\"preview-copy\"}").unwrap();
+        assert_eq!(host.clipboard().as_deref(), Some("select 8"));
+        assert_eq!(
+            state_of(&host)["tabs"]["preview"]["status"]["text"],
+            t("view.workbench.copied")
+        );
+        assert_eq!(
+            state_of(&host)["tabs"]["preview"]["replaceInput"],
+            false,
+            "a copy leaves the input box alone"
+        );
+    }
+
+    #[test]
+    fn a_preview_export_message_writes_the_output_channel() {
+        let (host, _guard) = test_host();
+        handle_panel_message(
+            &host,
+            "{\"op\":\"preview-render\",\"text\":\"select 9\",\"kind\":\"sql\"}",
+        )
+        .unwrap();
+        handle_panel_message(&host, "{\"op\":\"preview-export\"}").unwrap();
+        let out = &host.output()[common::CHANNEL];
+        assert!(out.contains("mybatis-sql workbench export"), "{out}");
+        // The body is the statement formatted for the dialect, so the
+        // whitespace differs from what was typed.
+        let compact = out.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(compact.to_lowercase().contains("select 9"), "{out}");
+    }
+
+    #[test]
+    fn the_select_tab_request_survives_until_the_page_reports_its_tab() {
+        let (host, _guard) = test_host();
+        crate::views::workbench::request_tab();
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["selectTab"], "preview");
+        // Every push keeps the request until the page confirms.
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["selectTab"], "preview");
+        handle_panel_message(&host, "{\"op\":\"tab\",\"tab\":\"preview\"}").unwrap();
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert!(
+            state_of(&host)["selectTab"].is_null(),
+            "the page confirmed its tab, so the request is done"
+        );
+    }
+
+    #[test]
+    fn the_bare_ops_of_the_log_panel_do_not_touch_the_preview() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        crate::views::workbench::set_model(crate::views::workbench::WorkbenchModel::new(
+            "select keep",
+            Vec::new(),
+            "MySQL",
+        ));
+        handle_panel_message(
+            &host,
+            "{\"op\":\"preview-render\",\"text\":\"select keep\"}",
+        )
+        .unwrap();
+        // `clear` empties the log buffer; the preview model stays.
+        handle_panel_message(&host, "{\"op\":\"clear\"}").unwrap();
+        assert_eq!(crate::views::workbench::model().sql, "select keep");
+        assert_eq!(
+            state_of(&host)["tabs"]["preview"]["model"]["sql"],
+            "select keep"
+        );
     }
 
     // Helpers -------------------------------------------------------------

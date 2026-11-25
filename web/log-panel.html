@@ -186,6 +186,84 @@
     .histrow:hover { background: var(--openidea-bg-hover); }
     .histrow .sql { margin-top: 2px; }
 
+    /* Fifth tab: the preview workbench (L23). Everything is scoped to
+       #panelPreview so the log list's own .meta / .badge / .status rules keep
+       working untouched. */
+    #panelPreview .pv-pane {
+      display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+    }
+    #panelPreview .pv-pane.pv-top { flex: 0 0 40%; }
+    #panelPreview .pv-pane.pv-preview { flex: 1 1 auto; }
+    #panelPreview .pv-toolbar {
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px;
+    }
+    #panelPreview #pvInput {
+      flex: 1 1 auto; min-height: 0; margin: 0 8px 8px; padding: 6px 8px; resize: none;
+      color: var(--openidea-fg); background: var(--openidea-bg-input);
+      border: 1px solid var(--openidea-border); border-radius: 3px;
+      font: var(--openidea-font-size, 13px)/1.5 var(--openidea-font-mono, monospace);
+    }
+    #panelPreview .pv-splitter {
+      flex: 0 0 6px; cursor: row-resize; background: var(--openidea-border); opacity: 0.6;
+    }
+    #panelPreview .pv-splitter:hover, #panelPreview .pv-splitter.dragging {
+      background: var(--openidea-accent); opacity: 1;
+    }
+    #panelPreview .pv-meta {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 8px;
+    }
+    #panelPreview .pv-chip {
+      padding: 0 6px; border: 1px solid var(--openidea-border);
+      border-radius: 3px; white-space: nowrap;
+    }
+    #panelPreview .pv-badge {
+      padding: 0 6px; border-radius: 3px;
+      background: var(--openidea-bg-selected); font-size: 11px;
+    }
+    #panelPreview .pv-badge.partial { color: var(--openidea-warning); }
+    #panelPreview .pv-badge.unresolved { color: var(--openidea-danger); }
+    #panelPreview .pv-advice { font-size: 11px; }
+    #panelPreview .pv-cols {
+      display: flex; flex: 1 1 auto; min-height: 0;
+      border-top: 1px solid var(--openidea-border);
+    }
+    #panelPreview .pv-params {
+      flex: 0 0 30%; display: flex; flex-direction: column;
+      min-width: 0; min-height: 0; border-right: 1px solid var(--openidea-border);
+    }
+    #panelPreview .pv-pane-title { padding: 4px 8px 2px; font-weight: 600; }
+    #panelPreview .pv-scroll { flex: 1 1 auto; overflow: auto; padding: 4px 8px 8px; }
+    #panelPreview .pv-sqlside {
+      flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+    }
+    #panelPreview .pv-tabs {
+      display: flex; gap: 2px; padding: 4px 8px 0;
+      border-bottom: 1px solid var(--openidea-border);
+    }
+    #panelPreview .pv-tab {
+      padding: 3px 12px; background: transparent; border: 1px solid transparent;
+      border-bottom: none; border-radius: 3px 3px 0 0; cursor: pointer;
+      color: var(--openidea-fg-muted); font-size: 12px;
+    }
+    #panelPreview .pv-tab:hover { color: var(--openidea-fg); }
+    #panelPreview .pv-tab[aria-selected="true"] {
+      background: var(--openidea-bg-elevated); border-color: var(--openidea-border);
+      color: var(--openidea-fg-strong);
+    }
+    #panelPreview .pv-tabbody {
+      flex: 1 1 auto; min-height: 0; margin: 0; overflow: auto;
+      white-space: pre-wrap; word-break: break-word;
+      border: none; border-radius: 0; background: transparent;
+    }
+    #panelPreview .pv-footer {
+      display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      border-top: 1px solid var(--openidea-border);
+    }
+    #panelPreview #pvStatus {
+      flex: 1 1 auto; min-width: 0; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -195,6 +273,10 @@
     <button class="tab" type="button" role="tab" aria-selected="false" data-tab="logToSql" id="tab-logToSql"></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-tab="sqlToJava" id="tab-sqlToJava"></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-tab="history" id="tab-history"></button>
+    <!-- Fifth tab: the preview workbench, as the IntelliJ edition's "SQL 预览"
+         tab (there a Registry key decides whether it exists; here it is
+         permanent, see docs/registration/L23.md). -->
+    <button class="tab" type="button" role="tab" aria-selected="false" data-tab="preview" id="tab-preview"></button>
   </div>
 
   <div class="panel" id="panelLogs">
@@ -295,6 +377,63 @@
     </div>
   </div>
 
+  <!-- SQL 预览：the preview workbench, moved out of its own view (L23).
+       Input pane on top, preview pane below, parameters beside the SQL. -->
+  <div class="panel" id="panelPreview" hidden>
+    <div class="pv-pane pv-top" id="pvPaneTop">
+      <div class="pv-toolbar">
+        <button id="pvResolve" class="btn" type="button"></button>
+        <button id="pvFormat" class="btn" type="button"></button>
+        <button id="pvLoadFile" class="btn" type="button"></button>
+        <button id="pvClear" class="btn" type="button"></button>
+        <button id="pvOpenDialog" class="btn" type="button" disabled></button>
+      </div>
+      <div class="hint" id="pvInputHint"></div>
+      <textarea id="pvInput" spellcheck="false" autocomplete="off"></textarea>
+    </div>
+
+    <div class="pv-splitter" id="pvSplitter" role="separator" aria-orientation="horizontal"
+         tabindex="0"></div>
+
+    <div class="pv-pane pv-preview">
+      <div class="pv-meta">
+        <span class="pv-chip" id="pvDialectChip"></span>
+        <span class="muted" id="pvDialectHint"></span>
+        <span class="pv-badge" id="pvConfidence" hidden></span>
+        <span class="pv-advice muted" id="pvAdvice"></span>
+      </div>
+      <div class="pv-toolbar">
+        <button id="pvCopy" class="btn" type="button"></button>
+        <button id="pvFormatPreview" class="btn" type="button"></button>
+        <label class="muted" id="pvModeLabel" for="pvMode"></label>
+        <select id="pvMode" class="btn">
+          <option value="normal"></option>
+          <option value="formatted"></option>
+        </select>
+        <button id="pvExport" class="btn" type="button"></button>
+      </div>
+      <div class="pv-cols">
+        <div class="pv-params">
+          <div class="pv-pane-title" id="pvParamsTitle"></div>
+          <div class="pv-scroll"><pre class="code muted" id="pvParams"></pre></div>
+        </div>
+        <div class="pv-sqlside">
+          <div class="pv-tabs" role="tablist">
+            <button class="pv-tab" type="button" role="tab" data-pvtab="sql" aria-selected="true"></button>
+            <button class="pv-tab" type="button" role="tab" data-pvtab="raw" aria-selected="false"></button>
+            <button class="pv-tab" type="button" role="tab" data-pvtab="columns" aria-selected="false"></button>
+          </div>
+          <pre class="code pv-tabbody" id="pvTabBody" role="tabpanel"></pre>
+        </div>
+      </div>
+      <div class="pv-footer">
+        <button id="pvExecute" class="btn" type="button" disabled></button>
+        <button id="pvCopySql" class="btn" type="button"></button>
+        <span id="pvStatus" class="muted"></span>
+      </div>
+    </div>
+  </div>
+
   <div id="ctxMenu" class="ctxmenu" hidden>
     <button type="button" data-act="copy-sql"></button>
     <button type="button" data-act="copy-time"></button>
@@ -321,10 +460,13 @@
       var ctxLine = null;
       var typeMenuBuilt = false;
       // Tab strip (L22). Selection is DOM-only: no state request on switch.
-      var TAB_IDS = ['logs', 'logToSql', 'sqlToJava', 'history'];
+      // The fifth tab (L23) is the preview workbench; it is permanent, so the
+      // strip never removes an entry.
+      var TAB_IDS = ['logs', 'logToSql', 'sqlToJava', 'history', 'preview'];
       var PANELS = {
         logs: 'panelLogs', logToSql: 'panelLogToSql',
-        sqlToJava: 'panelSqlToJava', history: 'panelHistory'
+        sqlToJava: 'panelSqlToJava', history: 'panelHistory',
+        preview: 'panelPreview'
       };
       var activeTab = 'logs';
       // Line the "Log → SQL" tab shows (null = nothing to restore yet).
@@ -432,6 +574,7 @@
         setText($('tab-logToSql'), L.tabLogToSql || 'Log -> SQL');
         setText($('tab-sqlToJava'), L.tabSqlToJava || 'SQL -> Java');
         setText($('tab-history'), L.tabHistory || 'SQL History');
+        setText($('tab-preview'), L.tabPreview || 'SQL Preview');
         setText($('l2sRawCaption'), L.tabLogToSqlRaw);
         setText($('l2sParamsCaption'), L.tabLogToSqlParams);
         setText($('l2sRestoredCaption'), L.tabLogToSqlRestored);
@@ -817,6 +960,164 @@
         }
       }
 
+      // "SQL 预览" (L23) ----------------------------------------------------
+      // The workbench moved here from its own view. Same behaviour as before:
+      // the host owns the model, the page only renders it and posts
+      // `preview-*` ops.
+      var PV_LABEL_KEYS = {
+        pvResolve: 'resolve', pvFormat: 'format', pvLoadFile: 'loadFile',
+        pvClear: 'clear', pvOpenDialog: 'openDialog', pvCopy: 'copySql',
+        pvFormatPreview: 'format', pvExport: 'export', pvExecute: 'execute',
+        pvCopySql: 'copySql'
+      };
+      var PV_TAB_KEYS = { sql: 'tabSql', raw: 'tabRaw', columns: 'tabColumns' };
+      var PV_TAB_ORDER = ['sql', 'raw', 'columns'];
+      var preview = { model: {}, labels: {}, dialect: {}, tab: 'sql', mode: 'normal' };
+
+      function pvNode(id) { return document.getElementById(id); }
+      function pvTabs() { return preview.model.tabs || {}; }
+
+      function pvInputText() {
+        var editor = pvNode('pvInput');
+        return editor ? editor.value : '';
+      }
+
+      function pvRenderTab() {
+        var body = pvNode('pvTabBody');
+        if (!body) { return; }
+        var m = preview.model || {};
+        var labels = preview.labels || {};
+        var text = '';
+        var placeholder = false;
+        if (preview.tab === 'sql') {
+          if (!m.sql && m.reason) {
+            text = (labels.reasonTitle || '') + '\n' + m.reason;
+          } else if (!m.sql) {
+            text = labels.empty || '';
+            placeholder = true;
+          } else {
+            var source = pvTabs();
+            text = preview.mode === 'formatted'
+              ? (source.formatted || source.sql || '')
+              : (source.sql || '');
+            if (m.reason) {
+              // A partial render keeps its SQL and explains itself below it the
+              // way `render-xml` prints reasons as comments.
+              text += '\n\n-- ' + (labels.reasonTitle || '');
+              var reasons = m.reason.split('\n');
+              for (var line = 0; line < reasons.length; line++) {
+                text += '\n-- ' + reasons[line];
+              }
+            }
+          }
+        } else if (preview.tab === 'raw') {
+          text = pvTabs().raw || '';
+          placeholder = !text;
+        } else {
+          text = pvTabs().columns || '';
+          if (!text) {
+            text = labels.columnsEmpty || '';
+            placeholder = true;
+          }
+        }
+        body.textContent = text;
+        body.className = placeholder ? 'code pv-tabbody muted' : 'code pv-tabbody';
+        body.scrollTop = 0;
+      }
+
+      function pvSelectTab(key) {
+        if (PV_TAB_ORDER.indexOf(key) < 0) { return; }
+        preview.tab = key;
+        var buttons = document.querySelectorAll('#panelPreview .pv-tab');
+        for (var i = 0; i < buttons.length; i++) {
+          var on = buttons[i].getAttribute('data-pvtab') === key;
+          buttons[i].setAttribute('aria-selected', on ? 'true' : 'false');
+        }
+        pvRenderTab();
+      }
+
+      function pvSetMode(mode) {
+        preview.mode = mode === 'formatted' ? 'formatted' : 'normal';
+        var select = pvNode('pvMode');
+        if (select && select.value !== preview.mode) { select.value = preview.mode; }
+        pvRenderTab();
+      }
+
+      function pvApplyLabels() {
+        var labels = preview.labels || {};
+        var ids = Object.keys(PV_LABEL_KEYS);
+        for (var index = 0; index < ids.length; index++) {
+          setText(pvNode(ids[index]), labels[PV_LABEL_KEYS[ids[index]]]);
+        }
+        var openDialog = pvNode('pvOpenDialog');
+        if (openDialog) { openDialog.title = labels.openDialogNote || ''; }
+        var executeButton = pvNode('pvExecute');
+        if (executeButton) { executeButton.title = labels.executeNote || ''; }
+        setText(pvNode('pvInputHint'), labels.hintInput);
+        setText(pvNode('pvParamsTitle'), labels.params);
+        setText(pvNode('pvModeLabel'), labels.mode);
+        var modeSelect = pvNode('pvMode');
+        if (modeSelect && modeSelect.options.length >= 2) {
+          modeSelect.options[0].textContent = labels.modeNormal || '';
+          modeSelect.options[1].textContent = labels.modeFormatted || '';
+        }
+        var buttons = document.querySelectorAll('#panelPreview .pv-tab');
+        for (var tabIndex = 0; tabIndex < buttons.length; tabIndex++) {
+          var key = buttons[tabIndex].getAttribute('data-pvtab');
+          buttons[tabIndex].textContent = labels[PV_TAB_KEYS[key]] || key;
+        }
+      }
+
+      function pvApplyModel() {
+        var m = preview.model || {};
+        var dialect = preview.dialect || {};
+        var labels = preview.labels || {};
+        var name = dialect.name || m.dialect || '';
+        var suffix = dialect.isDefault ? (labels.dialectDefault || '') : '';
+        setText(pvNode('pvDialectChip'), (labels.dialect || '') + ': ' + name + suffix);
+        var chip = pvNode('pvDialectChip');
+        if (chip) { chip.title = dialect.capabilities || ''; }
+        setText(pvNode('pvDialectHint'), labels.dialectHint);
+        setText(pvNode('pvAdvice'), m.advice);
+
+        var badge = pvNode('pvConfidence');
+        if (badge) {
+          var level = (m.confidence === 'partial' || m.confidence === 'unresolved')
+            ? m.confidence : '';
+          badge.className = level ? 'pv-badge ' + level : 'pv-badge';
+          badge.textContent = labels.confidenceLabel || '';
+          badge.hidden = !labels.confidenceLabel;
+        }
+
+        var params = m.params || [];
+        setText(pvNode('pvParams'), params.length ? params.join('\n') : '—');
+
+        var columns = pvTabs().columns || '';
+        var buttons = document.querySelectorAll('#panelPreview .pv-tab');
+        for (var tabIndex = 0; tabIndex < buttons.length; tabIndex++) {
+          var key = buttons[tabIndex].getAttribute('data-pvtab');
+          buttons[tabIndex].title = key === 'columns' && !columns
+            ? (labels.columnsEmpty || '') : '';
+        }
+      }
+
+      function applyPreview(tab) {
+        if (!tab) { return; }
+        preview.model = tab.model || {};
+        preview.labels = tab.labels || {};
+        preview.dialect = tab.dialect || {};
+        pvApplyLabels();
+        pvApplyModel();
+        // Only an op that rewrote the model asks for the input box to be
+        // overwritten; every other state push leaves what the user typed.
+        if (tab.replaceInput) {
+          var editor = pvNode('pvInput');
+          if (editor) { editor.value = pvTabs().raw || ''; }
+        }
+        setText(pvNode('pvStatus'), tab.status ? tab.status.text : '');
+        pvRenderTab();
+      }
+
       function applyState(state) {
         current = state;
         L = state.labels || L;
@@ -836,6 +1137,11 @@
         applyLogToSql(tabs.logToSql);
         applySqlToJava(tabs.sqlToJava);
         applyHistory(tabs.history);
+        applyPreview(tabs.preview);
+        // `selectTab` is set by open-workbench / a double-clicked row and stays
+        // in the state until the page reports the tab it shows (the `tab`
+        // message below does exactly that).
+        if (state.selectTab) { selectTab(state.selectTab, true); }
       }
 
       // Type popup ----------------------------------------------------------
@@ -881,6 +1187,106 @@
       $('histKw').addEventListener('keydown', function (event) {
         if (event.key === 'Enter') { event.preventDefault(); $('histSearchBtn').click(); }
       });
+
+      // "SQL 预览" (L23): splitter, actions, inner tabs, Ctrl+Enter.
+      var pvPaneTop = pvNode('pvPaneTop');
+      var pvSplitter = pvNode('pvSplitter');
+      var pvDragging = false;
+
+      function pvPanelRect() {
+        var panel = pvNode('panelPreview');
+        return panel ? panel.getBoundingClientRect() : null;
+      }
+      function pvSetTopFraction(fraction) {
+        if (!pvPaneTop) { return; }
+        var clamped = Math.min(0.8, Math.max(0.15, fraction));
+        pvPaneTop.style.flexBasis = (clamped * 100) + '%';
+      }
+      function pvTopFraction() {
+        var rect = pvPanelRect();
+        if (!pvPaneTop || !rect || rect.height <= 0) { return 0.4; }
+        return pvPaneTop.getBoundingClientRect().height / rect.height;
+      }
+
+      if (pvSplitter) {
+        pvSplitter.addEventListener('pointerdown', function (event) {
+          pvDragging = true;
+          pvSplitter.classList.add('dragging');
+          if (pvSplitter.setPointerCapture) {
+            pvSplitter.setPointerCapture(event.pointerId);
+          }
+          event.preventDefault();
+        });
+        pvSplitter.addEventListener('pointermove', function (event) {
+          if (!pvDragging) { return; }
+          var rect = pvPanelRect();
+          if (rect && rect.height > 0) {
+            pvSetTopFraction((event.clientY - rect.top) / rect.height);
+          }
+        });
+        var pvStopDrag = function (event) {
+          if (!pvDragging) { return; }
+          pvDragging = false;
+          pvSplitter.classList.remove('dragging');
+          if (pvSplitter.releasePointerCapture && event.pointerId !== undefined) {
+            try {
+              pvSplitter.releasePointerCapture(event.pointerId);
+            } catch (error) {
+              /* the capture was already released */
+            }
+          }
+        };
+        pvSplitter.addEventListener('pointerup', pvStopDrag);
+        pvSplitter.addEventListener('pointercancel', pvStopDrag);
+        pvSplitter.addEventListener('keydown', function (event) {
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') { return; }
+          pvSetTopFraction(pvTopFraction() + (event.key === 'ArrowDown' ? 0.02 : -0.02));
+          event.preventDefault();
+        });
+      }
+
+      function pvOn(id, handler) {
+        var target = pvNode(id);
+        if (target) { target.addEventListener('click', handler); }
+      }
+      pvOn('pvResolve', function () {
+        post({ op: 'preview-render', text: pvInputText(), kind: '' });
+      });
+      pvOn('pvFormat', function () {
+        post({ op: 'preview-format', text: pvInputText() });
+      });
+      pvOn('pvLoadFile', function () { post({ op: 'preview-load-file' }); });
+      pvOn('pvClear', function () { post({ op: 'preview-clear' }); });
+      pvOn('pvCopy', function () { post({ op: 'preview-copy' }); });
+      pvOn('pvCopySql', function () { post({ op: 'preview-copy' }); });
+      pvOn('pvExport', function () { post({ op: 'preview-export' }); });
+      pvOn('pvFormatPreview', function () { pvSetMode('formatted'); });
+
+      var pvModeSelect = pvNode('pvMode');
+      if (pvModeSelect) {
+        pvModeSelect.addEventListener('change', function () {
+          pvSetMode(pvModeSelect.value);
+        });
+      }
+
+      var pvTabButtons = document.querySelectorAll('#panelPreview .pv-tab');
+      for (var pvIndex = 0; pvIndex < pvTabButtons.length; pvIndex++) {
+        (function (element) {
+          element.addEventListener('click', function () {
+            pvSelectTab(element.getAttribute('data-pvtab'));
+          });
+        })(pvTabButtons[pvIndex]);
+      }
+
+      var pvEditor = pvNode('pvInput');
+      if (pvEditor) {
+        pvEditor.addEventListener('keydown', function (event) {
+          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault();
+            post({ op: 'preview-render', text: pvEditor.value, kind: '' });
+          }
+        });
+      }
 
       $('typeBtn').addEventListener('click', function (event) {
         event.stopPropagation();
