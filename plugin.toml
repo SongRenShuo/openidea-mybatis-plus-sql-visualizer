@@ -160,7 +160,7 @@ icon = "icons/sqlLog.svg"
 location = "right"
 web = "web/log-panel.html"
 
-# Settings page (L5 schema, 40 fields in five groups).
+# Settings page (L5 schema, 42 fields in five groups).
 [contributes.settings]
 schema = "settings.schema.json"
 

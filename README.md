@@ -8,7 +8,7 @@
 
 ## 先看 IntelliJ 版
 
-本仓是 IntelliJ 插件 `mybatis-plus-sql-visualizer` 的 **OpenIDEA 端口**。功能更全、日常在用的那一版在这里：
+本仓是 IntelliJ 插件 **MyBatis SQL Visualizer** 的 OpenIDEA 端口。两个版本同名、同图标，区别只在宿主平台。功能更全、日常在用的那一版在这里：
 
 [官网与在线文档](https://sql-visualizer.jvtools.cn) · [插件市场](https://plugins.jetbrains.com/plugin/33633-mybatis-sql-visualizer) · [快速开始](https://sql-visualizer.jvtools.cn/guide/getting-started) · [原版更新记录](https://gitee.com/songrenshuo/mybatis-plus-sql-visualizer/blob/master/CHANGELOG.md) · [问题反馈](https://sql-visualizer.jvtools.cn/about/feedback)
 
