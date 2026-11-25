@@ -40,13 +40,12 @@
 2. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
    `LambdaQueryWrapper` 文本→链由 `src/analyze` 解析（无 PSI 的类型推断），
    `unresolved` 时只给原因，不出 Java 代码。
-3. **EXPLAIN 不连库**：引擎只做 `EXPLAIN <语句>` 包装与格式分类，不执行、不自省表结构；
-   `sqlv_explain` 只格式化调用方已经拿到的 EXPLAIN 结果，缺结果返回 `unresolved`。
-   为什么本版不补真执行：平台 `database` 明确不执行 SQL（`docs/FEATURES.md` F133+ 一档），
-   唯一执行面是 sidecar 的 JVM；而引擎要直连库必须带 JDBC 驱动，主流驱动又不在本仓
-   许可白名单内（MySQL Connector/J 为 GPLv2+FOSS、H2 为 MPL/EPL，均禁入；PostgreSQL BSD、
-   SQLite Apache-2.0 合规但本机没有对应真实库）。因此「3 个真实库 EXPLAIN 出结果」在本仓
-   红线下不可达，`T5-5` 验收项保留为未达成，而不是用打包 GPL 驱动去凑读数。
+3. **EXPLAIN 只在引擎侧真执行**：平台 `database` 不执行 SQL，所以执行面只有 sidecar 的 JVM。
+   引擎 jar 现在自带 **PostgreSQL JDBC 42.7.1（BSD-2）** 与 **mssql-jdbc 12.4.2（MIT）**，
+   支持对 PostgreSQL / SQL Server 跑**只读** `EXPLAIN`（PG 返回 JSON、SQL Server 返回 ShowPlan XML）；
+   写语句、DDL、多语句一律结构化拒绝，连接只读 + 查询超时。MySQL/MariaDB 仍不执行：
+   Connector/J 是 GPLv2+FOSS、H2 是 MPL/EPL，均不在许可白名单内。schema 自省仍不做，
+   `sqlv_schema_context` 只格式化调用方给的结构；`sqlv_explain` 缺结果时返回 `unresolved`。
 4. **schema 由调用方提供**：`sqlv_schema_context` 格式化入参里的表/列/索引，不做数据库自省；
    诊断与 inlay 在没有列清单时一律不出结果（宁可不报，也不误报）。
 5. **MCP `sqlv_history_search` 只搜入参文本**：平台没有 IDE 历史记录 API，所以它不检索历史面板，

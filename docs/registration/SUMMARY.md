@@ -39,7 +39,8 @@
 直接依赖只有 `serde` / `serde_json`（MIT/Apache-2.0）与 `openidea-plugin`（tag `v0.1.51`）。
 引擎 jar 与 agent jar 不入库：引擎经 `engine/ENGINE_VERSION` + sha256，agent jar 由主仓
 `agentFatJar` 产出后入包；`NOTICE` 记 JSqlParser（Apache-2.0 分支）与 ASM（BSD-3-Clause）。
-（L15 引入的 PostgreSQL JDBC（BSD-2）与 mssql-jdbc（MIT）如落地，会同步记入 NOTICE。）
+（L15 已落地：引擎 jar 内含 PostgreSQL JDBC 42.7.1（BSD-2）与 mssql-jdbc 12.4.2（MIT），
+NOTICE 第 4 条已记；MySQL 驱动因 GPL 仍不引入。）
 
 ## 复读命令
 

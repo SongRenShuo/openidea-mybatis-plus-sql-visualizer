@@ -27,4 +27,14 @@ This product includes software developed by other projects.
    only accepts a jar inside the package. It relocates ASM (BSD-3-Clause)
    under the agent's own namespace.
 
+4. PostgreSQL JDBC Driver 42.7.1 (BSD-2-Clause) and Microsoft JDBC Driver for
+   SQL Server 12.4.2.jre11 (MIT)
+
+   Shipped inside the engine jar (`mpsv-engine-<version>.jar`, downloaded at
+   first use and verified against `engine/ENGINE_VERSION.sha256`) so the
+   sidecar can run a read-only EXPLAIN against PostgreSQL or SQL Server.
+
+   Projects: https://jdbc.postgresql.org/ and
+   https://github.com/microsoft/mssql-jdbc
+
    Project: https://github.com/OW2/asm
