@@ -19,3 +19,12 @@ This product includes software developed by other projects.
 
    Linked at build time from https://github.com/l0ng-ai/openidea at tag
    v0.1.51. Its licence and notices are those of the OpenIDEA repository.
+
+3. mps-sql-agent.jar
+
+   Built from the IntelliJ repository's `sub-projects/sql-visualizer-agent` and
+   bundled at `agent/mps-sql-agent.jar`, because `[[contributes.javaAgents]]`
+   only accepts a jar inside the package. It relocates ASM (BSD-3-Clause)
+   under the agent's own namespace.
+
+   Project: https://github.com/OW2/asm
