@@ -1820,7 +1820,9 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
     #[test]
     fn the_packaged_page_draws_its_own_action_row() {
         // A `web =` view gets no host toolbar, so the page must offer pause,
-        // clear and copy itself, with the labels the state carries.
+        // clear and copy itself — as IDE-style icon buttons (L24): a 24×24
+        // hit area, an inline SVG from icons/toolbar/, and the Chinese label
+        // in `title` + `aria-label` instead of visible text.
         let (_host, _guard) = test_host();
         let page = include_str!("../../web/log-panel.html");
         for (id, op) in [
@@ -1830,7 +1832,31 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         ] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
             assert!(page.contains(op), "missing op {op}");
+            assert!(
+                page.contains(&format!("id=\"{id}\" class=\"iconbtn\"")),
+                "{id} is an icon button"
+            );
         }
+        // The action row draws pause + resume (one is hidden by the state),
+        // clear and copy: four SVG bodies, no text buttons left.
+        let bar_start = page.find("class=\"actionbar\"").expect("action row");
+        let bar_end = page.find("class=\"filterbar\"").expect("filter row");
+        let actionbar = &page[bar_start..bar_end];
+        assert_eq!(actionbar.matches("<svg").count(), 4, "{actionbar}");
+        assert!(
+            !actionbar.contains("class=\"btn\""),
+            "the action row has no text buttons"
+        );
+        for id in ["pauseIcon", "resumeIcon"] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        // The label binds through `title` and `aria-label`, both fed by the
+        // state's `labels`.
+        assert!(
+            page.contains("node.setAttribute('aria-label', label || '')"),
+            "aria-label binding"
+        );
+        assert!(page.contains("node.title = label || ''"), "title binding");
         let labels = labels_json();
         for key in ["pause", "resume", "clear", "copyAll"] {
             assert!(labels.get(key).is_some(), "missing label {key}");
@@ -2117,6 +2143,23 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         );
         assert!(page.contains("rowsSig"), "rows are signature guarded");
         assert!(page.contains("event.key === 'Tab'"), "Ctrl+Tab cycling");
+        // Tab strip (L24): JBTabs-style cards instead of the underline. The
+        // selected tab is a raised page with a 4px top radius, and a narrow
+        // strip scrolls it into view (the host can switch to the fifth tab).
+        assert!(
+            page.contains(".tab.active"),
+            "the selected tab has its own state class"
+        );
+        assert!(
+            page.contains("border-radius: 4px 4px 0 0"),
+            "the selected tab is a card"
+        );
+        assert!(!page.contains(".tab.sel"), "the underline tab is gone");
+        assert!(
+            page.contains("scrollIntoView({ inline: 'nearest', block: 'nearest' })"),
+            "the active tab is scrolled into view"
+        );
+        assert!(!page.contains("border-bottom-color: var(--openidea-accent)"));
         assert!(page.contains("op: 'log-to-sql'"), "log-to-sql op");
         assert!(page.contains("op: 'sql-to-java'"), "sql-to-java op");
         assert!(page.contains("op: 'history'"), "history op");
@@ -2146,6 +2189,62 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             "tabConfidenceUnresolved",
         ] {
             assert!(labels.get(key).is_some(), "missing label {key}");
+        }
+    }
+
+    #[test]
+    fn the_log_list_follows_the_jblist_row_style() {
+        // L24: the rows read like a JBList cell — a 3px type bar, a muted
+        // metadata line, the statement, and a 1px rule between rows.
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        for needle in [
+            "min-height: 40px",
+            ".row:hover { background: var(--openidea-bg-hover); }",
+            ".row.sel { background: var(--openidea-bg-selected); }",
+            ".row .bar { width: 3px; flex: 0 0 3px; }",
+        ] {
+            assert!(page.contains(needle), "missing row style {needle}");
+        }
+        // Metadata is 11px muted with monospace sequence/time/duration; the
+        // statement is 12px monospace and wraps.
+        for needle in [
+            "align-items: center; gap: 8px; font-size: 11px;",
+            ".meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }",
+            "font-size: 12px; line-height: 1.4;",
+            "white-space: pre-wrap; word-break: break-word;",
+        ] {
+            assert!(page.contains(needle), "missing text style {needle}");
+        }
+        // Badges are 8px-radius 10px capsules tinted 16% with the semantic
+        // host variable; the slow duration and the error line take the
+        // warning/danger ink.
+        assert!(
+            page.contains("border-radius: 8px; font-size: 10px;"),
+            "capsule badges"
+        );
+        for tint in ["fg-muted", "warning", "danger"] {
+            let rule = format!("color-mix(in srgb, var(--openidea-{tint}) 16%, transparent)");
+            assert!(page.contains(&rule), "missing {tint} tint");
+        }
+        assert!(
+            page.contains(".meta .dur.hot { color: var(--openidea-warning);"),
+            "slow duration in warning"
+        );
+        assert!(
+            page.contains("id=\"slowBadge\" class=\"pill danger\""),
+            "the slow count is a right-side capsule"
+        );
+    }
+
+    #[test]
+    fn the_log_page_uses_no_literal_colours() {
+        // Everything visual rides on the host's `--openidea-*` variables, so a
+        // theme switch recolours the panel without touching the page.
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        for needle in ["#6C707E", "#DB3B4B", "#208A3C", "#F2FCF3", "rgb(", "hsl("] {
+            assert!(!page.contains(needle), "literal colour {needle}");
         }
     }
 

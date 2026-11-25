@@ -16,18 +16,48 @@
       background: var(--openidea-bg);
     }
 
-    /* Action row (the host draws no toolbar for a packaged page) */
+    /* Action row (the host draws no toolbar for a packaged page). Icon buttons
+       the way an IDE toolbar draws them: a 24×24 hit area around a 16×16
+       inline SVG, hover showing a 3px-radius plate. The SVG paths are the
+       Apache-2.0 icons under icons/toolbar/, recoloured with currentColor so
+       the host theme decides the ink. */
     .actionbar {
-      display: flex; align-items: center; gap: 6px;
-      padding: 4px 8px; border-bottom: 1px solid var(--openidea-border);
+      display: flex; align-items: center; gap: 2px; flex: 0 0 auto;
+      padding: 3px 6px; border-bottom: 1px solid var(--openidea-border);
     }
+    .iconbtn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 24px; height: 24px; padding: 0; flex: 0 0 auto;
+      background: transparent; border: 1px solid transparent; border-radius: 3px;
+      color: var(--openidea-fg-muted); cursor: pointer;
+    }
+    .iconbtn:hover { background: var(--openidea-bg-hover); color: var(--openidea-fg); }
+    .iconbtn:focus-visible { border-color: var(--openidea-accent); outline: none; }
+    .iconbtn.on { background: var(--openidea-bg-selected); color: var(--openidea-fg-strong); }
+    .iconbtn.run { color: var(--openidea-success); }
+    .iconbtn svg { width: 16px; height: 16px; display: block; }
 
     /* Filter row */
     .filterbar {
       display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
       padding: 4px 8px; border-bottom: 1px solid var(--openidea-border);
+      flex: 0 0 auto;
     }
-    .filterleft { display: flex; align-items: center; gap: 6px; position: relative; }
+    .filterleft {
+      display: flex; align-items: center; gap: 6px;
+      position: relative; flex: 1 1 auto; min-width: 0;
+    }
+    /* Type selector: an IDE "chip" — small icon, current value, caret. */
+    .chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      height: 22px; padding: 0 8px;
+      background: transparent; color: var(--openidea-fg);
+      border: 1px solid var(--openidea-border); border-radius: 11px;
+      font-size: 12px; cursor: pointer; white-space: nowrap;
+    }
+    .chip:hover { background: var(--openidea-bg-hover); }
+    .chip[aria-expanded="true"] { background: var(--openidea-bg-selected); border-color: var(--openidea-accent); }
+    .chip svg { width: 12px; height: 12px; display: block; color: var(--openidea-fg-muted); }
     .btn {
       display: inline-flex; align-items: center; gap: 4px;
       background: var(--openidea-bg-input); color: var(--openidea-fg);
@@ -36,8 +66,11 @@
     }
     .btn:hover { background: var(--openidea-bg-hover); }
     .btn.on { background: var(--openidea-bg-selected); border-color: var(--openidea-accent); }
-    .caret { color: var(--openidea-fg-muted); font-size: 10px; }
-    .chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; white-space: nowrap; }
+    .caret { color: var(--openidea-fg-muted); font-size: 9px; line-height: 1; }
+    .chk {
+      display: inline-flex; align-items: center; gap: 4px;
+      cursor: pointer; user-select: none; white-space: nowrap; font-size: 12px;
+    }
 
     /* Type popup */
     .menu {
@@ -78,43 +111,79 @@
     .tog.on { background: var(--openidea-bg-selected); color: var(--openidea-fg-strong); border-color: var(--openidea-accent); }
     .muted { color: var(--openidea-fg-muted); }
     .danger { color: var(--openidea-danger); }
+    /* Badge chips the way the IDE draws tags: a 8px-radius capsule at 10px
+       whose fill is the semantic colour mixed 16% into the row background.
+       color-mix keeps the host variable as the single colour source; the
+       plain declaration above it is the fallback for engines without it. */
     .badge {
-      display: inline-block; padding: 0 5px; border-radius: 3px;
-      background: var(--openidea-bg-selected); color: var(--openidea-fg-strong); font-size: 11px;
+      display: inline-flex; align-items: center; height: 15px; padding: 0 6px;
+      border-radius: 8px; font-size: 10px; line-height: 1;
+      color: var(--openidea-fg); white-space: nowrap;
+      background: var(--openidea-bg-selected);
+      background: color-mix(in srgb, var(--openidea-fg-muted) 16%, transparent);
     }
+    .badge.group {
+      color: var(--openidea-warning);
+      background: var(--openidea-bg-selected);
+      background: color-mix(in srgb, var(--openidea-warning) 16%, transparent);
+    }
+    .badge.n1 {
+      color: var(--openidea-danger);
+      background: var(--openidea-bg-selected);
+      background: color-mix(in srgb, var(--openidea-danger) 16%, transparent);
+    }
+    /* Right-aligned counter capsule in the filter row. */
+    .pill {
+      display: inline-flex; align-items: center; height: 16px; padding: 0 8px;
+      border-radius: 8px; font-size: 10px; line-height: 1; white-space: nowrap;
+    }
+    .pill.danger {
+      color: var(--openidea-danger);
+      background: var(--openidea-bg-selected);
+      background: color-mix(in srgb, var(--openidea-danger) 16%, transparent);
+    }
+    #slowBadge { margin-left: auto; }
 
-    /* List */
+    /* List — one JBList-style row per statement: a 3px type bar, a muted
+       metadata line and the statement itself, separated by 1px rules. */
     .list { flex: 1 1 auto; overflow: auto; }
-    .row { display: flex; align-items: stretch; border-bottom: 1px solid var(--openidea-border); cursor: default; }
+    .row {
+      display: flex; align-items: stretch; min-height: 40px;
+      border-bottom: 1px solid var(--openidea-border); cursor: default;
+    }
     .row:hover { background: var(--openidea-bg-hover); }
     .row.sel { background: var(--openidea-bg-selected); }
     .row .bar { width: 3px; flex: 0 0 3px; }
-    .row .content { flex: 1 1 auto; min-width: 0; padding: 4px 8px; }
+    .row .content { flex: 1 1 auto; min-width: 0; padding: 5px 8px; }
     .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px; color: var(--openidea-fg-muted); }
-    .meta .seq { color: var(--openidea-fg-strong); font-weight: 600; }
-    .meta .dur.hot { color: var(--openidea-danger); font-weight: 600; }
+    .meta .seq { color: var(--openidea-fg-strong); font-weight: 600; font-family: var(--openidea-font-mono, monospace); }
+    .meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }
+    .meta .dur.hot { color: var(--openidea-warning); font-weight: 600; }
     .meta .part { white-space: nowrap; }
     .sql {
       margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
+      font-size: 12px; line-height: 1.4;
       white-space: pre-wrap; word-break: break-word; color: var(--openidea-fg);
     }
     .err {
       margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
-      white-space: pre-wrap; word-break: break-word; color: var(--openidea-danger);
+      font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--openidea-danger);
     }
     .empty {
       flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
       color: var(--openidea-fg-muted); padding: 16px;
     }
 
-    /* Bottom status */
+    /* Bottom status: one muted 11px line, segments separated by a middot. */
     .status {
-      display: flex; align-items: center; gap: 8px; padding: 3px 8px;
-      border-top: 1px solid var(--openidea-border); font-size: 11px;
-      color: var(--openidea-fg-muted); background: var(--openidea-bg-elevated);
+      display: flex; align-items: center; flex-wrap: wrap; gap: 0;
+      padding: 3px 8px; border-top: 1px solid var(--openidea-border);
+      font-size: 11px; color: var(--openidea-fg-muted);
+      background: var(--openidea-bg-elevated);
     }
-    .status #statusMid { flex: 0 0 auto; }
-    .status #statusRight { margin-left: auto; }
+    .status #statusMid::before, .status #statusRight::before {
+      content: '\00b7'; margin: 0 8px; opacity: 0.7;
+    }
 
     /* Context menu */
     .ctxmenu {
@@ -127,22 +196,34 @@
       color: var(--openidea-fg); padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px;
     }
     .ctxmenu button:hover { background: var(--openidea-bg-hover); }
-    /* Tab strip (L22): one row, IDE-like underline, scrolls when it overflows */
+    /* Tab strip (L24): one row of JBTabs-style cards over a 1px rule. The
+       active tab is a raised page — 1px border on top/left/right, 4px top
+       radius, its bottom edge merging into the strip's rule. No underline.
+       Tabs shrink until the labels stop being readable and only then
+       overflow: a ~320px panel still shows all five, a narrower one scrolls
+       and `selectTab` brings the active tab into view. */
     .tabstrip {
-      display: flex; align-items: stretch; flex: 0 0 auto;
+      display: flex; align-items: flex-end; flex: 0 0 auto;
+      min-height: 30px; padding: 4px 4px 0;
       overflow-x: auto; overflow-y: hidden; white-space: nowrap;
       border-bottom: 1px solid var(--openidea-border);
-      background: var(--openidea-bg-elevated);
+      background: var(--openidea-bg);
     }
     .tab {
-      flex: 0 0 auto; background: none; border: none; cursor: pointer;
-      padding: 5px 10px 4px; font-size: 12px; color: var(--openidea-fg-muted);
-      border-bottom: 2px solid transparent;
+      flex: 0 1 auto; min-width: 60px; height: 26px; padding: 0 6px; margin-right: 2px;
+      overflow: hidden; text-overflow: ellipsis;
+      background: transparent; border: 1px solid transparent; border-bottom: none;
+      border-radius: 4px 4px 0 0;
+      font-size: 12px; color: var(--openidea-fg-muted); cursor: pointer;
+      white-space: nowrap;
     }
     .tab:hover { background: var(--openidea-bg-hover); color: var(--openidea-fg); }
-    .tab.sel {
-      color: var(--openidea-fg-strong); border-bottom-color: var(--openidea-accent);
-      background: var(--openidea-bg);
+    .tab.active {
+      margin-bottom: -1px; height: 27px;
+      background: var(--openidea-bg-elevated);
+      border-color: var(--openidea-border);
+      border-bottom-color: var(--openidea-bg-elevated);
+      color: var(--openidea-fg-strong);
     }
 
     /* One panel per tab; only the selected one is visible */
@@ -270,7 +351,7 @@
 </head>
 <body>
   <div class="tabstrip" id="tabStrip" role="tablist">
-    <button class="tab sel" type="button" role="tab" aria-selected="true" data-tab="logs" id="tab-logs"></button>
+    <button class="tab active" type="button" role="tab" aria-selected="true" data-tab="logs" id="tab-logs"></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-tab="logToSql" id="tab-logToSql"></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-tab="sqlToJava" id="tab-sqlToJava"></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-tab="history" id="tab-history"></button>
@@ -282,14 +363,37 @@
 
   <div class="panel" id="panelLogs">
   <div class="actionbar">
-    <button id="pauseBtn" class="btn" type="button"></button>
-    <button id="clearBtn" class="btn" type="button"></button>
-    <button id="copyAllBtn" class="btn" type="button"></button>
+    <button id="pauseBtn" class="iconbtn" type="button">
+      <svg id="pauseIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <rect x="3.5" y="2.5" width="3" height="11" rx="0.5" fill="none" stroke="currentColor"/>
+        <rect x="9.5" y="2.5" width="3" height="11" rx="0.5" fill="none" stroke="currentColor"/>
+      </svg>
+      <svg id="resumeIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden>
+        <path fill="currentColor" d="M14.3563 7.2593C14.8171 7.6581 14.8171 8.37279 14.3563 8.77158L9.15752 13.2709C8.50981 13.8315 7.50312 13.3714 7.50312 12.5148L7.50312 3.51611C7.50312 2.65951 8.50982 2.1994 9.15753 2.75997L14.3563 7.2593Z"/>
+      </svg>
+    </button>
+    <button id="clearBtn" class="iconbtn" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z"/>
+      </svg>
+    </button>
+    <button id="copyAllBtn" class="iconbtn" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <rect x="2.5" y="3.5" width="9" height="10" rx="1.5" fill="none" stroke="currentColor"/>
+        <rect x="5" y="6" width="4" height="1" rx="0.5" fill="currentColor"/>
+        <rect x="5" y="8" width="4" height="1" rx="0.5" fill="currentColor"/>
+        <rect x="5" y="10" width="4" height="1" rx="0.5" fill="currentColor"/>
+        <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M11.0017 2H11.5998C12.373 2 12.9998 2.6268 12.9998 3.4V3.91081C13.0011 3.94038 13.0017 3.97011 13.0017 4V11.5482C13.6063 11.1124 13.9998 10.4021 13.9998 9.6V3.4C13.9998 2.07452 12.9253 1 11.5998 1H6.39978C5.59677 1 4.88587 1.39437 4.4502 2H6.39978H11.0017Z"/>
+      </svg>
+    </button>
   </div>
 
   <div class="filterbar">
     <div class="filterleft">
-      <button id="typeBtn" class="btn" type="button" aria-haspopup="true" aria-expanded="false">
+      <button id="typeBtn" class="chip" type="button" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M13.5 2.5H2.5L6.5 7.5V14L9.5 12V7.5L13.5 2.5Z" fill="none" stroke="currentColor" stroke-linejoin="round"/>
+        </svg>
         <span id="typeBtnText"></span><span class="caret">&#9662;</span>
       </button>
       <div id="typeMenu" class="menu" hidden>
@@ -302,9 +406,14 @@
           <button id="selectNone" class="linkbtn" type="button"></button>
         </div>
       </div>
-      <button id="searchBtn" class="btn" type="button"></button>
+      <button id="searchBtn" class="iconbtn" type="button">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor"/>
+          <path d="M10.1992 10.2002L13.4992 13.4961" fill="none" stroke="currentColor" stroke-linecap="round"/>
+        </svg>
+      </button>
       <label class="chk"><input type="checkbox" id="dedupe"><span id="dedupeLabel"></span></label>
-      <span id="slowBadge" class="badge" hidden></span>
+      <span id="slowBadge" class="pill danger" hidden></span>
     </div>
   </div>
 
@@ -546,13 +655,28 @@
         $('regexBtn').classList.toggle('on', ui.regex);
       }
 
+      // Icon buttons carry no text: the label lives in title + aria-label so
+      // screen readers and tooltips still get it.
+      function labelIconButton(node, label) {
+        if (!node) { return; }
+        node.setAttribute('aria-label', label || '');
+        node.title = label || '';
+      }
+
       function updateLabels() {
-        setText($('searchBtn'), L.search);
         var paused = !!(current && current.status && current.status.paused);
-        setText($('pauseBtn'), paused ? (L.resume || 'Resume') : (L.pause || 'Pause'));
-        $('pauseBtn').classList.toggle('on', paused);
-        setText($('clearBtn'), L.clear || 'Clear');
-        setText($('copyAllBtn'), L.copyAll || 'Copy SQL');
+        var pauseText = paused ? (L.resume || 'Resume') : (L.pause || 'Pause');
+        var pauseBtn = $('pauseBtn');
+        labelIconButton(pauseBtn, pauseText);
+        pauseBtn.classList.toggle('on', paused);
+        pauseBtn.classList.toggle('run', paused);
+        // Pause while live, resume (green play) while paused: both icons sit in
+        // the button, the state decides which one is drawn.
+        $('pauseIcon').hidden = paused;
+        $('resumeIcon').hidden = !paused;
+        labelIconButton($('clearBtn'), L.clear || 'Clear');
+        labelIconButton($('copyAllBtn'), L.copyAll || 'Copy SQL');
+        labelIconButton($('searchBtn'), L.search || 'Search');
         setText($('dedupeLabel'), L.dedupe);
         setText($('slowOnlyLabel'), L.slowOnly);
         setText($('selectAll'), L.selectAll);
@@ -571,11 +695,21 @@
       }
 
       function updateTabLabels() {
-        setText($('tab-logs'), L.tabLogs || 'SQL Logs');
-        setText($('tab-logToSql'), L.tabLogToSql || 'Log -> SQL');
-        setText($('tab-sqlToJava'), L.tabSqlToJava || 'SQL -> Java');
-        setText($('tab-history'), L.tabHistory || 'SQL History');
-        setText($('tab-preview'), L.tabPreview || 'SQL Preview');
+        var titles = {
+          logs: L.tabLogs || 'SQL Logs',
+          logToSql: L.tabLogToSql || 'Log -> SQL',
+          sqlToJava: L.tabSqlToJava || 'SQL -> Java',
+          history: L.tabHistory || 'SQL History',
+          preview: L.tabPreview || 'SQL Preview'
+        };
+        for (var i = 0; i < TAB_IDS.length; i++) {
+          var btn = tabButton(TAB_IDS[i]);
+          if (!btn) { continue; }
+          setText(btn, titles[TAB_IDS[i]]);
+          // A narrow strip ellipsises the label; the tooltip keeps the full
+          // name one hover away (the IDE does the same for squeezed tabs).
+          btn.title = titles[TAB_IDS[i]];
+        }
         setText($('l2sRawCaption'), L.tabLogToSqlRaw);
         setText($('l2sParamsCaption'), L.tabLogToSqlParams);
         setText($('l2sRestoredCaption'), L.tabLogToSqlRestored);
@@ -688,7 +822,6 @@
         }
         if (row.n_plus_one) {
           var n1 = makePart('badge n1', L.nPlusOne || 'N+1');
-          n1.style.color = 'var(--openidea-danger)';
           meta.appendChild(n1);
         }
         if (row.source) { meta.appendChild(makePart('part src', '[' + row.source + ']')); }
@@ -816,8 +949,13 @@
           var on = id === tab;
           var btn = tabButton(id);
           if (btn) {
-            btn.classList.toggle('sel', on);
+            btn.classList.toggle('active', on);
             btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            // A narrow panel scrolls the strip: the tab the host switched to
+            // must be what the user sees, not an off-screen neighbour.
+            if (on && btn.scrollIntoView) {
+              btn.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+            }
           }
           var panel = tabPanel(id);
           if (panel) { panel.hidden = !on; }
