@@ -11,14 +11,14 @@
 | --- | --- | --- |
 | P0 骨架 | 完成 | 本仓首提交 `e2e6e38`：`plugin.toml`（API 1.15）、`render-xml` 命令、`openidea-plugin check` ok、wasm 110.6 KiB |
 | P0 引擎导出 | 完成（主仓） | 主仓 `sub-projects/engine-jar`，`b3a8aeb9a`；jar 4.5 MB、零 IntelliJ 引用、15 方言 |
-| P1 纯逻辑引擎 | 未开始 | Rust 侧 XML/OGNL/iBatis/方言/规则/生成/反向/回滚/日志解析 |
-| P2 界面面 | 未开始 | 日志面板、预览工作台（web 视图）、设置页、双语、图标 |
-| P3 导航与注解 | 未开始 | `documentIndexers` 图、line-markers、definition、injections、inlay、diagnostics |
-| P4 捕获链 | 未开始 | agent 改 loopback WebSocket、`javaAgents` 贡献、`websocket-connect` 消费 |
-| P5 sidecar 与执行 | 未开始 | 接 engine jar（`ENGINE_VERSION`）、Wrapper 文本定位、EXPLAIN、schema |
-| P6 MCP | 未开始 | 11 个 `sqlv_*` 工具 → `contributes.mcpTools` |
-| P7 发行 | 未开始 | 签名、打包、双仓 Release、自建索引、市场 PR |
-| P8 上游提案 | 并行 | `database.execute`、符号 `detail`、LSP 只读白名单、声明式 sidecar |
+| P1 纯逻辑引擎 | 完成 | Rust 侧 XML/OGNL/include/注解/iBatis、15 方言、参数、格式化、21 条规则、生成/回滚、日志四族；`cases/cases.jsonl` 150 例对拍（144 绿 + 6 条有据白名单） |
+| P2 界面面 | 完成 | 日志面板、预览工作台、42 项设置、双语表、标记/文件图标；GUI 走查待 IDE 重载 |
+| P3 导航与注解 | 完成（默认关） | `documentIndexers` 图、definition/line-markers、injections、inlay、diagnostics；Ctrl+B 真机未验 |
+| P4 捕获链 | 完成（固定端口） | agent ws 旁路（默认 TCP）、`websocket-ready` 消费、事件唤醒、日志文件路径 |
+| P5 sidecar 与执行 | 完成（不连库） | 引擎钉值 + sha256、stdio 真往返（204 ms）、Wrapper 文本解析、EXPLAIN 包装与结果模型、schema 缓存 |
+| P6 MCP | 完成 | 11 个 `sqlv_*` 工具 + 11 份 schema，全部 readOnly，`partial` 不冒充 `exact` |
+| P7 发行 | 完成（市场 PR 外） | `scripts/release.sh`（真签真 pack 实测）、`release.yml`、Gitee 镜像、自建索引脚本与文档 |
+| P8 上游提案 | 完成（待提交上游） | `docs/upstream/T8-1~T8-3` 三份草案 + 索引；是否另有 CLA 待上游确认 |
 
 ## 阶段验收（摘要）
 
@@ -44,6 +44,18 @@
 | P-5 | `injections` 与宿主 PR #3641 不打架 | mapper XML 上同时开两者 | 放弃 injections |
 | P-6 | 自建索引在中国网络可用 | Gitee Pages 托管 index.json 实测 | 只走官方注册表（要求开源） |
 | P-7 | `documentIndexer` 图能驱动 Ctrl+B | 最小插件建假 Mapper 图 | 导航退回 provider 现算 |
+
+本版落地后的前提状态（2026-11-25 收口）：
+
+- **P-2 未实测**：没有做 2,000 行 XML / 800 行 Java 的 p95 读数；为了不赌预算，导航与注入默认关闭
+  （`nav.enabled=false`、`injections.enabled=false`），provider 只读当前文档文本、单遍、无 IO。
+- **P-3 已落地为降级路径**：引擎 jar 不入库，只钉 `engine/ENGINE_VERSION` + sha256；安装态需要
+  `engine.downloadUrl`（默认空）才下载，留空即降级纯文本。补了 `--stdio` 入口并实测真进程往返
+  （冷启 204 ms），但「安装态从网络下载」这一步没有真机验证。
+- **P-5 未实测**：injections 默认关，避免与宿主 PR #3641 重复高亮；打开后是否冲突仍需真机确认。
+- **P-6 未实测**：`scripts/build-index.sh` 与 `market/README.md` 已备，Gitee Pages 托管未跑。
+- **P-7 部分验证**：L6 在临时目录用真实 manifest + 导出跑过 `build/check`，键图有单测；
+  Ctrl+B 跨文件跳转未在真机验收。
 
 ## 三条工程纪律
 
