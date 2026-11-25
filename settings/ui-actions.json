@@ -1,0 +1,58 @@
+{
+  "properties": {
+    "nav.enabled": {
+      "type": "boolean",
+      "title": "Mapper and XML navigation",
+      "group": "Navigation",
+      "default": false
+    },
+    "nav.showLineMarkers": {
+      "type": "boolean",
+      "title": "Gutter line markers",
+      "group": "Navigation",
+      "default": true
+    },
+    "injections.enabled": {
+      "type": "boolean",
+      "title": "SQL injection in mapper XML",
+      "group": "Navigation",
+      "default": false
+    },
+    "injections.language": {
+      "type": "string",
+      "title": "Injection language id",
+      "group": "Navigation",
+      "default": "sql"
+    },
+    "inlay.enabled": {
+      "type": "boolean",
+      "title": "Inlay hints",
+      "group": "Navigation",
+      "default": false
+    },
+    "inlay.insertColumns": {
+      "type": "boolean",
+      "title": "Show INSERT target columns",
+      "group": "Navigation",
+      "default": true
+    },
+    "diagnostics.enabled": {
+      "type": "boolean",
+      "title": "Diagnostics",
+      "group": "Navigation",
+      "default": false
+    },
+    "diagnostics.unknownColumn": {
+      "type": "boolean",
+      "title": "Report unknown columns",
+      "group": "Navigation",
+      "default": true
+    },
+    "diagnostics.dialectQuotes": {
+      "type": "boolean",
+      "title": "Report dialect quote mismatches",
+      "group": "Navigation",
+      "default": true
+    }
+  }
+}

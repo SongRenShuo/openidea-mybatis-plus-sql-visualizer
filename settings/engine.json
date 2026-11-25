@@ -1,0 +1,50 @@
+{
+  "properties": {
+    "engine.downloadUrl": {
+      "type": "string",
+      "title": "Engine download URL",
+      "group": "Engine",
+      "default": ""
+    },
+    "engine.autoDownload": {
+      "type": "boolean",
+      "title": "Download the engine on first use",
+      "group": "Engine",
+      "default": true
+    },
+    "engine.degradePolicy": {
+      "type": "string",
+      "title": "When the engine is unavailable",
+      "group": "Engine",
+      "enum": [
+        "text-only",
+        "prompt"
+      ],
+      "default": "text-only"
+    },
+    "engine.startupTimeoutMs": {
+      "type": "integer",
+      "title": "Engine startup timeout (ms)",
+      "group": "Engine",
+      "default": 5000
+    },
+    "engine.requestTimeoutMs": {
+      "type": "integer",
+      "title": "Engine request timeout (ms)",
+      "group": "Engine",
+      "default": 30000
+    },
+    "engine.javaPath": {
+      "type": "string",
+      "title": "Java executable",
+      "group": "Engine",
+      "default": ""
+    },
+    "engine.maxRestarts": {
+      "type": "integer",
+      "title": "Engine restarts before degrading",
+      "group": "Engine",
+      "default": 3
+    }
+  }
+}

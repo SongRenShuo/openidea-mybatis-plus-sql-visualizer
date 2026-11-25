@@ -160,9 +160,31 @@ icon = "icons/sqlLog.svg"
 location = "right"
 web = "web/log-panel.html"
 
-# Settings page (L5 schema, 42 fields in five groups).
+# Settings: one node named after the plugin, split into pages like the IntelliJ
+# edition's `Tools › SQL Visualizer` (UI and Actions / SQL Preview / SQL Log /
+# Engine). Keys are unchanged; only the page they live on moved.
 [contributes.settings]
-schema = "settings.schema.json"
+title = "MyBatis SQL Visualizer"
+
+[[contributes.settings.pages]]
+id = "ui-actions"
+title = "UI and Actions"
+schema = "settings/ui-actions.json"
+
+[[contributes.settings.pages]]
+id = "sql-preview"
+title = "SQL Preview"
+schema = "settings/sql-preview.json"
+
+[[contributes.settings.pages]]
+id = "sql-log"
+title = "SQL Log"
+schema = "settings/sql-log.json"
+
+[[contributes.settings.pages]]
+id = "engine"
+title = "Engine"
+schema = "settings/engine.json"
 
 # Gutter markers and the mapper XML file icon (L5).
 [[contributes.markerIcons]]

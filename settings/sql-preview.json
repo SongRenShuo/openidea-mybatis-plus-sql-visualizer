@@ -1,0 +1,128 @@
+{
+  "properties": {
+    "dialect.mode": {
+      "type": "string",
+      "title": "Dialect mode",
+      "group": "Dialect",
+      "enum": [
+        "auto",
+        "manual"
+      ],
+      "default": "auto"
+    },
+    "dialect.default": {
+      "type": "string",
+      "title": "Default dialect",
+      "group": "Dialect",
+      "enum": [
+        "MySQL",
+        "PostgreSQL",
+        "Oracle",
+        "SQL Server",
+        "H2",
+        "SQLite",
+        "MariaDB",
+        "DM（达梦）",
+        "KingBase（人大金仓）",
+        "OceanBase",
+        "openGauss",
+        "GaussDB",
+        "HighGo",
+        "Vastbase",
+        "GoldenDB"
+      ],
+      "default": "MySQL"
+    },
+    "dialect.detectFromUrl": {
+      "type": "boolean",
+      "title": "Detect dialect from the JDBC URL",
+      "group": "Dialect",
+      "default": true
+    },
+    "dialect.autoDetectFromMappers": {
+      "type": "boolean",
+      "title": "Detect dialect from mapper statements",
+      "group": "Dialect",
+      "default": true
+    },
+    "dialect.quoteIdentifiers": {
+      "type": "string",
+      "title": "Quote identifiers",
+      "group": "Dialect",
+      "enum": [
+        "auto",
+        "always",
+        "never"
+      ],
+      "default": "auto"
+    },
+    "dialect.keywordCase": {
+      "type": "string",
+      "title": "Keyword case",
+      "group": "Dialect",
+      "enum": [
+        "auto",
+        "upper",
+        "lower"
+      ],
+      "default": "auto"
+    },
+    "render.paramsSeparator": {
+      "type": "string",
+      "title": "Parameter separator",
+      "group": "Rendering",
+      "default": ", "
+    },
+    "render.sqlCase": {
+      "type": "string",
+      "title": "Rendered SQL case",
+      "group": "Rendering",
+      "enum": [
+        "preserve",
+        "upper",
+        "lower"
+      ],
+      "default": "preserve"
+    },
+    "render.dateFormat": {
+      "type": "string",
+      "title": "Date format",
+      "group": "Rendering",
+      "default": "yyyy-MM-dd HH:mm:ss"
+    },
+    "render.showConfidence": {
+      "type": "boolean",
+      "title": "Show confidence",
+      "group": "Rendering",
+      "default": true
+    },
+    "render.formatSql": {
+      "type": "boolean",
+      "title": "Format SQL",
+      "group": "Rendering",
+      "default": true
+    },
+    "render.indentWidth": {
+      "type": "integer",
+      "title": "Indent width",
+      "group": "Rendering",
+      "default": 2
+    },
+    "render.truncateSql": {
+      "type": "integer",
+      "title": "Preview truncation (characters)",
+      "group": "Rendering",
+      "default": 180
+    },
+    "render.exportFormat": {
+      "type": "string",
+      "title": "Export format",
+      "group": "Rendering",
+      "enum": [
+        "sql",
+        "json"
+      ],
+      "default": "sql"
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "properties": {
+    "log.prefix": {
+      "type": "string",
+      "title": "Log prefix",
+      "group": "Log",
+      "default": ""
+    },
+    "log.slowThresholdMs": {
+      "type": "integer",
+      "title": "Slow statement threshold (ms)",
+      "group": "Log",
+      "default": 1000
+    },
+    "log.nPlusOneThreshold": {
+      "type": "integer",
+      "title": "N+1 threshold",
+      "group": "Log",
+      "default": 5
+    },
+    "log.dedupe": {
+      "type": "boolean",
+      "title": "Fold duplicate statements",
+      "group": "Log",
+      "default": true
+    },
+    "log.dedupeWindowMs": {
+      "type": "integer",
+      "title": "Duplicate window (ms)",
+      "group": "Log",
+      "default": 0
+    },
+    "log.ignoreParamsInDedupe": {
+      "type": "boolean",
+      "title": "Ignore parameter values when deduplicating",
+      "group": "Log",
+      "default": false
+    },
+    "log.maxSqlLength": {
+      "type": "integer",
+      "title": "Maximum SQL length",
+      "group": "Log",
+      "default": 20000
+    },
+    "log.refreshIntervalMs": {
+      "type": "integer",
+      "title": "Refresh interval (ms)",
+      "group": "Log",
+      "default": 250
+    },
+    "log.timestampOffsetMinutes": {
+      "type": "integer",
+      "title": "Timestamp offset (minutes east of UTC)",
+      "group": "Log",
+      "default": 0
+    },
+    "log.showRawLine": {
+      "type": "boolean",
+      "title": "Show raw line for partial statements",
+      "group": "Log",
+      "default": true
+    },
+    "logs.pageSize": {
+      "type": "integer",
+      "title": "SQL log entries shown per render-log run",
+      "group": "Log",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 5000
+    },
+    "capture.port": {
+      "type": "integer",
+      "title": "Java agent capture WebSocket port",
+      "group": "Log",
+      "default": 17890,
+      "minimum": 1,
+      "maximum": 65535
+    }
+  }
+}

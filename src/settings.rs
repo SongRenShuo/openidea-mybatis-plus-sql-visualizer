@@ -1,9 +1,11 @@
 //! Settings schema and accessors (T2-3).
 //!
-//! The manifest declares `[contributes.settings] schema = "settings.schema.json"`;
-//! the IDE generates the page from that file. [`DEFINITIONS`] mirrors it in code
-//! so callers can enumerate keys, defaults and which changes need reopening the
-//! IDE. The tests keep the two in sync.
+//! The manifest declares `[contributes.settings] title` plus four pages
+//! (`settings/ui-actions.json`, `settings/sql-preview.json`,
+//! `settings/sql-log.json`, `settings/engine.json`); the IDE generates one page
+//! per file under the plugin's Settings node. [`DEFINITIONS`] mirrors them in
+//! code so callers can enumerate keys, defaults and which changes need reopening
+//! the IDE. The tests keep the two in sync.
 //!
 //! Code reads values through the `get_*` helpers, which fall back to the default
 //! when a stored value has the wrong type or the user never touched the setting.
@@ -450,8 +452,30 @@ mod tests {
     use serde_json::Value;
 
     fn schema() -> Value {
-        serde_json::from_str(include_str!("../settings.schema.json"))
-            .expect("settings.schema.json is valid JSON")
+        // The settings node is split into pages, one schema file each; the tests
+        // assert every code-defined key is declared exactly once across them.
+        let mut merged = serde_json::Map::new();
+        for text in [
+            include_str!("../settings/ui-actions.json"),
+            include_str!("../settings/sql-preview.json"),
+            include_str!("../settings/sql-log.json"),
+            include_str!("../settings/engine.json"),
+        ] {
+            let page: Value = serde_json::from_str(text).expect("a page schema is valid JSON");
+            for (key, value) in page["properties"]
+                .as_object()
+                .expect("a page schema has properties")
+            {
+                assert!(
+                    merged.insert(key.clone(), value.clone()).is_none(),
+                    "{key} is declared on two settings pages"
+                );
+            }
+        }
+        Value::Object(serde_json::Map::from_iter([(
+            "properties".to_string(),
+            Value::Object(merged),
+        )]))
     }
 
     #[test]
