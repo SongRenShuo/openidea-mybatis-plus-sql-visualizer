@@ -70,19 +70,19 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ("view.logs.slow_prefix", "Slow", "慢"),
     (
         "view.logs.status.console_prefix",
-        "Console channel: scanned",
-        "控制台通道：已扫描",
+        "Console: scanned",
+        "控制台：已扫描",
     ),
     ("view.logs.status.console_suffix", "lines", "行"),
     (
         "view.logs.status.agent_off",
-        "Enhanced channel: off",
-        "增强通道：未开启",
+        "Enhanced: off",
+        "增强：未开启",
     ),
     (
         "view.logs.status.agent_events_prefix",
-        "Enhanced channel: received",
-        "增强通道：已收事件",
+        "Enhanced: received",
+        "增强：已收事件",
     ),
     ("view.logs.status.total_prefix", "Total", "共"),
     ("view.logs.status.total_suffix", "rows", "条"),
@@ -213,8 +213,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "view.logs.help.menu",
-        "Right-click a row: copy SQL / copy timestamp / export / jump to Java / jump to Mapper XML / focus by method / focus by request / delete / mute this method",
-        "右键行：复制 SQL / 复制时间戳 / 导出 / 跳转 Java / 跳转 Mapper XML / 按方法聚焦 / 按请求聚焦 / 删除 / 屏蔽此方法",
+        "Right-click a row: copy SQL / copy timestamp / delete / mute / send to SQL→Java / send to Log→SQL / jump to source / jump to Mapper XML / focus by method / focus by request / focus by template / export visible rows",
+        "右键行：复制 SQL / 复制时间戳 / 删除 / 屏蔽此方法 / 发送到 SQL→Java / 发送到 日志→SQL / 跳转源码 / 跳转 Mapper XML / 按方法聚焦 / 按请求聚焦 / 按模板聚焦 / 导出可见行集",
     ),
     (
         "view.logs.help.scroll",
@@ -678,6 +678,37 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "view.logs.tab.confidence.unresolved",
         "Unresolved",
         "未解析",
+    ),
+    // Lane L32: row fragments, toolbar entries and row actions the reference
+    // panel has (duration unit, affected-row suffix, quick preview, community,
+    // per-template focus and the two "send to an input tab" hand-offs).
+    ("view.logs.row.duration_suffix", "ms", "ms"),
+    ("view.logs.row.rows_suffix", "rows", "行"),
+    ("view.logs.button.preview", "Quick preview", "快速预览"),
+    ("view.logs.menu.sort_time", "Sort by time", "按时间排序"),
+    ("view.logs.menu.settings_page", "Settings page…", "设置页…"),
+    (
+        "view.logs.menu.focus_template",
+        "Focus by template",
+        "按模板聚焦",
+    ),
+    (
+        "view.logs.menu.send_sql_to_java",
+        "Send to SQL\u{2192}Java",
+        "发送到 SQL\u{2192}Java",
+    ),
+    (
+        "view.logs.menu.send_log_to_sql",
+        "Send to Log\u{2192}SQL",
+        "发送到 日志\u{2192}SQL",
+    ),
+    ("view.logs.focus.template_prefix", "Template", "模板"),
+    ("view.logs.button.community", "Community", "交流群"),
+    ("view.logs.community.title", "Community", "交流群"),
+    (
+        "view.logs.community.guide",
+        "The community group and the author's contact are listed on the project page.",
+        "交流群与作者联系方式见项目主页。",
     ),
 ];
 

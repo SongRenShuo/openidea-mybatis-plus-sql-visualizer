@@ -38,16 +38,42 @@
     .iconbtn.on { background: var(--openidea-bg-selected); color: var(--openidea-fg-strong); }
     .iconbtn.run { color: var(--openidea-success); }
     .iconbtn svg { width: 16px; height: 16px; display: block; }
+    /* Toolbar layout (L32): the icon actions on the left, then a spacer so the
+       slow count, the SQL-type selector and the dedupe box keep their width at
+       the right edge, the way the reference toolbar draws them. No `overflow`
+       anywhere on this row: the popups drop out of it. */
+    .actionbar .spacer { margin-left: auto; }
+    .actionbar .rightgroup {
+      display: flex; align-items: center; gap: 8px;
+      position: relative; flex: 0 0 auto;
+    }
+    /* A popup drops from the button that opened it, not from the row's edge. */
+    .menuanchor { position: relative; display: inline-flex; flex: 0 0 auto; }
+    /* The type menu hangs off the right edge of the panel, so it never runs off
+       a narrow window (the selector itself sits at the right edge). */
+    #typeMenu { left: auto; right: 0; }
+    /* Menu entries that are real buttons (the settings popup): a .menu-item
+       reset onto a <button>. */
+    button.menu-item {
+      display: flex; width: 100%; align-items: center; gap: 6px;
+      background: none; border: none; color: var(--openidea-fg);
+      font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+    }
+    button.menu-item svg {
+      width: 14px; height: 14px; display: block; flex: 0 0 auto;
+      color: var(--openidea-fg-muted);
+    }
+    button.menu-item.on { background: var(--openidea-bg-selected); }
+    button.menu-item.on svg { color: var(--openidea-success); }
 
-    /* Filter row */
+    /* Active-filter row (L32): the toolbar now owns the type selector and the
+       dedupe box, so this row only carries what actually narrows the list —
+       the focus chip and the muted-method counter. It hides itself when both
+       are empty instead of leaving a bare 1px rule under the toolbar. */
     .filterbar {
       display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
       padding: 4px 8px; border-bottom: 1px solid var(--openidea-border);
       flex: 0 0 auto;
-    }
-    .filterleft {
-      display: flex; align-items: center; gap: 6px;
-      position: relative; flex: 1 1 auto; min-width: 0;
     }
     /* Type selector: an IDE "chip" — small icon, current value, caret. */
     .chip {
@@ -173,7 +199,6 @@
       background: var(--openidea-bg-selected);
       background: color-mix(in srgb, var(--openidea-danger) 16%, transparent);
     }
-    #slowBadge { margin-left: auto; }
 
     /* List — one JBList-style row per statement: a 3px type bar, a muted
        metadata line and the statement itself, separated by 1px rules. */
@@ -209,6 +234,9 @@
       font-size: 12px; line-height: 1.4;
       white-space: pre-wrap; word-break: break-word; color: var(--openidea-fg);
     }
+    /* The folded-lines counter (`… (+N)`) is muted so it never competes with the
+       statement itself (L32). */
+    .sql .sqlTail { color: var(--openidea-fg-muted); }
     .err {
       margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
       font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--openidea-danger);
@@ -228,6 +256,11 @@
     .status #statusMid::before, .status #statusRight::before {
       content: '\00b7'; margin: 0 8px; opacity: 0.7;
     }
+    /* An empty segment draws no separator (L32): the enhanced-channel state is
+       only named while that channel is on. */
+    .status #statusMid:empty::before, .status #statusRight:empty::before {
+      content: none; margin: 0;
+    }
 
     /* Context menu */
     .ctxmenu {
@@ -245,33 +278,30 @@
     .ctxmenu button[disabled] { color: var(--openidea-fg-muted); opacity: 0.55; cursor: default; }
     .ctxmenu button[disabled]:hover { background: none; }
     .ctxmenu .sep { height: 1px; background: var(--openidea-border); margin: 4px 2px; }
-    /* Tab strip (L24): one row of JBTabs-style cards over a 1px rule. The
-       active tab is a raised page — 1px border on top/left/right, 4px top
-       radius, its bottom edge merging into the strip's rule. No underline.
-       Tabs shrink until the labels stop being readable and only then
-       overflow: a ~320px panel still shows all five, a narrower one scrolls
-       and `selectTab` brings the active tab into view. */
+    /* Tab strip (L32): the new-UI **underline** tabs, not JBTabs cards. Every
+       tab is a borderless label sitting on the strip's 1px rule; the selected
+       one wears a 2px accent underline instead of a raised page. Tabs shrink
+       until the labels stop being readable and only then overflow: a ~320px
+       panel still shows all five, a narrower one scrolls and `selectTab`
+       brings the active tab into view. */
     .tabstrip {
-      display: flex; align-items: flex-end; flex: 0 0 auto;
-      min-height: 30px; padding: 4px 4px 0;
+      display: flex; align-items: stretch; flex: 0 0 auto;
+      min-height: 32px; padding: 0 4px;
       overflow-x: auto; overflow-y: hidden; white-space: nowrap;
       border-bottom: 1px solid var(--openidea-border);
       background: var(--openidea-bg);
     }
     .tab {
-      flex: 0 1 auto; min-width: 60px; height: 26px; padding: 0 6px; margin-right: 2px;
+      flex: 0 1 auto; min-width: 60px; height: 32px; padding: 0 10px; margin-right: 2px;
       overflow: hidden; text-overflow: ellipsis;
-      background: transparent; border: 1px solid transparent; border-bottom: none;
-      border-radius: 4px 4px 0 0;
+      background: transparent; border: none; border-bottom: 2px solid transparent;
       font-size: 12px; color: var(--openidea-fg-muted); cursor: pointer;
       white-space: nowrap;
     }
     .tab:hover { background: var(--openidea-bg-hover); color: var(--openidea-fg); }
     .tab.active {
-      margin-bottom: -1px; height: 27px;
-      background: var(--openidea-bg-elevated);
-      border-color: var(--openidea-border);
-      border-bottom-color: var(--openidea-bg-elevated);
+      background: transparent;
+      border-bottom-color: var(--openidea-accent);
       color: var(--openidea-fg-strong);
     }
 
@@ -427,6 +457,19 @@
 
   <div class="panel" id="panelLogs">
   <div class="actionbar">
+    <!-- Capture start/stop (L26): one button, the icon follows the agent
+         connection state reported by the host. First of the reference
+         actions (L32). -->
+    <button id="captureBtn" class="iconbtn" type="button">
+      <svg id="captureRunIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path fill="currentColor" d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z"/>
+      </svg>
+      <svg id="captureStopIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden>
+        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="currentColor"/>
+      </svg>
+    </button>
+    <!-- Pause / resume (L26) in the slot the reference gives its capture-pause
+         action: the only entry point to "stop refreshing while I read". -->
     <button id="pauseBtn" class="iconbtn" type="button">
       <svg id="pauseIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
         <rect x="3.5" y="2.5" width="3" height="11" rx="0.5" fill="none" stroke="currentColor"/>
@@ -441,23 +484,53 @@
         <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z"/>
       </svg>
     </button>
-    <button id="copyAllBtn" class="iconbtn" type="button">
+    <!-- Settings (L32): the button opens a popup instead of firing the op on
+         the spot. The first item points at the settings page (L26 `settings`
+         op), the second is the shortcut cheat sheet (L26 `help` op). -->
+    <span class="menuanchor">
+      <button id="settingsBtn" class="iconbtn" type="button" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M3.22655 4.36961C2.92233 4.76924 2.66735 5.20781 2.47037 5.67626L3.30992 7.0943C3.6406 7.65283 3.6406 8.34718 3.30992 8.9057L2.47037 10.3237C2.66736 10.7922 2.92233 11.2308 3.22656 11.6304L4.87261 11.6124C5.52165 11.6053 6.12297 11.9524 6.44133 12.5181L7.24899 13.953C7.49593 13.984 7.74792 14 8.00408 14C8.2602 14 8.51214 13.984 8.75904 13.9531L9.56671 12.5181C9.88507 11.9524 10.4864 11.6053 11.1354 11.6124L12.7816 11.6304C13.0858 11.2308 13.3408 10.7923 13.5377 10.3239L12.6981 8.9057C12.3674 8.34718 12.3674 7.65283 12.6981 7.0943L13.5377 5.67613C13.3408 5.20773 13.0858 4.76921 12.7816 4.36961L11.1354 4.38764C10.4864 4.39475 9.88507 4.04758 9.56671 3.48194L8.75904 2.04693C8.51214 2.01599 8.2602 2 8.00408 2C7.74792 2 7.49594 2.016 7.24899 2.04695L6.44133 3.48194C6.12297 4.04758 5.52165 4.39475 4.87261 4.38764L3.22655 4.36961ZM10.655 8.00001C10.655 9.46412 9.46811 10.651 8.004 10.651C6.5399 10.651 5.353 9.46412 5.353 8.00001C5.353 6.53591 6.5399 5.34902 8.004 5.34902C9.46811 5.34902 10.655 6.53591 10.655 8.00001ZM4.88356 3.3877C5.16752 3.39081 5.4306 3.23892 5.56988 2.99146L6.43817 1.44875C6.54914 1.25159 6.7401 1.1101 6.96387 1.07676C7.30327 1.0262 7.65062 1 8.00408 1C8.3575 1 8.7048 1.02619 9.04414 1.07674C9.26792 1.11007 9.45889 1.25157 9.56986 1.44873L10.4382 2.99146C10.5774 3.23892 10.8405 3.39081 11.1245 3.3877L12.8938 3.36832C13.1196 3.36585 13.3372 3.46012 13.4781 3.63661C13.9099 4.17766 14.2632 4.78416 14.5207 5.43884C14.6034 5.6491 14.5763 5.88489 14.4612 6.07931L13.5586 7.60376C13.4139 7.84811 13.4139 8.15189 13.5586 8.39625L14.4612 9.92069C14.5763 10.1151 14.6034 10.3509 14.5207 10.5612C14.2632 11.2158 13.9099 11.8223 13.4781 12.3634C13.3372 12.5399 13.1196 12.6342 12.8938 12.6317L11.1245 12.6123C10.8405 12.6092 10.5774 12.7611 10.4382 13.0085L9.56986 14.5513C9.45889 14.7484 9.26792 14.8899 9.04414 14.9233C8.7048 14.9738 8.3575 15 8.00408 15C7.65062 15 7.30327 14.9738 6.96387 14.9232C6.7401 14.8899 6.54914 14.7484 6.43817 14.5512L5.56988 13.0085C5.4306 12.7611 5.16752 12.6092 4.88356 12.6123L3.1144 12.6317C2.8886 12.6342 2.67096 12.5399 2.5301 12.3634C2.09822 11.8223 1.74489 11.2158 1.48738 10.561C1.40469 10.3508 1.43184 10.115 1.54695 9.92057L2.44942 8.39625C2.5941 8.15189 2.5941 7.84811 2.44942 7.60376L1.54695 6.07944C1.43184 5.88502 1.40469 5.64924 1.48738 5.43898C1.74489 4.78425 2.09822 4.1777 2.53009 3.63661C2.67096 3.46012 2.8886 3.36585 3.1144 3.36832L4.88356 3.3877ZM9.655 8.00001C9.655 8.91183 8.91582 9.65101 8.004 9.65101C7.09218 9.65101 6.353 8.91183 6.353 8.00001C6.353 7.08819 7.09218 6.34902 8.004 6.34902C8.91582 6.34902 9.655 7.08819 9.655 8.00001Z"/>
+        </svg>
+      </button>
+      <div id="settingsMenu" class="menu" hidden>
+        <button id="settingsPageItem" class="menu-item" type="button"></button>
+        <button id="settingsHelpItem" class="menu-item" type="button"></button>
+      </div>
+    </span>
+    <!-- Blocked methods popup (L26). -->
+    <span class="menuanchor">
+      <button id="blockedBtn" class="iconbtn" type="button" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <circle cx="8" cy="8" r="1.72" stroke="currentColor" stroke-width="1.4"/>
+          <path d="M8.0000 12.0250C5.2670 12.0250 2.5648 10.2367 1.7105 8.0000C2.5648 5.7633 5.2670 3.9750 8.0000 3.9750C10.7330 3.9750 13.4352 5.7633 14.2895 8.0000C13.4352 10.2367 10.7330 12.0250 8.0000 12.0250Z" stroke="currentColor" stroke-width="1.4"/>
+          <path d="M2.250 13.750L13.750 2.250" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div id="blockedMenu" class="menu" hidden>
+        <div id="blockedList"></div>
+        <div class="menu-sep"></div>
+        <div class="menu-footer">
+          <span id="blockedEmpty" class="muted"></span>
+          <button id="blockedClear" class="linkbtn" type="button"></button>
+        </div>
+      </div>
+    </span>
+    <button id="searchBtn" class="iconbtn" type="button">
       <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <rect x="2.5" y="3.5" width="9" height="10" rx="1.5" fill="none" stroke="currentColor"/>
-        <rect x="5" y="6" width="4" height="1" rx="0.5" fill="currentColor"/>
-        <rect x="5" y="8" width="4" height="1" rx="0.5" fill="currentColor"/>
-        <rect x="5" y="10" width="4" height="1" rx="0.5" fill="currentColor"/>
-        <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M11.0017 2H11.5998C12.373 2 12.9998 2.6268 12.9998 3.4V3.91081C13.0011 3.94038 13.0017 3.97011 13.0017 4V11.5482C13.6063 11.1124 13.9998 10.4021 13.9998 9.6V3.4C13.9998 2.07452 12.9253 1 11.5998 1H6.39978C5.59677 1 4.88587 1.39437 4.4502 2H6.39978H11.0017Z"/>
+        <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor"/>
+        <path d="M10.1992 10.2002L13.4992 13.4961" fill="none" stroke="currentColor" stroke-linecap="round"/>
       </svg>
     </button>
-    <!-- Capture start/stop (L26): one button, the icon follows the agent
-         connection state reported by the host. -->
-    <button id="captureBtn" class="iconbtn" type="button">
-      <svg id="captureRunIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path fill="currentColor" d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z"/>
-      </svg>
-      <svg id="captureStopIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden>
-        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="currentColor"/>
+    <!-- Quick preview (L32): hands the selected statement to the preview tab
+         through the existing `open-line` op; with no row selected it only
+         brings that tab forward. -->
+    <button id="previewBtn" class="iconbtn" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M7.00002 3H12C12.5523 3 13 3.44772 13 4V12C13 12.5523 12.5523 13 12 13H7.00002V3ZM6.00002 2H7.00002H12C13.1046 2 14 2.89543 14 4V12C14 13.1046 13.1046 14 12 14H7.00002H6.00002H4C2.89543 14 2 13.1046 2 12V4C2 2.89543 2.89543 2 4 2H6.00002ZM6.00002 13H4C3.44772 13 3 12.5523 3 12V4C3 3.44772 3.44772 3 4 3H6.00002V13Z"/>
+        <rect x="8" y="5" width="4" height="1" rx="0.5" fill="currentColor"/>
+        <rect x="8" y="7.5" width="4" height="1" rx="0.5" fill="currentColor"/>
+        <rect x="8" y="10" width="4" height="1" rx="0.5" fill="currentColor"/>
       </svg>
     </button>
     <!-- Scroll to bottom / restore follow (L26). -->
@@ -477,27 +550,13 @@
         <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M7.85355 9.85355C8.04881 9.65829 8.04881 9.34171 7.85355 9.14645C7.65829 8.95118 7.34171 8.95118 7.14645 9.14645L5 11.2929L5 3.5C5 3.22386 4.77615 3 4.5 3C4.22386 3 4 3.22386 4 3.5L4 11.2929L1.85355 9.14645C1.65829 8.95118 1.34171 8.95118 1.14645 9.14645C0.951184 9.34171 0.951184 9.65829 1.14645 9.85355L4.14644 12.8536C4.23693 12.944 4.36193 13 4.5 13C4.63885 13 4.76447 12.9434 4.85507 12.852L7.85355 9.85355Z"/>
       </svg>
     </button>
-    <!-- Blocked methods popup (L26). -->
-    <button id="blockedBtn" class="iconbtn" type="button">
+    <!-- Community (L32): the reference toolbar's 交流群 entry. -->
+    <button id="communityBtn" class="iconbtn" type="button">
       <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <circle cx="8" cy="8" r="1.72" stroke="currentColor" stroke-width="1.4"/>
-        <path d="M8.0000 12.0250C5.2670 12.0250 2.5648 10.2367 1.7105 8.0000C2.5648 5.7633 5.2670 3.9750 8.0000 3.9750C10.7330 3.9750 13.4352 5.7633 14.2895 8.0000C13.4352 10.2367 10.7330 12.0250 8.0000 12.0250Z" stroke="currentColor" stroke-width="1.4"/>
-        <path d="M2.250 13.750L13.750 2.250" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-      </svg>
-    </button>
-    <div id="blockedMenu" class="menu" hidden>
-      <div id="blockedList"></div>
-      <div class="menu-sep"></div>
-      <div class="menu-footer">
-        <span id="blockedEmpty" class="muted"></span>
-        <button id="blockedClear" class="linkbtn" type="button"></button>
-      </div>
-    </div>
-    <!-- Settings entry (L26): no platform API opens the settings page, so the
-         button posts an op that points the user there. -->
-    <button id="settingsBtn" class="iconbtn" type="button">
-      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M3.22655 4.36961C2.92233 4.76924 2.66735 5.20781 2.47037 5.67626L3.30992 7.0943C3.6406 7.65283 3.6406 8.34718 3.30992 8.9057L2.47037 10.3237C2.66736 10.7922 2.92233 11.2308 3.22656 11.6304L4.87261 11.6124C5.52165 11.6053 6.12297 11.9524 6.44133 12.5181L7.24899 13.953C7.49593 13.984 7.74792 14 8.00408 14C8.2602 14 8.51214 13.984 8.75904 13.9531L9.56671 12.5181C9.88507 11.9524 10.4864 11.6053 11.1354 11.6124L12.7816 11.6304C13.0858 11.2308 13.3408 10.7923 13.5377 10.3239L12.6981 8.9057C12.3674 8.34718 12.3674 7.65283 12.6981 7.0943L13.5377 5.67613C13.3408 5.20773 13.0858 4.76921 12.7816 4.36961L11.1354 4.38764C10.4864 4.39475 9.88507 4.04758 9.56671 3.48194L8.75904 2.04693C8.51214 2.01599 8.2602 2 8.00408 2C7.74792 2 7.49594 2.016 7.24899 2.04695L6.44133 3.48194C6.12297 4.04758 5.52165 4.39475 4.87261 4.38764L3.22655 4.36961ZM10.655 8.00001C10.655 9.46412 9.46811 10.651 8.004 10.651C6.5399 10.651 5.353 9.46412 5.353 8.00001C5.353 6.53591 6.5399 5.34902 8.004 5.34902C9.46811 5.34902 10.655 6.53591 10.655 8.00001ZM4.88356 3.3877C5.16752 3.39081 5.4306 3.23892 5.56988 2.99146L6.43817 1.44875C6.54914 1.25159 6.7401 1.1101 6.96387 1.07676C7.30327 1.0262 7.65062 1 8.00408 1C8.3575 1 8.7048 1.02619 9.04414 1.07674C9.26792 1.11007 9.45889 1.25157 9.56986 1.44873L10.4382 2.99146C10.5774 3.23892 10.8405 3.39081 11.1245 3.3877L12.8938 3.36832C13.1196 3.36585 13.3372 3.46012 13.4781 3.63661C13.9099 4.17766 14.2632 4.78416 14.5207 5.43884C14.6034 5.6491 14.5763 5.88489 14.4612 6.07931L13.5586 7.60376C13.4139 7.84811 13.4139 8.15189 13.5586 8.39625L14.4612 9.92069C14.5763 10.1151 14.6034 10.3509 14.5207 10.5612C14.2632 11.2158 13.9099 11.8223 13.4781 12.3634C13.3372 12.5399 13.1196 12.6342 12.8938 12.6317L11.1245 12.6123C10.8405 12.6092 10.5774 12.7611 10.4382 13.0085L9.56986 14.5513C9.45889 14.7484 9.26792 14.8899 9.04414 14.9233C8.7048 14.9738 8.3575 15 8.00408 15C7.65062 15 7.30327 14.9738 6.96387 14.9232C6.7401 14.8899 6.54914 14.7484 6.43817 14.5512L5.56988 13.0085C5.4306 12.7611 5.16752 12.6092 4.88356 12.6123L3.1144 12.6317C2.8886 12.6342 2.67096 12.5399 2.5301 12.3634C2.09822 11.8223 1.74489 11.2158 1.48738 10.561C1.40469 10.3508 1.43184 10.115 1.54695 9.92057L2.44942 8.39625C2.5941 8.15189 2.5941 7.84811 2.44942 7.60376L1.54695 6.07944C1.43184 5.88502 1.40469 5.64924 1.48738 5.43898C1.74489 4.78425 2.09822 4.1777 2.53009 3.63661C2.67096 3.46012 2.8886 3.36585 3.1144 3.36832L4.88356 3.3877ZM9.655 8.00001C9.655 8.91183 8.91582 9.65101 8.004 9.65101C7.09218 9.65101 6.353 8.91183 6.353 8.00001C6.353 7.08819 7.09218 6.34902 8.004 6.34902C8.91582 6.34902 9.655 7.08819 9.655 8.00001Z"/>
+        <path fill="currentColor" d="M5.6 7.6a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/>
+        <path fill="currentColor" d="M11.4 7.1a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2Z"/>
+        <path fill="currentColor" d="M1.2 13.4c0-2 1.9-3.6 4.4-3.6s4.4 1.6 4.4 3.6v.4H1.2v-.4Z"/>
+        <path fill="currentColor" d="M11.1 10.3c2 .2 3.6 1.5 3.6 3.2v.3h-2.6v-.4c0-1.2-.4-2.3-1-3.1Z"/>
       </svg>
     </button>
     <!-- Help (L26): prints a shortcut cheat sheet to the Output channel. -->
@@ -507,10 +566,12 @@
         <path fill="currentColor" d="M7.97962 8.25128C8.20415 8.01392 8.49793 7.73622 8.8602 7.41844C9.23243 7.09036 9.52729 6.80791 9.74572 6.57075L9.74668 6.56973C9.96622 6.33799 10.1503 6.0594 10.2982 5.73275L10.2988 5.73133C10.45 5.4108 10.5268 5.0457 10.5268 4.634C10.5268 4.13537 10.4222 3.69607 10.2158 3.31349C10.0093 2.93099 9.71876 2.63442 9.34261 2.42208L9.34155 2.42149C8.96585 2.20334 8.53389 2.093 8.04277 2.093C7.53263 2.093 7.08144 2.20651 6.68653 2.43124C6.29797 2.65595 5.9944 2.97134 5.77499 3.3796C5.67273 3.57247 5.59473 3.77918 5.54126 4C5.51644 4.10252 5.49691 4.20808 5.48269 4.31671C5.44318 4.61868 5.20739 4.867 4.90285 4.867H4.77896C4.47828 4.867 4.23781 4.61717 4.24929 4.31671C4.25956 4.2093 4.27359 4.10373 4.2914 4C4.36501 3.57119 4.50313 3.17391 4.7064 2.80885C5.03226 2.23534 5.4864 1.7906 6.06642 1.47769C6.64663 1.15834 7.30949 1 8.05227 1C8.77568 1 9.4194 1.15185 9.98062 1.45842C10.5475 1.75827 10.9888 2.17975 11.3023 2.72194C11.6162 3.26467 11.7718 3.88719 11.7718 4.5865C11.7718 5.13576 11.6813 5.62465 11.4976 6.05106C11.3166 6.47121 11.0924 6.82638 10.8239 7.11469C10.567 7.39722 10.2283 7.71973 9.80882 8.08202C9.47419 8.37245 9.2138 8.61414 9.02667 8.8075C8.85057 8.98968 8.70116 9.20284 8.57871 9.44772L8.57826 9.44864C8.4595 9.6802 8.39927 9.93983 8.39927 10.2295C8.39927 10.4946 8.18437 10.7095 7.91927 10.7095H7.71977C7.42844 10.7095 7.19227 10.4733 7.19227 10.182C7.19227 9.77678 7.26749 9.41044 7.42025 9.08501C7.57001 8.76595 7.75635 8.48769 7.97962 8.25128Z"/>
       </svg>
     </button>
-  </div>
-
-  <div class="filterbar">
-    <div class="filterleft">
+    <span class="spacer"></span>
+    <!-- The right edge of the reference toolbar (L32): the slow-query count (only
+         shown while there is one), the SQL-type selector (filter glyph + current
+         value + caret) and the dedupe checkbox, in that order. -->
+    <div class="rightgroup">
+      <span id="slowBadge" class="pill danger" hidden></span>
       <button id="typeBtn" class="chip" type="button" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           <path d="M13.5 2.5H2.5L6.5 7.5V14L9.5 12V7.5L13.5 2.5Z" fill="none" stroke="currentColor" stroke-linejoin="round"/>
@@ -527,16 +588,14 @@
           <button id="selectNone" class="linkbtn" type="button"></button>
         </div>
       </div>
-      <button id="searchBtn" class="iconbtn" type="button">
-        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-          <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor"/>
-          <path d="M10.1992 10.2002L13.4992 13.4961" fill="none" stroke="currentColor" stroke-linecap="round"/>
-        </svg>
-      </button>
       <label class="chk"><input type="checkbox" id="dedupe"><span id="dedupeLabel"></span></label>
-      <span id="focusChips" class="chips"></span>
-      <span id="slowBadge" class="pill danger" hidden></span>
     </div>
+  </div>
+
+  <!-- Active-filter row (L32): only the chips that narrow the list live here;
+       the row hides itself when nothing does. -->
+  <div class="filterbar" id="filterBar" hidden>
+    <span id="focusChips" class="chips"></span>
   </div>
 
   <div id="searchRow" class="searchrow" hidden>
@@ -677,23 +736,30 @@
   </div>
 
   <div id="ctxMenu" class="ctxmenu" hidden>
-    <button type="button" data-act="jump-java"></button>
-    <button type="button" data-act="jump-xml"></button>
-    <div class="sep"></div>
-    <button type="button" data-act="focus-method"></button>
-    <button type="button" data-act="focus-request"></button>
-    <div class="sep"></div>
-    <button type="button" data-act="block-method"></button>
-    <button type="button" data-act="delete-line"></button>
-    <div class="sep"></div>
+    <!-- The reference's twelve row actions, in its order (lane L32):
+         复制 SQL / 复制时间戳 / 删除 / 屏蔽 / 发送到 SQL→Java / 发送到 日志→SQL /
+         跳转源码 / 跳转 Mapper XML / 按方法聚焦 / 按请求聚焦 / 按模板聚焦 /
+         导出可见行集. -->
     <button type="button" data-act="copy-sql"></button>
     <button type="button" data-act="copy-time"></button>
+    <button type="button" data-act="delete-line"></button>
+    <button type="button" data-act="block-method"></button>
+    <button type="button" data-act="send-sql-to-java"></button>
+    <button type="button" data-act="send-log-to-sql"></button>
+    <button type="button" data-act="jump-java"></button>
+    <button type="button" data-act="jump-xml"></button>
+    <button type="button" data-act="focus-method"></button>
+    <button type="button" data-act="focus-request"></button>
+    <button type="button" data-act="focus-template"></button>
     <button type="button" data-act="export"></button>
   </div>
 
   <script>
     (function () {
       var TYPE_TOKENS = ['select', 'insert', 'update', 'delete', 'create', 'drop'];
+      // Statement lines the list shows before it folds the rest behind `(+N)`
+      // (L32, the reference's three-line cell).
+      var SQL_MAX_LINES = 3;
       var TYPE_COLORS = {
         select: 'var(--openidea-link)',
         insert: 'var(--openidea-success)',
@@ -876,7 +942,9 @@
         if (focus && focus.value) {
           var prefix = focus.kind === 'request'
             ? (L.focusRequestPrefix || 'Request')
-            : (L.focusMethodPrefix || 'Method');
+            : (focus.kind === 'template'
+              ? (L.focusTemplatePrefix || 'Template')
+              : (L.focusMethodPrefix || 'Method'));
           var label = prefix + ' · ' + focus.value;
           var chip = chipButton(label, L.focusClear || 'Clear focus', clearFocus);
           chip.title = label;
@@ -896,16 +964,14 @@
       function updateLabels() {
         var paused = !!(current && current.status && current.status.paused);
         var pauseText = paused ? (L.resume || 'Resume') : (L.pause || 'Pause');
+        // Pause/resume: the glyph swaps between the pause and resume icons.
         var pauseBtn = $('pauseBtn');
         labelIconButton(pauseBtn, pauseText);
         pauseBtn.classList.toggle('on', paused);
         pauseBtn.classList.toggle('run', paused);
-        // Pause while live, resume (green play) while paused: both icons sit in
-        // the button, the state decides which one is drawn.
         $('pauseIcon').hidden = paused;
         $('resumeIcon').hidden = !paused;
         labelIconButton($('clearBtn'), L.clear || 'Clear');
-        labelIconButton($('copyAllBtn'), L.copyAll || 'Copy SQL');
         // Capture (L26): the icon follows the agent connection state — a run
         // glyph while disconnected (click starts), a stop glyph while connected.
         var connected = !!(current && current.status && current.status.agent_connected);
@@ -916,16 +982,23 @@
         captureBtn.classList.toggle('run', !connected);
         $('captureRunIcon').hidden = connected;
         $('captureStopIcon').hidden = !connected;
-        // Sort (L26): the icon's label names the action, the tooltip the mode
-        // the list is actually in.
-        labelIconButton($('sortBtn'), L.sortDuration || 'Sort by duration');
+        // Sort (L26): the label names the mode the list is *going to*, the
+        // tooltip the mode it is actually in.
         var sorted = (current && current.sort === 'duration') ? 'duration' : 'time';
+        labelIconButton($('sortBtn'), sorted === 'duration'
+          ? (L.sortTime || 'Sort by time')
+          : (L.sortDuration || 'Sort by duration'));
         $('sortBtn').title = sorted === 'duration'
           ? (L.sortDurationTitle || '')
           : (L.sortTimeTitle || '');
         labelIconButton($('scrollEndBtn'), L.scrollEnd || 'Scroll to bottom');
         labelIconButton($('blockedBtn'), L.blocked || 'Blocked methods');
         labelIconButton($('settingsBtn'), L.settings || 'Settings');
+        // The settings popup (L32): a settings-page pointer and the cheat sheet.
+        setText($('settingsPageItem'), L.menuSettingsPage || 'Settings page…');
+        setText($('settingsHelpItem'), L.help || 'Help');
+        labelIconButton($('previewBtn'), L.preview || 'Quick preview');
+        labelIconButton($('communityBtn'), L.community || 'Community');
         labelIconButton($('helpBtn'), L.help || 'Help');
         setText($('blockedEmpty'), L.blockedEmpty);
         setText($('blockedClear'), L.blockedClear);
@@ -946,8 +1019,11 @@
         setText($('ctxMenu').querySelector('[data-act="jump-xml"]'), L.menuJumpXml);
         setText($('ctxMenu').querySelector('[data-act="focus-method"]'), L.menuFocusMethod);
         setText($('ctxMenu').querySelector('[data-act="focus-request"]'), L.menuFocusRequest);
+        setText($('ctxMenu').querySelector('[data-act="focus-template"]'), L.menuFocusTemplate);
         setText($('ctxMenu').querySelector('[data-act="delete-line"]'), L.menuDelete);
         setText($('ctxMenu').querySelector('[data-act="block-method"]'), L.menuBlockMethod);
+        setText($('ctxMenu').querySelector('[data-act="send-sql-to-java"]'), L.menuSendSqlToJava);
+        setText($('ctxMenu').querySelector('[data-act="send-log-to-sql"]'), L.menuSendLogToSql);
         setText($('empty'), L.empty);
         updateTabLabels();
         updateTypeButton();
@@ -1069,7 +1145,7 @@
         return parts[parts.length - 1] || path;
       }
 
-      function buildRow(row, slowThreshold, isMember) {
+      function buildRow(row, slowThreshold, isMember, dialect) {
         var el = document.createElement('div');
         el.className = 'row';
         el.setAttribute('data-line', String(row.line));
@@ -1085,17 +1161,25 @@
 
         var meta = document.createElement('div');
         meta.className = 'meta';
+        // The reference header is `#1 [time] 12ms [MySQL · conn] (rows) …`
+        // (L32): the sequence bare, the timestamp bracketed, the duration with
+        // its unit, and the database badge right after it.
         meta.appendChild(makePart('seq', '#' + row.seq));
-        meta.appendChild(makePart('part time', row.time || ''));
+        meta.appendChild(makePart('part time', '[' + (row.time || '-') + ']'));
         var dur = document.createElement('span');
         dur.className = 'dur';
-        dur.textContent = row.duration_ms == null ? '-' : formatMs(row.duration_ms);
+        dur.textContent = row.duration_ms == null
+          ? '—'
+          : formatMs(row.duration_ms) + (L.durationUnit || 'ms');
         if (row.duration_ms != null && slowThreshold != null && row.duration_ms >= slowThreshold) {
           dur.classList.add('hot');
         }
         meta.appendChild(dur);
-        if (row.db) { meta.appendChild(makePart('part db', '[' + row.db + ']')); }
-        if (row.rows_affected != null) { meta.appendChild(makePart('part rows', '(' + row.rows_affected + ')')); }
+        var dbText = dbBadge(row.db, dialect);
+        if (dbText) { meta.appendChild(makePart('part db', dbText)); }
+        if (row.rows_affected != null) {
+          meta.appendChild(makePart('part rows', '(' + row.rows_affected + ' ' + (L.rowsSuffix || 'rows') + ')'));
+        }
         if (row.dedupe_count > 1) {
           var dedupeText = (L.dedupeBadgePrefix || '') + row.dedupe_count;
           var dedupeTitle = row.expanded ? (L.groupCollapse || '') : (L.groupExpand || '');
@@ -1157,7 +1241,19 @@
         if (row.sql) {
           var sql = document.createElement('div');
           sql.className = 'sql';
-          sql.textContent = row.sql;
+          var fold = foldSql(row.sql);
+          sql.appendChild(document.createTextNode(fold.text));
+          if (fold.tail) {
+            // The dropped-line counter is muted, the way the reference draws
+            // `… (+N)` at the end of the third line (L32).
+            var tail = document.createElement('span');
+            tail.className = 'sqlTail';
+            tail.textContent = fold.tail;
+            sql.appendChild(tail);
+          }
+          // The list folds the statement (`sql-lines-3`); the whole of it stays
+          // one hover away.
+          sql.title = row.sql;
           content.appendChild(sql);
         }
         if (row.error_text) {
@@ -1189,6 +1285,34 @@
         return ms.toFixed(1);
       }
 
+      // The database badge (L32). The reference draws `[MySQL · conn-3]`; this
+      // build captures no connection name, so it states the engine configured
+      // in the settings and appends the database only when the row carries one
+      // — it never guesses a connection.
+      function dbBadge(db, dialect) {
+        var engine = dialect || '';
+        var name = db || '';
+        if (!engine && !name) { return ''; }
+        if (!name) { return '[' + engine + ']'; }
+        return '[' + (engine ? engine + ' · ' : '') + name + ']';
+      }
+
+      // `sql-lines-3`: the list shows at most three statement lines and states
+      // how many it dropped at the end of the third one, the way the reference
+      // row ends with `… (+1)`.
+      function foldSql(text) {
+        var lines = String(text || '').split(/\r?\n/);
+        if (lines.length <= SQL_MAX_LINES) {
+          return { text: lines.join('\n'), tail: '' };
+        }
+        var rest = lines.length - SQL_MAX_LINES;
+        var shown = lines.slice(0, SQL_MAX_LINES);
+        return {
+          text: shown.join('\n'),
+          tail: ' … (+' + rest + ')'
+        };
+      }
+
       function selectLine(line) {
         var changed = selectedLine !== line;
         selectedLine = line;
@@ -1214,6 +1338,9 @@
         var list = $('list');
         var rows = state.rows || [];
         var threshold = state.slow_threshold_ms;
+        // The engine half of the row's database badge (L32): what the settings
+        // page configured, so a row never claims a connection it does not know.
+        var dialect = state.dialect || '';
         var wasAtBottom = atBottom();
 
         while (list.firstChild) { list.removeChild(list.firstChild); }
@@ -1238,7 +1365,7 @@
           var isMember = !!(row.expanded &&
             ((row.dedupe_key && row.dedupe_key === prevDedupe) ||
               (row.n_plus_one_key && row.n_plus_one_key === prevNPlusOne)));
-          frag.appendChild(buildRow(row, threshold, isMember));
+          frag.appendChild(buildRow(row, threshold, isMember, dialect));
           prevDedupe = row.dedupe_key || '';
           prevNPlusOne = row.n_plus_one_key || '';
         }
@@ -1267,6 +1394,15 @@
         var invalid = state.filter && state.filter.regex_error;
         err.hidden = !invalid;
         if (invalid) { setText(err, L.regexError); }
+        updateFilterBar();
+      }
+
+      // The chips row only takes space while it states something (L32). The slow
+      // count is not here: it sits at the right edge of the toolbar.
+      function updateFilterBar() {
+        var chips = $('focusChips');
+        var hasChips = !!(chips && chips.childNodes.length);
+        $('filterBar').hidden = !hasChips;
       }
 
       function updateStatus(state) {
@@ -1281,7 +1417,9 @@
         }
         setText($('statusMid'), mid.replace(/\s+/g, ' ').trim());
         // The right segment names the first mode that changes what the user
-        // sees: refresh paused, follow paused, then the capture channel (L26).
+        // sees: refresh paused, follow paused, then the enhanced channel. That
+        // channel keeps its own segment even while it is off — the reference
+        // status bar always states both channels (`CaptureStatusBar`).
         var right;
         if (s.paused) {
           right = L.paused || '';
@@ -1723,7 +1861,7 @@
         updateTypeButton();
         renderFocusChips(state);
         renderBlocked(state);
-        var sig = rowsSignature(state.rows || []);
+        var sig = rowsSignature(state.rows || []) + '#' + (state.dialect || '');
         if (sig !== rowsSig) {
           rowsSig = sig;
           renderList(state);
@@ -1739,6 +1877,12 @@
         // in the state until the page reports the tab it shows (the `tab`
         // message below does exactly that).
         if (state.selectTab) { selectTab(state.selectTab, true); }
+        // "发送到 …" (L32): the tab that received the row comes forward. The
+        // text rides along as `state.sendToTab.text`; filling the input pane is
+        // the tab's own work, so the page only reports the switch here.
+        if (state.sendToTab && state.sendToTab.selectTab) {
+          selectTab(state.sendToTab.tab, true);
+        }
       }
 
       // Type popup ----------------------------------------------------------
@@ -1752,6 +1896,13 @@
       function openBlockedMenu(open) {
         $('blockedMenu').hidden = !open;
         $('blockedBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+
+      // Settings popup (L32): the gear opens a menu instead of firing the op on
+      // the spot, so the settings-page pointer and the help sheet sit together.
+      function openSettingsMenu(open) {
+        $('settingsMenu').hidden = !open;
+        $('settingsBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
       }
 
       function renderBlocked(state) {
@@ -1793,6 +1944,13 @@
         enableItem('focus-method', !!(row && row.focus_key));
         enableItem('focus-request', !!(row && row.request_id));
         enableItem('block-method', !!(row && row.focus_key));
+        // The template focus clusters by the structure key the `×N` badge
+        // counts, so a row outside any such group has no template to focus on.
+        enableItem('focus-template', !!(row && row.n_plus_one_key));
+        // Both "发送到" entries need the row's own text: the SQL for SQL→Java,
+        // the buffered log line for 日志→SQL (every listed row has one).
+        enableItem('send-sql-to-java', !!(row && row.sql));
+        enableItem('send-log-to-sql', !!row);
         var menu = $('ctxMenu');
         menu.hidden = false;
         var width = menu.offsetWidth || 200;
@@ -1998,7 +2156,6 @@
       $('regexBtn').addEventListener('click', function () { ui.regex = !ui.regex; this.classList.toggle('on', ui.regex); postFilter(); });
       $('pauseBtn').addEventListener('click', function () { post({ op: 'toggle-pause' }); });
       $('clearBtn').addEventListener('click', function () { post({ op: 'clear' }); });
-      $('copyAllBtn').addEventListener('click', function () { post({ op: 'copy-all' }); });
 
       // Toolbar actions (lane L26).
       $('captureBtn').addEventListener('click', function () {
@@ -2023,8 +2180,28 @@
         post({ op: 'clear-blocked' });
         openBlockedMenu(false);
       });
-      $('settingsBtn').addEventListener('click', function () { post({ op: 'settings' }); });
+      // Settings (L32): the gear opens a popup; the items keep the L26 ops.
+      $('settingsBtn').addEventListener('click', function (event) {
+        event.stopPropagation();
+        openSettingsMenu($('settingsMenu').hidden);
+      });
+      $('settingsMenu').addEventListener('click', function (event) { event.stopPropagation(); });
+      $('settingsPageItem').addEventListener('click', function () {
+        openSettingsMenu(false);
+        post({ op: 'settings' });
+      });
+      $('settingsHelpItem').addEventListener('click', function () {
+        openSettingsMenu(false);
+        post({ op: 'help' });
+      });
       $('helpBtn').addEventListener('click', function () { post({ op: 'help' }); });
+      $('communityBtn').addEventListener('click', function () { post({ op: 'community' }); });
+      // Quick preview (L32): the row in hand goes to the preview tab through the
+      // `open-line` op; with nothing selected only the tab comes forward.
+      $('previewBtn').addEventListener('click', function () {
+        if (selectedLine != null) { post({ op: 'open-line', line: selectedLine }); }
+        else { selectTab('preview', true); }
+      });
 
       // Follow (lane L26): scrolling away from the bottom pauses it, scrolling
       // back restores it; the host mirrors the flag for the status line.
@@ -2055,12 +2232,15 @@
         else if (act === 'jump-xml') { post({ op: 'jump-xml', line: ctxLine }); }
         else if (act === 'focus-method' && row) { setFocus('method', row.focus_key); }
         else if (act === 'focus-request' && row) { setFocus('request', row.request_id); }
+        else if (act === 'focus-template' && row) { setFocus('template', row.n_plus_one_key); }
+        else if (act === 'send-sql-to-java') { post({ op: 'send-to-tab', tab: 'sqlToJava', line: ctxLine }); }
+        else if (act === 'send-log-to-sql') { post({ op: 'send-to-tab', tab: 'logToSql', line: ctxLine }); }
         else if (act === 'delete-line') { post({ op: 'delete-line', line: ctxLine }); }
         else if (act === 'block-method') { post({ op: 'block-method', line: ctxLine }); }
         closeCtx();
       });
 
-      document.addEventListener('click', function () { openTypeMenu(false); openBlockedMenu(false); closeCtx(); });
+      document.addEventListener('click', function () { openTypeMenu(false); openBlockedMenu(false); openSettingsMenu(false); closeCtx(); });
       document.addEventListener('keydown', function (event) {
         // Ctrl+Tab / Ctrl+Shift+Tab cycle the four tabs. The IDE may consume
         // this chord before the page sees it; the mouse always works.
@@ -2081,6 +2261,7 @@
         }
         if (event.key === 'Escape') {
           if (!$('ctxMenu').hidden) { closeCtx(); return; }
+          if (!$('settingsMenu').hidden) { openSettingsMenu(false); return; }
           if (!$('blockedMenu').hidden) { openBlockedMenu(false); return; }
           if (!$('typeMenu').hidden) { openTypeMenu(false); return; }
           if (!$('searchRow').hidden) {
