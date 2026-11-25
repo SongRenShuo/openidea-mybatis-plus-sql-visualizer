@@ -92,8 +92,10 @@ T5 sidecar（依赖 T1 的接口与主仓 engine-jar 扩展）
 > **T7-4 状态（2026-11-25）：外部依赖，未执行（等待用户授权）。**
 > 上游是 `github.com/l0ng-ai/openidea-plugins`；PR 需要 `publishers/<publisher>.toml` 与
 > `plugins/<publisher>.<name>.toml`，条目必须指向**已签名、已发布**的包 URL + sha256。
-> 本会话红线不建 tag、不发 Release、不擅自对外推送，也没有发布者密钥；用户尚未给出
+> 本会话红线不建 tag、不发 Release、不擅自对外推送；用户尚未给出
 > 发版/对外提交的授权，因此只交付材料（`market/official-pr/`，含两份 upstream TOML 模板）。
+> **本地已就绪**：发布者密钥在仓库外 `C:\Users\USER\.mpsv\songrenshuo.key`，签名包
+> `dist/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin`（sha256 `6bcbc845…`）已通过 check。
 > 取得授权前不执行任何对外动作。
 
 ## P8 上游提案（并行，不阻塞主线）

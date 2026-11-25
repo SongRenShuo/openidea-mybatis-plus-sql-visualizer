@@ -6,8 +6,15 @@
 跑 `openidea-plugin check` 并验签。
 
 本次会话按红线（不建 tag、不发 Release、不擅自对外推送）**没有提交 PR**；用户尚未给出
-对外发版授权，因此状态记为「外部依赖，未执行，等待用户授权」。授权后需一次走完：
-`keygen → tag v0.1.0 → GitHub Release + Gitee 镜像 → 签名打包 → PR`。
+对外发版授权，因此状态记为「外部依赖，未执行，等待用户授权」。
+
+**本地已就绪（不属于对外动作）**：发布者密钥已生成并保存在仓库外
+`C:\Users\USER\.mpsv\songrenshuo.key`（私钥，勿入库/勿外传；公钥在同目录
+`songrenshuo.pub`，并已填入 `upstream/publishers/songrenshuo.toml`）；签名包已产出
+`dist/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin`，sha256
+`6bcbc8450fe1eec0754a4cafd588d534c20130e4e5fd2233f4106ceb2be660ad`，`openidea-plugin check`
+通过。还差的只有「发布」与「PR」：`tag v0.1.0 → GitHub Release + Gitee 镜像 → 上传签名包 →
+填写 package URL → 向 l0ng-ai/openidea-plugins 提 PR`。
 
 可直接使用的模板在 [`upstream/`](upstream/README.md)（两份 TOML 的精确形状）。
 
