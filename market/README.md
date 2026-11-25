@@ -19,11 +19,15 @@ GitHub。
 | `publishers[].id` / `keys[]` | 发布者与其签名公钥；换了密钥要带 `endorsement` |
 | `plugins[].id` / `version` | 插件标识与版本；同一 id 可以有多条表示多版本 |
 | `plugins[].download` | 绝对 URL（由 `--download-base` + 包文件名拼成） |
-| `plugins[].digest` | 包的 sha256，安装时校验 |
+| `plugins[].digest` | 包的内容摘要：manifest 与代码参与，README 与签名不参与（改 README、换密钥重签都不变，改 `plugin.toml` 会变——实测）；它不是文件 sha256 |
 | `plugins[].engine` | 支持的插件 API 线（这里是 `^1.15`） |
 
-两条硬约束：`download` 指向的字节必须与 `digest` 一致，且索引与包必须**同一次
-发布**产出。任何一侧单独重打，用户侧都会以 `digest` 不符中止安装。
+两条硬约束：`download` 必须指向这次要发的那份包，`digest` 必须由 `build-index.sh`
+从同一份包算出。别把 `digest` 当成文件校验和——实测本机官方索引里
+`openidea.checkstyle` 的 digest 是 `7a2f798b…`，而它发布文件的 sha256 是
+`3e85bede…`；同一份内容换密钥重签，digest 也不变（本地两把一次性密钥分别 pack，
+digest 相同），改 `plugin.toml` 才会变。**镜像之间比一致性要用 `.sha256`（文件级
+校验和），不能拿 digest 代。**
 
 ## 生成
 
@@ -99,6 +103,7 @@ openidea-plugin merge market/index.json https://…/index.json --keep songrenshu
 | --- | --- |
 | 列表里搜不到 | `index.json` 404/403；`Content-Type` 不是 json；URL 是 http；IDE 缓存没刷新（删 `plugins/market-index.json` 后重启） |
 | 看到插件但下载 404 | `MPSV_DOWNLOAD_BASE` 少了版本 tag 段；附件没上传成功；Gitee 镜像漏传 |
-| 安装时 digest 不符 | 包被重新打包而索引没重建，或镜像上的包与 GitHub 不是同一份 |
+| 安装时 digest 不符 | 同版本换了内容（manifest/代码变了）而索引没重建；或索引偷懒用了别的包 |
+| 两处镜像 sha256 不同 | 一侧被重新打包；Gitee 附件同名未删除导致旧附件还在被引用 |
 | 装完不更新 | 索引里没有更高 `version`；或自建索引缺签名 `keys`，更新链断掉 |
 | 显示「需要更高版本的 IDE」 | 索引条目 `engine` 与当前 IDE 线不匹配 |

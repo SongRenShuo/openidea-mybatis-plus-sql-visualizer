@@ -24,7 +24,7 @@
 | 插件 id | `<publisher>.<name>`，前缀与 publisher 完全一致 | `songrenshuo.mybatis-plus-sql-visualizer` |
 | 版本一致 | tag = `plugin.toml` 版本 | `release.yml` 里有一条硬校验 |
 | 签名 | 公钥已登记在该索引的 publisher 下；包 signed | `scripts/release.sh` 缺密钥直接失败 |
-| digest 一致 | 索引里的 `digest` = 包 sha256 = 两处镜像的 sha256 | 见 `docs/registration/L10.md` 的一致性步骤 |
+| digest 一致 | 索引条目的 `digest` 由 `build-index.sh` 从同一份包生成（它是内容摘要，不是文件 sha256） | 见 `docs/registration/L10.md` 的一致性步骤 |
 | 能力诚实 | `plugin.toml` 声明的能力 = README 能力表 = 真实行为 | 目前只有 `project.read` |
 | 描述 | 不加未实现的功能承诺 | `plugin.toml` 的 description 只写已能做与将要做的事 |
 | 主页 | 可达的 HTTPS | 指向 Gitee 仓，提交前确认能打开 |
@@ -35,7 +35,7 @@
 ```sh
 openidea-plugin check dist/*.oiplugin        # 按安装口径校验，必须 ok
 awk -F'"' '/^version/{print "version:", $2; exit}' plugin.toml
-sha256sum dist/*.oiplugin                    # 与索引里的 digest、两处镜像比对
+sha256sum dist/*.oiplugin                    # 与两处镜像的 .sha256 比对（索引 digest 不是文件 sha256）
 ```
 
 ## 3 提交流程（入口待确认）
@@ -66,7 +66,8 @@ sha256sum dist/*.oiplugin                    # 与索引里的 digest、两处�
   或把 `partial` 结果说成精确结果。
 - **签名链断裂**：包未签名、公钥未登记、密钥与 publisher 不匹配；轮换时没带
   `--previous-key` 背书。
-- **字节不一致**：索引 `digest` ≠ 发布包 sha256；或发版后原地替换了包却没升版本。
+- **内容与索引不符**：索引 `digest` 与包内容对不上（同版本改了代码却没升版本）；
+  或发版后原地替换了包却没升版本。
 - **API 线不符**：用了 1.16 特性，1.15 线 IDE 一装就报「需要更高版本」。
 - **id/主页**：id 前缀与 publisher 不一致（等同冒充），主页 404，下载 URL 非 HTTPS。
 
