@@ -36,6 +36,57 @@ pub(crate) fn after_ci(haystack: &str, needle_lower: &str) -> Option<usize> {
     find_ci(haystack, needle_lower).map(|i| i + needle_lower.len())
 }
 
+/// Console thread token, used to keep a `<== Total:` / `<== Updates:` row with
+/// the statement that produced it.
+///
+/// Spring Boot / logback rows carry the thread in brackets
+/// (`2026-11-25 21:00:01.001 DEBUG 4242 --- [nio-8080-exec-1] … : ==>  Preparing: …`).
+/// The token is only looked for **before** the family keyword that starts the
+/// message body (`preparing:`, `parameters:`, `total:`, …), so a bracketed
+/// fragment inside SQL text (`a[1]`) can never pass as a thread name. `TID:`
+/// correlation ids and bare numbers are skipped and the bracket closest to the
+/// message wins, mirroring the reference `LogThreadRouter.threadTokenOf`.
+///
+/// `None` means "not extractable"; callers then fall back to the single-slot
+/// behaviour, which keeps prefix-less console formats working.
+pub(crate) fn thread_token(line: &str) -> Option<String> {
+    let boundary = [
+        "preparing:",
+        "parameters:",
+        "executing:",
+        "total:",
+        "updates:",
+    ]
+    .iter()
+    .filter_map(|marker| find_ci(line, marker))
+    .min()?;
+    // Every byte `find_ci` matches is ASCII, so `boundary` is a char boundary.
+    let prefix = &line[..boundary];
+    let mut token: Option<String> = None;
+    let mut from = 0;
+    while let Some(open) = prefix[from..].find('[') {
+        let start = from + open + 1;
+        let Some(close) = prefix[start..].find(']') else {
+            break;
+        };
+        let candidate = &prefix[start..start + close];
+        if is_thread_name(candidate) {
+            token = Some(candidate.to_string());
+        }
+        from = start + close + 1;
+    }
+    token
+}
+
+fn is_thread_name(candidate: &str) -> bool {
+    let trimmed = candidate.trim();
+    !trimmed.is_empty()
+        && !trimmed.chars().all(|c| c.is_ascii_digit())
+        && !trimmed
+            .get(..4)
+            .is_some_and(|head| head.eq_ignore_ascii_case("tid:"))
+}
+
 /// First whitespace-delimited token, upper-cased for classification.
 pub(crate) fn first_token_upper(sql: &str) -> String {
     let trimmed = sql.trim_start();

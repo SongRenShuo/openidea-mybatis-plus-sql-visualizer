@@ -108,6 +108,7 @@ pub(crate) fn feed(line_no: usize, line: &str, emitter: &mut Emitter<'_>) -> boo
         affected_rows: None,
         raw_line: (confidence != Confidence::Exact).then(|| line.to_string()),
         message_keys,
+        thread: emitter.current_thread(),
     });
     true
 }

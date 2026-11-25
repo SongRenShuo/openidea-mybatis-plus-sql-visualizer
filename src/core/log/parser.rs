@@ -35,6 +35,19 @@ pub(crate) struct PendingEntry {
     pub affected_rows: Option<u64>,
     pub raw_line: Option<String>,
     pub message_keys: Vec<String>,
+    /// Console thread that started the statement, when the line carried one.
+    /// Kept on the pending state (not the closing line) so a late `Total:` row
+    /// from another thread cannot claim this statement.
+    pub thread: Option<String>,
+}
+
+/// Which mybatis close row produced a count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CloseRow {
+    /// `<==      Total: N` — result rows returned to the caller.
+    Total,
+    /// `<==    Updates: N` — rows changed by a DML statement.
+    Updates,
 }
 
 /// Shared output sink. Families push `PendingEntry` values; the emitter owns
@@ -45,8 +58,12 @@ pub(crate) struct Emitter<'a> {
     pub unparsed: Vec<UnparsedLine>,
     current_timestamp: Option<i64>,
     current_duration: Option<f64>,
+    current_thread: Option<String>,
     pending_duration: Option<(f64, usize)>,
     last_entry: Option<usize>,
+    /// Last entry emitted per console thread, so a close row is resolved by
+    /// thread instead of by "whatever was emitted last".
+    last_by_thread: HashMap<String, usize>,
 }
 
 impl<'a> Emitter<'a> {
@@ -57,8 +74,10 @@ impl<'a> Emitter<'a> {
             unparsed: Vec::new(),
             current_timestamp: None,
             current_duration: None,
+            current_thread: None,
             pending_duration: None,
             last_entry: None,
+            last_by_thread: HashMap::new(),
         }
     }
 
@@ -68,6 +87,10 @@ impl<'a> Emitter<'a> {
 
     pub(crate) fn current_timestamp(&self) -> Option<i64> {
         self.current_timestamp
+    }
+
+    pub(crate) fn current_thread(&self) -> Option<String> {
+        self.current_thread.clone()
     }
 
     pub(crate) fn emit(&mut self, mut pending: PendingEntry) {
@@ -84,6 +107,11 @@ impl<'a> Emitter<'a> {
         if pending.confidence != Confidence::Exact && pending.raw_line.is_none() {
             pending.raw_line = Some(pending.raw_sql.clone());
         }
+        let thread_key = pending
+            .thread
+            .take()
+            .or_else(|| self.current_thread.clone())
+            .unwrap_or_default();
         let entry = LogEntry {
             family: pending.family,
             line_no: pending.line_no,
@@ -95,11 +123,14 @@ impl<'a> Emitter<'a> {
             confidence: pending.confidence,
             raw_sql: pending.raw_sql,
             affected_rows: pending.affected_rows,
+            result_rows: None,
             raw_line: pending.raw_line,
             message_keys: pending.message_keys,
         };
         self.entries.push(entry);
-        self.last_entry = Some(self.entries.len() - 1);
+        let index = self.entries.len() - 1;
+        self.last_entry = Some(index);
+        self.last_by_thread.insert(thread_key, index);
     }
 
     /// Emit an error row. Per the confidence model, unresolved rows never carry
@@ -117,6 +148,7 @@ impl<'a> Emitter<'a> {
             confidence: Confidence::Unresolved,
             raw_sql: String::new(),
             affected_rows: None,
+            result_rows: None,
             raw_line: Some(text.to_string()),
             message_keys: vec![message_keys::ENTRY_SQL_MISSING.to_string()],
         };
@@ -132,8 +164,8 @@ impl<'a> Emitter<'a> {
     }
 
     /// A duration was found on a line that produced no entry (p6spy `result`
-    /// row, `Total:` row). Attach it to the immediately preceding entry when
-    /// they are adjacent, otherwise remember it for the next emission.
+    /// row). Attach it to the immediately preceding entry when they are
+    /// adjacent, otherwise remember it for the next emission.
     pub(crate) fn notice_duration(&mut self, line_no: usize, duration: f64) {
         if let Some(index) = self.last_entry {
             let last = &mut self.entries[index];
@@ -145,22 +177,49 @@ impl<'a> Emitter<'a> {
         self.pending_duration = Some((duration, line_no));
     }
 
-    /// `<== Total: N` belongs to the statement emitted just before it.
-    pub(crate) fn attach_affected_rows(&mut self, line_no: usize, rows: u64) {
-        if let Some(index) = self.last_entry {
-            let last = &mut self.entries[index];
-            if last.family == Family::MyBatis
-                && last.affected_rows.is_none()
-                && line_no.saturating_sub(last.line_no) <= 10
-            {
-                last.affected_rows = Some(rows);
-            }
+    /// Bookkeeping for a mybatis close row (`<== Total:` / `<== Updates:`):
+    /// the count goes to the statement of the same thread, and its duration is
+    /// the timestamp gap between the `Preparing:` line and this row.
+    pub(crate) fn close_row(&mut self, line_no: usize, rows: Option<u64>, kind: CloseRow) {
+        let Some(index) = self.close_row_target() else {
+            return;
+        };
+        let close_timestamp = self.current_timestamp;
+        let measured = self.current_duration;
+        let entry = &mut self.entries[index];
+        if entry.family != Family::MyBatis || line_no.saturating_sub(entry.line_no) > 10 {
+            return;
+        }
+        if let Some(rows) = rows {
+            match kind {
+                CloseRow::Total => entry.result_rows.get_or_insert(rows),
+                CloseRow::Updates => entry.affected_rows.get_or_insert(rows),
+            };
+        }
+        if entry.duration_ms.is_none() {
+            entry.duration_ms = measured.or_else(|| match (entry.timestamp_ms, close_timestamp) {
+                // Both timestamps come from the same log clock; a negative gap
+                // means the rows were reordered and is not a duration.
+                (Some(start), Some(end)) if end >= start => Some((end - start) as f64),
+                _ => None,
+            });
+        }
+    }
+
+    /// Entry a close row belongs to: the last one emitted from the same console
+    /// thread. Without a thread token the previous entry is the only candidate,
+    /// which keeps prefix-less single-threaded logs working.
+    fn close_row_target(&self) -> Option<usize> {
+        match self.current_thread.as_deref() {
+            Some(thread) => self.last_by_thread.get(thread).copied(),
+            None => self.last_entry,
         }
     }
 
     fn clear_line_context(&mut self) {
         self.current_timestamp = None;
         self.current_duration = None;
+        self.current_thread = None;
     }
 }
 
@@ -193,6 +252,7 @@ impl<'a> Parser<'a> {
         self.emitter.current_timestamp =
             super::timestamp::parse_line(line, self.opts.timestamp_offset_minutes);
         self.emitter.current_duration = super::duration::extract(line);
+        self.emitter.current_thread = super::text::thread_token(line);
 
         // Error signatures first: MyBatis `### Error` rows start with `###` but
         // are the *head* of an error block, not a stack continuation.

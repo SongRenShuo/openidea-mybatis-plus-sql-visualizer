@@ -72,7 +72,7 @@ fn render(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
         );
     }
     for (index, entry) in analysis.entries.iter().take(shown).enumerate() {
-        let _ = writeln!(
+        let _ = write!(
             out,
             "#{} line={} time={} duration={} category={}/{} confidence={}",
             index + 1,
@@ -87,6 +87,15 @@ fn render(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
             class_label(entry.class),
             confidence_label(entry.confidence)
         );
+        // `<== Updates:` / `<== Total:` counts, printed only when the log
+        // family reported one so prefix-less fixtures keep the old header.
+        if let Some(rows) = entry.affected_rows {
+            let _ = write!(out, " rows_affected={rows}");
+        }
+        if let Some(rows) = entry.result_rows {
+            let _ = write!(out, " result_rows={rows}");
+        }
+        out.push('\n');
         if entry.sql.is_empty() {
             out.push_str("  <no SQL>");
         } else {
@@ -148,6 +157,27 @@ mod tests {
         assert!(text.contains("confidence=exact"));
         assert!(text.contains("SELECT id, name FROM user WHERE id = 1 AND status = 'active'"));
         assert!(text.contains("entries: 1"));
+    }
+
+    #[test]
+    fn close_rows_give_the_entry_its_duration_and_row_counts() {
+        let host = MockHost::install();
+        host.add_file(
+            "/project/app.log",
+            "2026-11-25 21:00:01.001 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.Mapper.selectById : ==>  Preparing: SELECT id FROM users WHERE id = ?\n\
+             2026-11-25 21:00:01.002 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.Mapper.selectById : ==> Parameters: 42(Long)\n\
+             2026-11-25 21:00:01.006 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.Mapper.selectById : <==      Total: 1\n\
+             2026-11-25 21:00:02.700 DEBUG 4242 --- [nio-8080-exec-2] c.e.m.Mapper.updateStatus : ==>  Preparing: UPDATE orders SET status = ? WHERE id = ?\n\
+             2026-11-25 21:00:02.701 DEBUG 4242 --- [nio-8080-exec-2] c.e.m.Mapper.updateStatus : ==> Parameters: SHIPPED(String), 42(Long)\n\
+             2026-11-25 21:00:02.980 DEBUG 4242 --- [nio-8080-exec-2] c.e.m.Mapper.updateStatus : <==    Updates: 3\n",
+        );
+        run(&host.invocation(), Some("/project/app.log")).unwrap();
+        let text = text(&host);
+        assert!(text.contains("duration=5ms"));
+        assert!(text.contains("result_rows=1"));
+        assert!(text.contains("duration=280ms"));
+        assert!(text.contains("rows_affected=3"));
+        assert!(!text.contains("duration=-"));
     }
 
     #[test]

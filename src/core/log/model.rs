@@ -96,8 +96,12 @@ pub struct LogEntry {
     pub confidence: Confidence,
     /// Placeholder form (`?` intact), truncated to `ParseOptions::max_sql_len`.
     pub raw_sql: String,
-    /// `<== Total:` row count, when the log family prints one.
+    /// `<==    Updates:` count: rows changed by a DML statement.
     pub affected_rows: Option<u64>,
+    /// `<==      Total:` count: result rows returned to the caller. Kept apart
+    /// from [`Self::affected_rows`] because the two mybatis close rows report
+    /// different things.
+    pub result_rows: Option<u64>,
     /// Original line text, filled only when `confidence != Exact` so the panel
     /// can show what could not be parsed without keeping every log line.
     pub raw_line: Option<String>,

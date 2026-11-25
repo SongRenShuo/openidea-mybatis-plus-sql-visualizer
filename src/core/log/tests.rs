@@ -84,7 +84,8 @@ fn mybatis_parameterless_statement_records_total_rows() {
     ]);
     assert_eq!(analysis.entries.len(), 1);
     assert_eq!(analysis.entries[0].sql, "SELECT COUNT(*) FROM user");
-    assert_eq!(analysis.entries[0].affected_rows, Some(3));
+    assert_eq!(analysis.entries[0].result_rows, Some(3));
+    assert_eq!(analysis.entries[0].affected_rows, None);
     assert!(analysis.entries[0].params.is_empty());
 }
 
@@ -160,6 +161,128 @@ fn mybatis_statement_executing_form_has_no_parameters() {
         "INSERT INTO audit_log (id, msg) VALUES (1, 'x')"
     );
     assert_eq!(analysis.entries[0].confidence, Confidence::Exact);
+}
+
+/// `fixture-java/mybatis-capture.log` verbatim: six statements, each a
+/// `Preparing:` / `Parameters:` / close-row triple on its own console thread.
+/// The close rows are the only place the end timestamp appears, so the
+/// duration is the gap between the two log lines.
+const MYBATIS_CAPTURE: &str = r#"2026-11-25 21:00:01.001 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.mapper.UserMapper.selectById : ==>  Preparing: SELECT id, name, email FROM users WHERE id = ?
+2026-11-25 21:00:01.002 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.mapper.UserMapper.selectById : ==> Parameters: 42(Long)
+2026-11-25 21:00:01.006 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.mapper.UserMapper.selectById : <==      Total: 1
+2026-11-25 21:00:02.101 DEBUG 4242 --- [nio-8080-exec-2] c.e.m.mapper.OrderMapper.selectByUser : ==>  Preparing: SELECT id, user_id, amount FROM orders WHERE user_id = ? ORDER BY id DESC
+2026-11-25 21:00:02.102 DEBUG 4242 --- [nio-8080-exec-2] c.e.m.mapper.OrderMapper.selectByUser : ==> Parameters: 42(Long)
+2026-11-25 21:00:02.115 DEBUG 4242 --- [nio-8080-exec-2] c.e.m.mapper.OrderMapper.selectByUser : <==      Total: 3
+2026-11-25 21:00:03.001 DEBUG 4242 --- [nio-8080-exec-3] c.e.m.mapper.UserMapper.selectById : ==>  Preparing: SELECT id, name, email FROM users WHERE id = ?
+2026-11-25 21:00:03.002 DEBUG 4242 --- [nio-8080-exec-3] c.e.m.mapper.UserMapper.selectById : ==> Parameters: 43(Long)
+2026-11-25 21:00:03.004 DEBUG 4242 --- [nio-8080-exec-3] c.e.m.mapper.UserMapper.selectById : <==      Total: 1
+2026-11-25 21:00:03.501 DEBUG 4242 --- [nio-8080-exec-4] c.e.m.mapper.UserMapper.selectById : ==>  Preparing: SELECT id, name, email FROM users WHERE id = ?
+2026-11-25 21:00:03.502 DEBUG 4242 --- [nio-8080-exec-4] c.e.m.mapper.UserMapper.selectById : ==> Parameters: 44(Long)
+2026-11-25 21:00:03.505 DEBUG 4242 --- [nio-8080-exec-4] c.e.m.mapper.UserMapper.selectById : <==      Total: 1
+2026-11-25 21:00:04.001 DEBUG 4242 --- [nio-8080-exec-5] c.e.m.mapper.UserMapper.selectById : ==>  Preparing: SELECT id, name, email FROM users WHERE id = ?
+2026-11-25 21:00:04.002 DEBUG 4242 --- [nio-8080-exec-5] c.e.m.mapper.UserMapper.selectById : ==> Parameters: 45(Long)
+2026-11-25 21:00:04.006 DEBUG 4242 --- [nio-8080-exec-5] c.e.m.mapper.UserMapper.selectById : <==      Total: 1
+2026-11-25 21:00:06.700 DEBUG 4242 --- [nio-8080-exec-6] c.e.m.mapper.OrderMapper.updateStatus : ==>  Preparing: UPDATE orders SET status = ? WHERE user_id = ? AND status = ?
+2026-11-25 21:00:06.701 DEBUG 4242 --- [nio-8080-exec-6] c.e.m.mapper.OrderMapper.updateStatus : ==> Parameters: SHIPPED(String), 42(Long), PAID(String)
+2026-11-25 21:00:06.980 DEBUG 4242 --- [nio-8080-exec-6] c.e.m.mapper.OrderMapper.updateStatus : <==    Updates: 3
+"#;
+
+#[test]
+fn mybatis_capture_fixture_derives_duration_from_close_rows() {
+    let analysis = parse(MYBATIS_CAPTURE, &ParseOptions::default());
+    assert_eq!(analysis.entries.len(), 6);
+    assert_eq!(
+        analysis
+            .entries
+            .iter()
+            .map(|entry| entry.duration_ms)
+            .collect::<Vec<_>>(),
+        vec![
+            Some(5.0),
+            Some(14.0),
+            Some(3.0),
+            Some(4.0),
+            Some(5.0),
+            Some(280.0)
+        ]
+    );
+    // `Total:` is the result row count, `Updates:` the changed row count.
+    assert_eq!(
+        analysis
+            .entries
+            .iter()
+            .map(|entry| entry.result_rows)
+            .collect::<Vec<_>>(),
+        vec![Some(1), Some(3), Some(1), Some(1), Some(1), None]
+    );
+    assert_eq!(
+        analysis
+            .entries
+            .iter()
+            .map(|entry| entry.affected_rows)
+            .collect::<Vec<_>>(),
+        vec![None, None, None, None, None, Some(3)]
+    );
+    let last = &analysis.entries[5];
+    assert_eq!(last.class, EntryClass::Update);
+    assert_eq!(
+        last.sql,
+        "UPDATE orders SET status = 'SHIPPED' WHERE user_id = 42 AND status = 'PAID'"
+    );
+}
+
+#[test]
+fn mybatis_capture_fixture_feeds_slow_query_detection() {
+    let opts = ParseOptions {
+        slow_threshold_ms: 200.0,
+        ..ParseOptions::default()
+    };
+    let analysis = parse(MYBATIS_CAPTURE, &opts);
+    assert_eq!(analysis.slow.len(), 1);
+    assert_eq!(analysis.slow[0].line_no, 16);
+    assert_eq!(analysis.slow[0].duration_ms, Some(280.0));
+}
+
+#[test]
+fn close_row_is_matched_by_thread_not_by_emission_order() {
+    let analysis = parse_lines(&[
+        "2026-11-25 21:00:01.000 DEBUG 1 --- [nio-1] a : ==>  Preparing: SELECT 1 FROM a WHERE id = ?",
+        "2026-11-25 21:00:01.001 DEBUG 1 --- [nio-1] a : ==> Parameters: 1(Long)",
+        "2026-11-25 21:00:02.000 DEBUG 1 --- [nio-2] b : ==>  Preparing: SELECT 2 FROM b WHERE id = ?",
+        "2026-11-25 21:00:02.010 DEBUG 1 --- [nio-2] b : ==> Parameters: 2(Long)",
+        // Thread 1's close row arrives after thread 2's statement was emitted.
+        "2026-11-25 21:00:01.010 DEBUG 1 --- [nio-1] a : <==      Total: 1",
+        "2026-11-25 21:00:02.050 DEBUG 1 --- [nio-2] b : <==      Total: 1",
+    ]);
+    assert_eq!(analysis.entries.len(), 2);
+    assert_eq!(analysis.entries[0].duration_ms, Some(10.0));
+    assert_eq!(analysis.entries[1].duration_ms, Some(50.0));
+    assert_eq!(analysis.entries[0].result_rows, Some(1));
+    assert_eq!(analysis.entries[1].result_rows, Some(1));
+}
+
+#[test]
+fn close_row_duration_spans_a_minute_boundary() {
+    let analysis = parse_lines(&[
+        "2026-11-25 21:00:59.998 DEBUG 1 --- [nio-1] a : ==>  Preparing: SELECT 1 FROM a WHERE id = ?",
+        "2026-11-25 21:00:59.999 DEBUG 1 --- [nio-1] a : ==> Parameters: 1(Long)",
+        "2026-11-25 21:01:00.004 DEBUG 1 --- [nio-1] a : <==      Total: 1",
+    ]);
+    assert_eq!(analysis.entries.len(), 1);
+    assert_eq!(analysis.entries[0].duration_ms, Some(6.0));
+    assert_eq!(analysis.entries[0].result_rows, Some(1));
+}
+
+#[test]
+fn statement_without_a_close_row_keeps_duration_unset() {
+    let analysis = parse_lines(&[
+        "2026-11-25 21:00:01.001 DEBUG 1 --- [nio-1] a : ==>  Preparing: SELECT 1 FROM a WHERE id = ?",
+        "2026-11-25 21:00:01.002 DEBUG 1 --- [nio-1] a : ==> Parameters: 1(Long)",
+    ]);
+    assert_eq!(analysis.entries.len(), 1);
+    assert_eq!(analysis.entries[0].duration_ms, None);
+    assert_eq!(analysis.entries[0].result_rows, None);
+    assert_eq!(analysis.entries[0].affected_rows, None);
 }
 
 // ---------------------------------------------------------------------------
