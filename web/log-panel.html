@@ -900,6 +900,10 @@
       // Statement lines the list shows before it folds the rest behind `(+N)`
       // (L32, the reference's three-line cell).
       var SQL_MAX_LINES = 3;
+      // Lane L34: `logs.displayMode` arrives as `state.displayMode`; the three
+      // modes map to a line limit here, `0` meaning "no fold" (`multi`).
+      var sqlLineLimit = SQL_MAX_LINES;
+      var showDuration = true;
       var TYPE_COLORS = {
         select: 'var(--openidea-link)',
         insert: 'var(--openidea-success)',
@@ -1317,15 +1321,20 @@
         // its unit, and the database badge right after it.
         meta.appendChild(makePart('seq', '#' + row.seq));
         meta.appendChild(makePart('part time', '[' + (row.time || '-') + ']'));
-        var dur = document.createElement('span');
-        dur.className = 'dur';
-        dur.textContent = row.duration_ms == null
-          ? '—'
-          : formatMs(row.duration_ms) + (L.durationUnit || 'ms');
-        if (row.duration_ms != null && slowThreshold != null && row.duration_ms >= slowThreshold) {
-          dur.classList.add('hot');
+        // Lane L34: `log.showDuration` off drops the whole segment, and with it
+        // the slow tint that lives on it — the row still states its category,
+        // so nothing else breaks.
+        if (showDuration) {
+          var dur = document.createElement('span');
+          dur.className = 'dur';
+          dur.textContent = row.duration_ms == null
+            ? '—'
+            : formatMs(row.duration_ms) + (L.durationUnit || 'ms');
+          if (row.duration_ms != null && slowThreshold != null && row.duration_ms >= slowThreshold) {
+            dur.classList.add('hot');
+          }
+          meta.appendChild(dur);
         }
-        meta.appendChild(dur);
         var dbText = dbBadge(row.db, dialect);
         if (dbText) { meta.appendChild(makePart('part db', dbText)); }
         if (row.rows_affected != null) {
@@ -1451,13 +1460,23 @@
       // `sql-lines-3`: the list shows at most three statement lines and states
       // how many it dropped at the end of the third one, the way the reference
       // row ends with `… (+1)`.
+      // Lane L34: `logs.displayMode` — one line, no fold, or the reference's
+      // three-line cell (`SQL_MAX_LINES`).
+      function modeLineLimit(mode) {
+        if (mode === 'single') { return 1; }
+        if (mode === 'multi') { return 0; }
+        return SQL_MAX_LINES;
+      }
+
       function foldSql(text) {
         var lines = String(text || '').split(/\r?\n/);
-        if (lines.length <= SQL_MAX_LINES) {
+        // `0` is `multi`: the whole statement, no fold and no tail.
+        var limit = sqlLineLimit;
+        if (limit <= 0 || lines.length <= limit) {
           return { text: lines.join('\n'), tail: '' };
         }
-        var rest = lines.length - SQL_MAX_LINES;
-        var shown = lines.slice(0, SQL_MAX_LINES);
+        var rest = lines.length - limit;
+        var shown = lines.slice(0, limit);
         return {
           text: shown.join('\n'),
           tail: ' … (+' + rest + ')'
@@ -1489,6 +1508,10 @@
         // The engine half of the row's database badge (L32): what the settings
         // page configured, so a row never claims a connection it does not know.
         var dialect = state.dialect || '';
+        // Lane L34: `logs.displayMode` picks the line limit and `log.showDuration`
+        // the header flag; the page only applies what the host pushed.
+        sqlLineLimit = modeLineLimit(state.displayMode);
+        showDuration = state.showDuration !== false;
         var wasAtBottom = atBottom();
 
         while (list.firstChild) { list.removeChild(list.firstChild); }
@@ -1631,6 +1654,14 @@
             (r.request_id || '') + '/' + (r.thread || ''));
         }
         return parts.join('|');
+      }
+
+      // Lane L34: `logs.displayMode` / `log.showDuration` take part in the list
+      // identity below, so changing either re-renders the rows even when the
+      // captured rows themselves did not move.
+      function displayKey(state) {
+        return (state.displayMode || 'keyword_wrap') + '/' +
+          (state.showDuration === false ? '0' : '1');
       }
 
       // "Log → SQL" (L33) ---------------------------------------------------
@@ -2107,7 +2138,7 @@
         updateTypeButton();
         renderFocusChips(state);
         renderBlocked(state);
-        var sig = rowsSignature(state.rows || []) + '#' + (state.dialect || '');
+        var sig = rowsSignature(state.rows || []) + '#' + (state.dialect || '') + '#' + displayKey(state);
         if (sig !== rowsSig) {
           rowsSig = sig;
           renderList(state);
