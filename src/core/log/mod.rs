@@ -16,6 +16,8 @@
 //!
 //! Entry points:
 //! - [`parse`] — single pass over a whole text, returns [`LogAnalysis`].
+//! - [`parse_with_sources`] — the same pass plus per-entry provenance
+//!   (logger-derived class/method, thread, correlation id) in [`ParsedLog`].
 //! - [`Parser`] — streaming variant for the capture bridge.
 //!
 //! No platform types, no `host::` calls; every shape is `serde`-serialisable so
@@ -30,6 +32,7 @@ mod p6spy;
 mod params;
 mod parser;
 mod restore;
+mod source;
 mod text;
 mod timestamp;
 
@@ -40,7 +43,10 @@ pub use model::{
     Confidence, DuplicateGroup, EntryClass, Family, LogAnalysis, LogEntry, NPlusOneGroup,
     ParseOptions, UnparsedLine, message_keys,
 };
-pub use parser::{Parser, classify_sql, parse};
+pub use parser::{Parser, classify_sql, parse, parse_with_sources};
+pub use source::{
+    LineSource, LogSources, ParsedLog, SourceRef, by_line, source_of_line, sources_for,
+};
 
 /// Executable form of a statement whose parameters were already rendered
 /// ([`LogEntry::params`]): the rendered literals replace the first `?`

@@ -397,6 +397,16 @@ pub fn parse(text: &str, opts: &ParseOptions) -> LogAnalysis {
     parser.finish()
 }
 
+/// Parse a whole log text and keep where each statement came from.
+///
+/// The provenance pass is a second linear scan over the same lines; it only
+/// stores rows that stated something, and joins on `LogEntry::line_no`.
+pub fn parse_with_sources(text: &str, opts: &ParseOptions) -> super::source::ParsedLog {
+    let analysis = parse(text, opts);
+    let sources = super::source::sources_for(&analysis, text);
+    super::source::ParsedLog { analysis, sources }
+}
+
 fn build_duplicates(entries: &[LogEntry], opts: &ParseOptions) -> Vec<DuplicateGroup> {
     let mut groups: Vec<DuplicateGroup> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
