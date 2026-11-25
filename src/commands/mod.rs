@@ -17,6 +17,7 @@ pub mod check_sql;
 pub mod common;
 pub mod generate_crud;
 pub mod perf_advice;
+pub mod render_log;
 pub mod render_xml;
 pub mod rollback_plan;
 
