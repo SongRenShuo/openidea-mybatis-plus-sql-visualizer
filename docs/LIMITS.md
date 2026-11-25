@@ -36,6 +36,9 @@
     （`crates/ide-lsp/src/plugin_requests.rs:11-38` 的 `plugin_method_allowed`），所以 `documentSymbol` / `definition` 发不出去。
     替代做法：日志行自带的 logger 名就是 `类.方法`（如 `c.e.m.mapper.UserMapper.selectById`），列表头用它显示 `[类#方法]`；
     文件:行与「跳转 Java」用插件自建的 Java 方法索引（`src/indexer/`）反查；请求维度只在日志里出现 `traceId`/`requestId` 时显示，没有就不显示。
+21. **MCP 工具入参上限 1 MiB**：宿主在调用插件工具前就拒绝更大的参数（实测 1.3 MB 日志返回
+    `MCP arguments exceed 1 MiB`）。大日志请走面板（`capture-open-log` 读文件）或 `render-log` 命令；MCP 的
+    `sqlv_render_logs` 适合中小片段（实测 7200 行 / 935 KB 可用，median 231 ms）。
 
 ## 还有一类：本版实现边界
 
