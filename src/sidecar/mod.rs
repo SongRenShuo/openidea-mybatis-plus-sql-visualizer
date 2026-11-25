@@ -31,7 +31,8 @@ pub use lifecycle::{
     retry_delays_ms, start, stop,
 };
 pub use proto::{
-    EngineError, ErrorValue, ExplainRequest, Kind, PROTOCOL_VERSION, RenderKind, RenderRequest,
+    ConnSpec, DEFAULT_EXPLAIN_TIMEOUT_MS, EngineError, ErrorValue, ExplainExecuteRequest,
+    ExplainExecuteResponse, ExplainRequest, Kind, PROTOCOL_VERSION, RenderKind, RenderRequest,
     Request, Response, SchemaRequest, Source, SourceRange,
 };
 pub use sha256::sha256_hex;
@@ -183,7 +184,7 @@ mod tests {
     fn the_pin_matches_the_recorded_engine_jar_digest() {
         assert_eq!(
             pinned_sha256_hex(),
-            "7b04dfc26a985273c45a80076e7b938fd31062676891d5ae27ea06eb732a2d69"
+            "b9af1046713a62971e868c2a554d135db602201e0fbc01d51a24dd16446c1b2e"
         );
     }
 }

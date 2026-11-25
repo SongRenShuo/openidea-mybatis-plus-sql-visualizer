@@ -68,6 +68,11 @@ pub enum Kind {
     Explain,
     Schema,
     Health,
+    /// Live EXPLAIN execution (T5-5): the engine opens the connection and runs
+    /// `EXPLAIN`; the wire string carries the dot because it is a different
+    /// operation from the pure `explain` wrapper.
+    #[serde(rename = "explain.execute")]
+    ExplainExecute,
 }
 
 impl Kind {
@@ -85,6 +90,7 @@ impl Kind {
             Kind::Explain => "explain",
             Kind::Schema => "schema",
             Kind::Health => "health",
+            Kind::ExplainExecute => "explain.execute",
         }
     }
 }
@@ -137,6 +143,15 @@ pub struct Request {
     pub sql: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub table: Option<String>,
+    // ---- explain.execute (T5-5): the engine opens the connection itself ----
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
 }
 
 impl Request {
@@ -151,6 +166,10 @@ impl Request {
             entity_tables: None,
             sql: None,
             table: None,
+            url: None,
+            user: None,
+            password: None,
+            timeout_ms: None,
         }
     }
 }
@@ -176,6 +195,10 @@ impl From<RenderRequest> for Request {
             entity_tables: r.entity_tables,
             sql: None,
             table: None,
+            url: None,
+            user: None,
+            password: None,
+            timeout_ms: None,
         }
     }
 }
@@ -198,6 +221,10 @@ impl From<ExplainRequest> for Request {
             entity_tables: None,
             sql: Some(r.sql),
             table: None,
+            url: None,
+            user: None,
+            password: None,
+            timeout_ms: None,
         }
     }
 }
@@ -220,8 +247,113 @@ impl From<SchemaRequest> for Request {
             entity_tables: None,
             sql: None,
             table: Some(r.table),
+            url: None,
+            user: None,
+            password: None,
+            timeout_ms: None,
         }
     }
+}
+
+/// Connection details for a live EXPLAIN (T5-5).
+///
+/// `Debug` is hand-written to redact the password: this struct travels through
+/// the wasm boundary and may end up in a log line, and a credential must never
+/// be printed. Serialization does include it — the engine needs it — but the
+/// wire request is never logged by this crate.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnSpec {
+    pub url: String,
+    pub user: String,
+    pub password: String,
+    pub timeout_ms: u64,
+}
+
+/// The default statement/connect timeout, matching `StdioMain.DEFAULT_EXPLAIN_TIMEOUT_MS`.
+pub const DEFAULT_EXPLAIN_TIMEOUT_MS: u64 = 5_000;
+
+impl ConnSpec {
+    pub fn new(
+        url: impl Into<String>,
+        user: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
+        ConnSpec {
+            url: url.into(),
+            user: user.into(),
+            password: password.into(),
+            timeout_ms: DEFAULT_EXPLAIN_TIMEOUT_MS,
+        }
+    }
+
+    pub fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = timeout_ms;
+        self
+    }
+}
+
+impl std::fmt::Debug for ConnSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnSpec")
+            .field("url", &self.url)
+            .field("user", &self.user)
+            .field("password", &"<redacted>")
+            .field("timeout_ms", &self.timeout_ms)
+            .finish()
+    }
+}
+
+/// A live EXPLAIN request: the engine connects, wraps the query in the
+/// dialect's plan form, and returns the raw plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplainExecuteRequest {
+    pub sql: String,
+    pub conn: ConnSpec,
+}
+
+impl From<ExplainExecuteRequest> for Request {
+    fn from(r: ExplainExecuteRequest) -> Self {
+        Request {
+            protocol: PROTOCOL_VERSION,
+            kind: Kind::ExplainExecute,
+            source: None,
+            dialect: None,
+            params: None,
+            entity_tables: None,
+            sql: Some(r.sql),
+            table: None,
+            url: Some(r.conn.url),
+            user: Some(r.conn.user),
+            password: Some(r.conn.password),
+            timeout_ms: Some(r.conn.timeout_ms),
+        }
+    }
+}
+
+/// The engine's reply to `explain.execute`.
+///
+/// Success carries `format` (`"json"` / `"xml"` / `"text"`) and the raw `plan`;
+/// failure carries a classified `kind`, a stable `messageKey` (the UI's
+/// localization key) and a short `detail`. The engine never sends a stack.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplainExecuteResponse {
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Reused for the dispatcher's generic `{"ok":false,"error":…}` shape
+    /// (bad JSON, missing kind), which has no `kind`/`messageKey`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ErrorValue>,
 }
 
 /// A structured engine error.
@@ -420,6 +552,7 @@ mod tests {
             (Kind::Explain, "explain"),
             (Kind::Schema, "schema"),
             (Kind::Health, "health"),
+            (Kind::ExplainExecute, "explain.execute"),
         ];
         for (kind, wire) in cases {
             assert_eq!(serde_json::to_string(&kind).unwrap(), format!("\"{wire}\""));
@@ -478,5 +611,53 @@ mod tests {
         let resp = Response::ok(Some("SELECT 1".into()), "partial");
         assert!(resp.engine_error().is_none());
         assert_eq!(resp.confidence, Some("partial".to_string()));
+    }
+
+    #[test]
+    fn explain_execute_request_carries_connection_fields_camel_case() {
+        let req: Request = ExplainExecuteRequest {
+            sql: "SELECT 1".into(),
+            conn: ConnSpec::new("jdbc:sqlserver://db:1433", "sa", "test-secret")
+                .with_timeout_ms(2_000),
+        }
+        .into();
+        assert_eq!(req.kind, Kind::ExplainExecute);
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"kind\":\"explain.execute\""), "{json}");
+        assert!(json.contains("\"timeoutMs\":2000"), "{json}");
+        assert_eq!(round_trip_request(&req), req);
+    }
+
+    #[test]
+    fn conn_spec_debug_never_prints_the_password() {
+        let spec = ConnSpec::new("jdbc:postgresql://db/x", "u", "test-secret");
+        let text = format!("{spec:?}");
+        assert!(text.contains("<redacted>"), "{text}");
+        assert!(!text.contains("test-secret"), "{text}");
+        // The wire form still carries it — the engine needs the credential.
+        let json = serde_json::to_string(&spec).unwrap();
+        assert!(json.contains("\"password\":\"test-secret\""), "{json}");
+        assert!(json.contains("\"timeoutMs\":5000"), "{json}");
+    }
+
+    #[test]
+    fn explain_execute_response_parses_success_and_classified_failure() {
+        let ok: ExplainExecuteResponse =
+            serde_json::from_str(r#"{"ok":true,"format":"xml","plan":"<ShowPlanXML/>"}"#).unwrap();
+        assert_eq!(ok.format.as_deref(), Some("xml"));
+        assert_eq!(ok.plan.as_deref(), Some("<ShowPlanXML/>"));
+
+        let bad: ExplainExecuteResponse = serde_json::from_str(
+            r#"{"ok":false,"kind":"timeout","messageKey":"explain.error.timeout","detail":"57014"}"#,
+        )
+        .unwrap();
+        assert!(!bad.ok);
+        assert_eq!(bad.kind.as_deref(), Some("timeout"));
+        assert_eq!(bad.message_key.as_deref(), Some("explain.error.timeout"));
+
+        let dispatch: ExplainExecuteResponse =
+            serde_json::from_str(r#"{"ok":false,"kind":"invalid","error":"missing kind"}"#)
+                .unwrap();
+        assert!(dispatch.error.is_some());
     }
 }
