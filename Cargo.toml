@@ -8,7 +8,9 @@ publish = false
 [workspace]
 
 [lib]
-crate-type = ["cdylib"]
+# `cdylib` is the shipped component; `rlib` lets `tests/` link the crate so the
+# parity harness (T1-12) and the ignored jar e2e test can call `core` directly.
+crate-type = ["cdylib", "rlib"]
 
 # Pinned to the SDK shipped with openidea-plugin 0.1.51 (plugin API 1.15).
 # Building against `main` targets API 1.16, which no released IDE loads.
