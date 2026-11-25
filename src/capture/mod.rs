@@ -11,7 +11,12 @@
 //!
 //! [`refresh`] holds the pure throttling / pause-anchor policy the panel view
 //! (lane L5) applies when new events arrive (T4-4).
+//!
+//! [`bridge`] (lane L12) connects the transport to the commands and the panel:
+//! it owns the one live consumer, converts frames to panel text and drives the
+//! throttled refresh.
 
+pub mod bridge;
 pub mod file_tail;
 pub mod refresh;
 pub mod ws;
