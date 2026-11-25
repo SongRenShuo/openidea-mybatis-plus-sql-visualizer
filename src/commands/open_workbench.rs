@@ -1,12 +1,16 @@
-//! `open-workbench`: send a statement to the preview workbench and reveal it.
+//! `open-workbench`: send a statement to the preview tab and reveal the panel.
+//!
+//! Since lane L23 the preview workbench is the fifth tab of the SQL log panel
+//! (`sqlv-logs`), exactly as the IntelliJ edition's "SQL 预览" tab lives inside
+//! the SQL Log tool window. So this command sets the workbench model, pushes
+//! the log panel's state with `selectTab: "preview"` and reveals `sqlv-logs`;
+//! there is no `sqlv-workbench` view any more.
 //!
 //! The argument is optional SQL text, `@<path>`, or a bare project file path
-//! (the form the project view context menu passes). The page receives the
-//! `{op:"load", model, labels}` message through
-//! [`host::post_view_message`](openidea_plugin::host::post_view_message); the
-//! plugin-side model is set too, because the page asks for it again with
-//! `{op:"ready"}` when it finishes loading (that handshake would otherwise
-//! overwrite the load with an empty model).
+//! (the form the project view context menu passes). The plugin-side model is
+//! set too, because the page asks for the state again with `{op:"ready"}`
+//! when it finishes loading (that handshake would otherwise overwrite the load
+//! with an empty model).
 
 use std::fmt::Write as _;
 
@@ -14,7 +18,7 @@ use openidea_plugin::{Error, Invocation, host};
 
 use crate::capture::bridge;
 use crate::commands::common::{self, CliError};
-use crate::views::workbench;
+use crate::views::{log_panel, workbench};
 
 /// Matches `[[contributes.commands]] id` in `plugin.toml`.
 pub const ID: &str = "open-workbench";
@@ -54,18 +58,23 @@ fn open(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     }
     workbench::set_model(model);
 
-    // The page renders the `state` shape and shows the statement in the input
-    // pane; the legacy `{op:"load"}` is not understood by it any more.
-    workbench::push_state_with("", true)
+    // The page renders the `state` shape of the log panel and shows the
+    // statement in the preview tab's input pane. `request_tab` rides along as
+    // `selectTab`, and stays set until the page reports the tab it shows (a
+    // push sent before the page finished loading must not be the only chance
+    // it gets).
+    workbench::request_tab();
+    workbench::request_input_replace();
+    log_panel::push_state()
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
-    host::reveal_view(workbench::VIEW_ID)
+    host::reveal_view(log_panel::VIEW_ID)
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
 
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "-- open-workbench: sent to {} (dialect: {}, sql: {} chars)",
-        workbench::VIEW_ID,
+        "-- open-workbench: sent to {}#preview (dialect: {}, sql: {} chars)",
+        log_panel::VIEW_ID,
         dialect,
         sql.chars().count()
     );
@@ -81,41 +90,51 @@ mod tests {
     use openidea_plugin::mock::MockHost;
     use serde_json::{Value, json};
 
-    /// Restores the process-wide workbench model, which the view tests share; the
-    /// lock is the view tests' own, so the two modules never interleave.
+    /// Restores the process-wide workbench store, which the view tests share;
+    /// the lock is the view tests' own, so the two modules never interleave.
     fn with_model_restore<T>(body: impl FnOnce() -> T) -> T {
         let _guard = workbench::test_store_lock();
         let previous = workbench::model();
         let out = body();
         workbench::set_model(previous);
+        workbench::note_page_tab();
         out
     }
 
+    fn preview_state(host: &MockHost) -> Value {
+        let messages = host.view_messages();
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert_eq!(messages[0].0, log_panel::VIEW_ID);
+        serde_json::from_str(&messages[0].1).expect("valid JSON")
+    }
+
     #[test]
-    fn commands_open_workbench_posts_a_state_message_and_reveals_the_page() {
+    fn commands_open_workbench_pushes_the_log_panel_state_and_reveals_it() {
         with_model_restore(|| {
             let host = MockHost::install();
             run(&host.invocation(), Some("select * from user")).unwrap();
 
-            let messages = host.view_messages();
-            assert_eq!(messages.len(), 1, "{messages:?}");
-            assert_eq!(messages[0].0, workbench::VIEW_ID);
-            let value: Value = serde_json::from_str(&messages[0].1).expect("valid JSON");
+            let value = preview_state(&host);
             assert_eq!(value["op"], "state");
-            assert_eq!(value["replaceInput"], true);
-            assert_eq!(value["model"]["sql"], "select * from user");
-            assert_eq!(value["model"]["params"], json!([]));
+            assert_eq!(value["selectTab"], "preview");
+            let preview = &value["tabs"]["preview"];
+            assert_eq!(preview["model"]["sql"], "select * from user");
+            assert_eq!(preview["model"]["params"], json!([]));
             assert!(
-                value["model"]["dialect"]
+                preview["model"]["dialect"]
                     .as_str()
                     .is_some_and(|d| !d.is_empty())
             );
-            assert!(value["labels"].is_object());
-            assert_eq!(host.revealed_views(), [workbench::VIEW_ID.to_string()]);
+            assert_eq!(
+                preview["replaceInput"], true,
+                "the statement has to show up in the input box"
+            );
+            assert!(preview["labels"].is_object());
+            assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
+            let out = &host.output()[common::CHANNEL];
             assert!(
-                host.output()[common::CHANNEL].contains("-- open-workbench: sent to"),
-                "{}",
-                &host.output()[common::CHANNEL]
+                out.contains("-- open-workbench: sent to sqlv-logs#preview"),
+                "{out}"
             );
         });
     }
@@ -126,14 +145,15 @@ mod tests {
             let host = MockHost::install();
             host.add_file("/project/pick.sql", "SELECT id FROM user WHERE id = 1\n");
             run(&host.invocation(), Some("@/project/pick.sql")).unwrap();
-            let value: Value = serde_json::from_str(&host.view_messages()[0].1).unwrap();
+            let value = preview_state(&host);
+            let preview = &value["tabs"]["preview"]["model"];
             assert!(
-                value["model"]["sql"]
+                preview["sql"]
                     .as_str()
                     .is_some_and(|sql| sql.contains("SELECT id FROM user"))
             );
             assert!(
-                value["model"]["source"]
+                preview["source"]
                     .as_str()
                     .is_some_and(|source| source == "/project/pick.sql")
             );
@@ -145,9 +165,11 @@ mod tests {
         with_model_restore(|| {
             let host = MockHost::install();
             run(&host.invocation(), None).unwrap();
-            let value: Value = serde_json::from_str(&host.view_messages()[0].1).unwrap();
-            assert_eq!(value["model"]["sql"], "");
-            assert_eq!(value["model"]["confidence"], "");
+            let value = preview_state(&host);
+            let preview = &value["tabs"]["preview"]["model"];
+            assert_eq!(preview["sql"], "");
+            assert_eq!(preview["confidence"], "");
+            assert_eq!(value["selectTab"], "preview", "the tab still opens");
         });
     }
 }

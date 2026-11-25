@@ -155,6 +155,7 @@
   "view.logs.tab.log_to_sql": "日志 → SQL",
   "view.logs.tab.sql_to_java": "SQL → Java",
   "view.logs.tab.history": "SQL 历史",
+  "view.logs.tab.preview": "SQL 预览",
   "view.logs.tab.log_to_sql.raw": "原始 SQL（? 占位）",
   "view.logs.tab.log_to_sql.params": "参数（按顺序）",
   "view.logs.tab.log_to_sql.restored": "还原后的 SQL",

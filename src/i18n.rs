@@ -399,6 +399,9 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ("view.logs.tab.log_to_sql", "Log → SQL", "日志 → SQL"),
     ("view.logs.tab.sql_to_java", "SQL → Java", "SQL → Java"),
     ("view.logs.tab.history", "SQL History", "SQL 历史"),
+    // Fifth tab: the preview workbench, as the IntelliJ edition's "SQL 预览"
+    // tab of the SQL Log tool window (lane L23).
+    ("view.logs.tab.preview", "SQL Preview", "SQL 预览"),
     (
         "view.logs.tab.log_to_sql.raw",
         "Original SQL (placeholder form)",

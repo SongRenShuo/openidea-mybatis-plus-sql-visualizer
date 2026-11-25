@@ -1,15 +1,16 @@
-//! Preview workbench (T2-2).
+//! Preview workbench (T2-2), now the fifth tab of the SQL log panel (L23).
 //!
 //! The workbench mirrors the IntelliJ edition's "SQL preview" panel
 //! (`SqlStandalonePreviewPanel` + `SqlPreviewPanel`): an input pane on top, a
 //! preview pane below, a parameter column beside the SQL column, and the tabs
-//! SQL / 原文 / 列信息.
+//! SQL / 原文 / 列信息. In the IntelliJ edition that panel is the fifth
+//! (closable) tab of the SQL Log tool window, not a tool window of its own, so
+//! this build renders it inside `web/log-panel.html` (`#panelPreview`).
 //!
-//! The page itself does no I/O, no network and no local storage: it talks to
-//! the plugin with `ViewEvent::Message` only. Registered with
-//! `web = "web/workbench.html"`; [`push_state`] posts the model, the labels and
-//! the status line to it. [`render_workbench`] produces the same content as an
-//! inline `Body::Html` for hosts/tests that do not load the packaged page.
+//! This module therefore owns the model and the op handling only; it posts no
+//! view message any more. The log panel carries [`preview_tab`] in its state
+//! (`tabs.preview`) and routes `preview-*` messages here, so both tabs share
+//! one push channel and one page.
 //!
 //! Two facts of the OpenIDEA platform shape this panel:
 //!
@@ -20,7 +21,6 @@
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use openidea_plugin::views::{Body, Button, View, ViewEvent};
 use openidea_plugin::{Error, PickItem, host};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -29,9 +29,6 @@ use crate::core::perf::{self, Severity};
 use crate::core::xml::{Confidence, MapperSet, RenderOutput};
 use crate::core::{dialect, format};
 use crate::i18n::t;
-
-/// The id declared in `[[contributes.views]]`.
-pub const VIEW_ID: &str = "sqlv-workbench";
 
 /// The input is SQL text, used verbatim.
 pub const KIND_SQL: &str = "sql";
@@ -409,89 +406,109 @@ fn advice_text(sql: &str, dialect_name: &str) -> String {
 // Model store
 // ---------------------------------------------------------------------------
 
-static MODEL: OnceLock<Mutex<WorkbenchModel>> = OnceLock::new();
+/// What the preview tab keeps between state pushes.
+struct PreviewStore {
+    model: WorkbenchModel,
+    /// Last status line (the panel keeps it across unrelated pushes).
+    status: String,
+    /// Set by an op that rewrote the input box (render / format / load-file /
+    /// clear); one-shot, so a later unrelated push leaves what the user typed
+    /// alone.
+    replace_input: bool,
+    /// Set by `open-workbench` and by the log panel's "open line": the page has
+    /// to open and select the preview tab. Cleared once the page reports the
+    /// tab it shows, because by then it has applied the selection.
+    select_pending: bool,
+}
 
-fn model_store() -> MutexGuard<'static, WorkbenchModel> {
-    let mutex = MODEL.get_or_init(|| Mutex::new(WorkbenchModel::default()));
+impl Default for PreviewStore {
+    fn default() -> Self {
+        Self {
+            model: WorkbenchModel::default(),
+            status: String::new(),
+            replace_input: false,
+            select_pending: false,
+        }
+    }
+}
+
+static PREVIEW: OnceLock<Mutex<PreviewStore>> = OnceLock::new();
+
+fn preview_store() -> MutexGuard<'static, PreviewStore> {
+    let mutex = PREVIEW.get_or_init(|| Mutex::new(PreviewStore::default()));
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Replaces what the workbench shows (called by the lanes that render).
+/// Replaces what the preview tab shows (called by the lanes that render).
 pub fn set_model(model: WorkbenchModel) {
-    *model_store() = model;
+    preview_store().model = model;
 }
 
 /// The current model.
 pub fn model() -> WorkbenchModel {
-    model_store().clone()
+    preview_store().model.clone()
 }
 
-/// Empties the workbench.
+/// Empties the preview tab.
 pub fn clear() {
-    *model_store() = WorkbenchModel::default();
+    preview_store().model = WorkbenchModel::default();
 }
 
-// ---------------------------------------------------------------------------
-// Messages to the page
-// ---------------------------------------------------------------------------
+/// Asks the page to open and select the "SQL 预览" tab on the next push.
+pub fn request_tab() {
+    preview_store().select_pending = true;
+}
 
-/// Posts the current model with the legacy `{op:"load"}` shape (the handshake
-/// `commands::open_workbench` relies on).
-pub fn push_model() -> Result<(), Error> {
-    let current = model();
-    let mut model_value =
-        serde_json::to_value(&current).map_err(|error| Error::Invalid(error.to_string()))?;
-    if let Some(object) = model_value.as_object_mut() {
-        object.insert(
-            "dialects".to_string(),
-            json!(WorkbenchModel::dialect_options()),
-        );
+/// The page reported the tab it now shows, so a pending request is satisfied.
+pub fn note_page_tab() {
+    preview_store().select_pending = false;
+}
+
+/// Asks the next push to write the model's text into the input box: a command
+/// that handed a statement over has to show it there, and no op of the page
+/// ran to set the flag.
+pub fn request_input_replace() {
+    preview_store().replace_input = true;
+}
+
+fn set_status(status: String, replace_input: bool) {
+    let mut store = preview_store();
+    store.status = status;
+    if replace_input {
+        store.replace_input = true;
     }
-    let payload = json!({
-        "op": "load",
-        "model": model_value,
-        "labels": {
-            "sql": t("view.workbench.sql"),
-            "params": t("view.workbench.params"),
-            "dialect": t("view.workbench.dialect"),
-            "copy": t("view.workbench.copy"),
-            "export": t("view.workbench.export"),
-            "empty": t("view.workbench.empty"),
-            "confidence": current.confidence_label(),
-        }
-    });
-    host::post_view_message(VIEW_ID, &payload.to_string())
 }
 
-/// Posts the full state the packaged page renders: the model (with the three
-/// tabs), the labels, the read-only dialect block and one status line.
-pub fn push_state(status: &str) -> Result<(), Error> {
-    let payload = state_payload(&model(), status, false);
-    host::post_view_message(VIEW_ID, &payload.to_string())
-}
+// ---------------------------------------------------------------------------
+// The payload the log panel carries
+// ---------------------------------------------------------------------------
 
-/// The same, plus whether this op rewrote the input textarea (render, format,
-/// load-file, clear). The page only overwrites what the user typed when the
-/// host says so.
-pub fn push_state_with(status: &str, replace_input: bool) -> Result<(), Error> {
-    let payload = state_payload(&model(), status, replace_input);
-    host::post_view_message(VIEW_ID, &payload.to_string())
-}
+/// The `tabs.preview` object of the log panel's state: the model (with the
+/// three tabs), the labels, the read-only dialect block, the status line and
+/// whether this push rewrites the input box.
+///
+/// Taking `replace_input` here makes the flag one-shot: the log panel pushes
+/// its state for other reasons too (filter, capture refresh), and those pushes
+/// must not overwrite what the user typed.
+pub fn preview_tab() -> Value {
+    let mut store = preview_store();
+    let replace_input = std::mem::take(&mut store.replace_input);
+    let current = store.model.clone();
+    let status = store.status.clone();
+    drop(store);
 
-fn state_payload(current: &WorkbenchModel, status: &str, replace_input: bool) -> Value {
     let (dialect_name, is_default) = configured_dialect();
-    // Callers that only have the statement (`commands::open_workbench`, the
-    // capture bridge) leave `raw` empty; the input pane then starts from the
-    // statement itself instead of an empty box.
+    // Callers that only have the statement (`commands::open_workbench`) leave
+    // `raw` empty; the input pane then starts from the statement itself
+    // instead of an empty box.
     let raw = if current.raw.is_empty() && !current.sql.is_empty() {
         &current.sql
     } else {
         &current.raw
     };
     json!({
-        "op": "state",
         "replaceInput": replace_input,
         "model": {
             "sql": &current.sql,
@@ -517,6 +534,12 @@ fn state_payload(current: &WorkbenchModel, status: &str, replace_input: bool) ->
         "labels": labels(&current.confidence),
         "status": { "text": status },
     })
+}
+
+/// The `selectTab` value for the next push, while the page still has to open
+/// the preview tab (`None` once it reported its tab).
+pub fn select_tab() -> Option<&'static str> {
+    preview_store().select_pending.then_some("preview")
 }
 
 fn labels(confidence: &str) -> Value {
@@ -554,73 +577,52 @@ fn labels(confidence: &str) -> Value {
 }
 
 // ---------------------------------------------------------------------------
-// View and events
+// Messages from the page
 // ---------------------------------------------------------------------------
 
-/// Builds the inline `Body::Html` variant of the workbench.
-pub fn render_workbench() -> View {
-    let model = model();
-    let mut view = View::new(Body::Html(build_html(&model)));
-    view.toolbar
-        .push(Button::new("copy", &t("view.workbench.copy")));
-    view.toolbar
-        .push(Button::new("export", &t("view.workbench.export")));
-    view.status = Some(model.dialect.clone());
-    view
-}
-
-/// Toolbar buttons and messages posted by the page.
-pub fn handle_workbench_event(event: ViewEvent) -> Result<(), Error> {
-    match event {
-        ViewEvent::Button(id) if id == "copy" => copy_sql()?,
-        ViewEvent::Button(id) if id == "export" => export_sql()?,
-        ViewEvent::Message(text) => handle_message(&text)?,
-        _ => {}
-    }
-    Ok(())
-}
-
-fn handle_message(text: &str) -> Result<(), Error> {
-    let message: Value =
-        serde_json::from_str(text).map_err(|error| Error::Invalid(error.to_string()))?;
-    let op = message
-        .get("op")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
+/// Handles one `preview*` message the log panel routed here.
+///
+/// The log panel pushes its state right after, so this only updates the store:
+/// the model, the status line and the input-replacement flag.
+pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
+    let op = message.get("op").and_then(Value::as_str).unwrap_or("");
+    // The page prefixes every op (`preview-render` …) so the log panel can
+    // route it without colliding with its own `clear` / `export` / `copy`.
+    let op = op.strip_prefix("preview").unwrap_or(op);
+    let op = op.strip_prefix('-').unwrap_or(op);
     match op {
-        // The packaged page asks for the state once its script is ready.
         // The packaged page asks for the state once its script is ready. The
         // input pane starts from the model (nothing has been typed yet).
         "ready" => {
             let current = model();
             let has_content = !current.raw.trim().is_empty() || !current.sql.trim().is_empty();
-            push_state_with("", has_content)?;
+            set_status(String::new(), has_content);
         }
         "render" => {
             let input = message.get("text").and_then(Value::as_str).unwrap_or("");
             let kind = message.get("kind").and_then(Value::as_str).unwrap_or("");
-            render_and_push(input, kind)?;
+            render_input_state(input, kind);
         }
         "format" => {
             let input = message.get("text").and_then(Value::as_str).unwrap_or("");
-            format_and_push(input)?;
+            format_input_state(input);
         }
-        "load-file" => load_file_and_push()?,
+        "load-file" => load_file_state()?,
         "clear" => {
             clear();
-            push_state_with(&t("view.workbench.status.cleared"), true)?;
+            set_status(t("view.workbench.status.cleared"), true);
         }
         "copy" => copy_sql()?,
         "export" => export_sql()?,
         // The dialect is read-only: it comes from the settings page. The op is
         // still answered so an older page does not wait for a reply.
-        "dialect" => push_state(&t("view.workbench.status.dialect_readonly"))?,
+        "dialect" => set_status(t("view.workbench.status.dialect_readonly"), false),
         _ => {}
     }
     Ok(())
 }
 
-fn render_and_push(input: &str, kind: &str) -> Result<(), Error> {
+fn render_input_state(input: &str, kind: &str) {
     let (dialect_name, _) = configured_dialect();
     let mut next = if input.trim().is_empty() {
         let mut empty = WorkbenchModel::new("", Vec::new(), &dialect_name);
@@ -632,22 +634,22 @@ fn render_and_push(input: &str, kind: &str) -> Result<(), Error> {
     next.dialect = dialect_name;
     let status = status_for(&next);
     set_model(next);
-    push_state_with(&status, true)
+    set_status(status, true);
 }
 
-fn format_and_push(input: &str) -> Result<(), Error> {
+fn format_input_state(input: &str) {
     let (dialect_name, _) = configured_dialect();
     if detect_kind(input) == KIND_XML {
         let mut next = render_input(input, KIND_XML, &dialect_name);
         next.dialect = dialect_name;
         set_model(next);
-        return push_state_with(&t("view.workbench.status.format_xml_skipped"), true);
+        return set_status(t("view.workbench.status.format_xml_skipped"), true);
     }
     let Some(found) = dialect::by_name(&dialect_name) else {
         let mut next = render_input(input, KIND_SQL, &dialect_name);
         next.dialect = dialect_name;
         set_model(next);
-        return push_state_with(&t("view.workbench.status.format_unknown_dialect"), true);
+        return set_status(t("view.workbench.status.format_unknown_dialect"), true);
     };
     let formatted = format::format(input, found);
     let unchanged = formatted == input;
@@ -659,22 +661,25 @@ fn format_and_push(input: &str) -> Result<(), Error> {
     } else {
         t("view.workbench.status.formatted")
     };
-    push_state_with(&status, true)
+    set_status(status, true);
 }
 
 fn copy_sql() -> Result<(), Error> {
     let current = model();
     if !current.has_sql() {
-        return push_state(&t("view.workbench.status.copy_empty"));
+        set_status(t("view.workbench.status.copy_empty"), false);
+        return Ok(());
     }
     host::copy_to_clipboard(&current.copy_text())?;
-    push_state(&t("view.workbench.copied"))
+    set_status(t("view.workbench.copied"), false);
+    Ok(())
 }
 
 fn export_sql() -> Result<(), Error> {
     let current = model();
     if !current.has_sql() {
-        return push_state(&t("view.workbench.status.export_empty"));
+        set_status(t("view.workbench.status.export_empty"), false);
+        return Ok(());
     }
     let (dialect_name, _) = configured_dialect();
     let body = current.formatted_sql(&dialect_name);
@@ -692,7 +697,8 @@ fn export_sql() -> Result<(), Error> {
         "-- mybatis-sql workbench export (dialect: {dialect_name}, confidence: {confidence})\n-- source: {source}\n{body}\n"
     );
     crate::commands::common::emit(&text)?;
-    push_state(&t("view.workbench.status.exported"))
+    set_status(t("view.workbench.status.exported"), false);
+    Ok(())
 }
 
 /// Lists the project's SQL and mapper XML files and lets the user pick one.
@@ -700,17 +706,23 @@ fn export_sql() -> Result<(), Error> {
 /// The SDK has no file-open dialog (only `pick` over a list and
 /// `pick_directory`), and `host::open_editors` would need `editor.read`, which
 /// this plugin does not declare — so "load from file" is a project-file picker.
-fn load_file_and_push() -> Result<(), Error> {
+fn load_file_state() -> Result<(), Error> {
     let projects = match host::projects() {
         Ok(projects) => projects,
         Err(error) => {
-            return push_state(
-                &t("view.workbench.status.load_no_project").replace("{0}", &error.to_string()),
+            set_status(
+                t("view.workbench.status.load_no_project").replace("{0}", &error.to_string()),
+                false,
             );
+            return Ok(());
         }
     };
     let Some(project) = projects.first() else {
-        return push_state(&t("view.workbench.status.load_no_project").replace("{0}", ""));
+        set_status(
+            t("view.workbench.status.load_no_project").replace("{0}", ""),
+            false,
+        );
+        return Ok(());
     };
 
     let mut paths: Vec<String> = Vec::new();
@@ -718,24 +730,30 @@ fn load_file_and_push() -> Result<(), Error> {
         match project.find_files(glob, PICK_LIMIT) {
             Ok(found) => paths.extend(found),
             Err(error) => {
-                return push_state(
-                    &t("view.workbench.status.load_failed")
+                set_status(
+                    t("view.workbench.status.load_failed")
                         .replace("{0}", glob)
                         .replace("{1}", &error.to_string()),
+                    false,
                 );
+                return Ok(());
             }
         }
     }
     paths.sort();
     paths.dedup();
     if paths.is_empty() {
-        return push_state(&t("view.workbench.status.load_no_files"));
+        set_status(t("view.workbench.status.load_no_files"), false);
+        return Ok(());
     }
 
     let items: Vec<PickItem> = paths.iter().map(|path| PickItem::new(path, path)).collect();
     let chosen = match host::pick(&t("view.workbench.load_file.title"), &items) {
         Ok(chosen) => chosen,
-        Err(error) => return push_state(&error.to_string()),
+        Err(error) => {
+            set_status(error.to_string(), false);
+            return Ok(());
+        }
     };
     // Cancelled: the previous state stays as it was.
     let Some(path) = chosen else {
@@ -745,11 +763,13 @@ fn load_file_and_push() -> Result<(), Error> {
     let text = match project.read_file(&path) {
         Ok(text) => text,
         Err(error) => {
-            return push_state(
-                &t("view.workbench.status.load_failed")
+            set_status(
+                t("view.workbench.status.load_failed")
                     .replace("{0}", &path)
                     .replace("{1}", &error.to_string()),
+                false,
             );
+            return Ok(());
         }
     };
     let (dialect_name, _) = configured_dialect();
@@ -757,10 +777,11 @@ fn load_file_and_push() -> Result<(), Error> {
     next.dialect = dialect_name;
     next.source = path.clone();
     set_model(next);
-    push_state_with(
-        &t("view.workbench.status.loaded").replace("{0}", &path),
+    set_status(
+        t("view.workbench.status.loaded").replace("{0}", &path),
         true,
-    )
+    );
+    Ok(())
 }
 
 fn kind_from_path(path: &str) -> &'static str {
@@ -792,117 +813,6 @@ fn status_for(current: &WorkbenchModel) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Inline page (fallback for hosts that do not load the packaged page)
-// ---------------------------------------------------------------------------
-
-const STYLE: &str = "\
-body{font:var(--openidea-font-size,13px)/1.5 var(--openidea-font-ui,sans-serif);\
-color:var(--openidea-fg);margin:0;padding:8px}\
-.meta{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}\
-.chip{border:1px solid var(--openidea-border);border-radius:3px;padding:0 6px}\
-pre{margin:0;padding:8px;border:1px solid var(--openidea-border);border-radius:4px;\
-background:var(--openidea-bg-elevated);white-space:pre-wrap;word-break:break-word;\
-font-family:var(--openidea-font-mono,monospace)}\
-label{font-weight:600;display:block;margin:8px 0 4px}\
-.badge{padding:0 6px;border-radius:3px;background:var(--openidea-bg-selected);font-size:11px}\
-.badge.partial{color:var(--openidea-warning)}\
-.badge.unresolved{color:var(--openidea-danger)}\
-.muted{color:var(--openidea-fg-muted)}";
-
-fn build_html(model: &WorkbenchModel) -> String {
-    let (dialect_name, is_default) = configured_dialect();
-    let mut html = String::with_capacity(2048);
-    html.push_str("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>");
-    html.push_str(STYLE);
-    html.push_str("</style></head><body>");
-
-    html.push_str("<div class=\"meta\"><span class=\"chip\">");
-    html.push_str(&escape_html(&t("view.workbench.dialect")));
-    html.push_str(": ");
-    html.push_str(&escape_html(&dialect_name));
-    if is_default {
-        html.push_str(&escape_html(&t("view.workbench.dialect.default_suffix")));
-    }
-    html.push_str("</span>");
-    if let Some(display) = model.dialect_display() {
-        html.push_str(&format!(
-            "<span class=\"muted\" title=\"{}\">{} {}</span>",
-            escape_attr(&capabilities_text(&dialect_name).replace('\n', " · ")),
-            escape_html(&display.quote_open),
-            escape_html(&display.quote_close)
-        ));
-    }
-    let confidence = model.confidence_label();
-    if !confidence.is_empty() {
-        html.push_str(&format!(
-            "<span class=\"badge {}\">{}</span>",
-            escape_attr(&model.confidence),
-            escape_html(&confidence)
-        ));
-    }
-    html.push_str("</div>");
-
-    if !model.advice.is_empty() {
-        html.push_str(&format!(
-            "<p class=\"muted\">{}</p>",
-            escape_html(&model.advice)
-        ));
-    }
-
-    if model.has_sql() {
-        if !model.source.is_empty() {
-            html.push_str(&format!(
-                "<p class=\"muted\">{}</p>",
-                escape_html(&model.source)
-            ));
-        }
-        html.push_str(&format!(
-            "<label>{}</label><pre>{}</pre>",
-            escape_html(&t("view.workbench.sql")),
-            escape_html(&model.sql)
-        ));
-        html.push_str(&format!(
-            "<label>{}</label><pre class=\"muted\">{}</pre>",
-            escape_html(&t("view.workbench.params")),
-            escape_html(&model.params_text())
-        ));
-    } else if !model.reason.is_empty() {
-        html.push_str(&format!(
-            "<label>{}</label><pre class=\"muted\">{}</pre>",
-            escape_html(&t("view.workbench.reason.title")),
-            escape_html(&model.reason)
-        ));
-    } else {
-        html.push_str(&format!(
-            "<p class=\"muted\">{}</p>",
-            escape_html(&t("view.workbench.empty"))
-        ));
-    }
-
-    html.push_str("</body></html>");
-    html
-}
-
-fn escape_html(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-fn escape_attr(text: &str) -> String {
-    escape_html(text)
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -919,12 +829,18 @@ mod tests {
     use super::*;
     use crate::commands::common;
     use openidea_plugin::mock::MockHost;
-    use serde_json::json;
 
     fn test_host() -> (MockHost, MutexGuard<'static, ()>) {
         let guard = test_store_lock();
         let host = MockHost::install();
         clear();
+        note_page_tab();
+        // A fresh store: the status and the one-shot flag from another test
+        // must not leak into this one.
+        let mut store = preview_store();
+        store.status.clear();
+        store.replace_input = false;
+        drop(store);
         (host, guard)
     }
 
@@ -940,15 +856,13 @@ mod tests {
         }
     }
 
-    fn message(value: Value) -> ViewEvent {
-        ViewEvent::Message(value.to_string())
+    fn send(value: Value) {
+        handle_preview_message(&value).expect("the op is answered");
     }
 
-    fn last_state(host: &MockHost) -> Value {
-        let messages = host.view_messages();
-        let (view, payload) = messages.last().expect("a message was posted");
-        assert_eq!(view, VIEW_ID);
-        serde_json::from_str(payload).expect("valid JSON")
+    /// The `tabs.preview` object the log panel would carry.
+    fn tab() -> Value {
+        preview_tab()
     }
 
     /// XML text nodes leave runs of whitespace in the rendered SQL.
@@ -1000,129 +914,75 @@ mod tests {
     }
 
     #[test]
-    fn inline_html_escapes_content_and_has_no_external_links() {
+    fn the_preview_tab_carries_the_model_labels_and_read_only_dialect() {
         let (_host, _guard) = test_host();
-        let mut model = sample();
-        model.sql = "SELECT '<script>' FROM t".to_string();
-        set_model(model);
-        let view = render_workbench();
-        let Body::Html(html) = &view.body else {
-            panic!("expected html, got {:?}", view.body)
-        };
-        assert!(html.contains("&lt;script&gt;"), "SQL is html-escaped");
-        for needle in ["http://", "https://", "localStorage", "fetch("] {
-            assert!(
-                !html.contains(needle),
-                "inline page must not contain {needle}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_packaged_page_has_no_external_links_or_storage() {
-        let page = include_str!("../../web/workbench.html");
-        assert!(
-            page.contains("openidea.postMessage"),
-            "the page talks to the plugin only"
-        );
-        for needle in [
-            "http://",
-            "https://",
-            "localStorage",
-            "fetch(",
-            "XMLHttpRequest",
-        ] {
-            assert!(!page.contains(needle), "web page must not contain {needle}");
-        }
-    }
-
-    #[test]
-    fn the_packaged_page_uses_only_text_content() {
-        let page = include_str!("../../web/workbench.html");
-        for needle in ["innerHTML", "outerHTML", "insertAdjacentHTML", "eval("] {
-            assert!(
-                !page.contains(needle),
-                "the page must not build markup from data ({needle})"
-            );
-        }
-    }
-
-    #[test]
-    fn a_ready_message_pushes_the_state_to_the_page() {
-        let (host, _guard) = test_host();
         set_model(sample());
-        handle_workbench_event(message(json!({ "op": "ready" }))).unwrap();
-        let state = last_state(&host);
-        assert_eq!(state["op"], "state");
-        assert_eq!(state["model"]["sql"], sample().sql);
-        assert_eq!(state["model"]["tabs"]["raw"], sample().raw);
-        assert!(state["model"]["tabs"]["formatted"].is_string());
-        assert!(state["labels"]["hintInput"].as_str().is_some());
-        assert!(state["dialect"]["capabilities"].is_string());
-        assert_eq!(state["status"]["text"], "");
+        let tab = tab();
+        assert_eq!(tab["model"]["sql"], sample().sql);
+        assert_eq!(tab["model"]["tabs"]["raw"], sample().raw);
+        assert!(tab["model"]["tabs"]["formatted"].is_string());
+        assert_eq!(tab["model"]["tabs"]["columns"], "");
+        assert!(tab["labels"]["hintInput"].as_str().is_some());
+        assert!(tab["labels"]["columnsEmpty"].as_str().is_some());
+        assert!(tab["dialect"]["capabilities"].is_string());
+        assert_eq!(tab["dialect"]["isDefault"], true);
+        assert_eq!(tab["replaceInput"], false);
+        assert_eq!(tab["status"]["text"], "");
     }
 
     #[test]
-    fn the_load_shape_still_works_for_older_pages() {
-        let (host, _guard) = test_host();
-        set_model(sample());
-        push_model().unwrap();
-        let payload = &host.view_messages()[0].1;
-        assert!(payload.contains("\"op\":\"load\""));
-        assert!(payload.contains("UserMapper.xml#findById"));
-    }
-
-    #[test]
-    fn the_ready_state_fills_the_input_from_a_statement_only_model() {
-        let (host, _guard) = test_host();
+    fn a_ready_message_fills_the_input_from_a_statement_only_model() {
+        let (_host, _guard) = test_host();
         // `commands::open_workbench` sets only `sql`; the input pane still has
         // to start from it instead of an empty box.
         let mut current = WorkbenchModel::new("select 1", Vec::new(), "MySQL");
         current.confidence = "exact".to_string();
         set_model(current);
-        handle_workbench_event(message(json!({ "op": "ready" }))).unwrap();
-        let state = last_state(&host);
+        send(json!({ "op": "preview-ready" }));
+        let state = tab();
         assert_eq!(state["replaceInput"], true);
         assert_eq!(state["model"]["tabs"]["raw"], "select 1");
+        // The flag is one-shot: the next push (a filter, a capture refresh)
+        // leaves what the user typed alone.
+        assert_eq!(tab()["replaceInput"], false);
     }
 
     #[test]
     fn render_asks_the_page_to_replace_the_input() {
-        let (host, _guard) = test_host();
-        handle_workbench_event(message(json!({ "op": "render", "text": "select 2" }))).unwrap();
-        assert_eq!(last_state(&host)["replaceInput"], true);
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": "select 2" }));
+        let tab = tab();
+        assert_eq!(tab["replaceInput"], true);
+        assert_eq!(tab["model"]["tabs"]["sql"], "select 2");
     }
 
     #[test]
     fn copy_and_export_leave_the_typed_input_alone() {
-        let (host, _guard) = test_host();
+        let (_host, _guard) = test_host();
         set_model(sample());
-        for op in ["copy", "export"] {
-            handle_workbench_event(message(json!({ "op": op }))).unwrap();
-            assert_eq!(last_state(&host)["replaceInput"], false, "op {op}");
+        for op in ["preview-copy", "preview-export"] {
+            send(json!({ "op": op }));
+            assert_eq!(tab()["replaceInput"], false, "op {op}");
         }
     }
 
     #[test]
     fn rendering_plain_sql_is_exact_and_keeps_the_text_verbatim() {
-        let (host, _guard) = test_host();
+        let (_host, _guard) = test_host();
         let text = "select id from user where id = ?\n";
-        handle_workbench_event(message(
-            json!({ "op": "render", "text": text, "kind": "sql" }),
-        ))
-        .unwrap();
+        send(json!({ "op": "preview-render", "text": text, "kind": "sql" }));
         let current = model();
         assert_eq!(current.kind, KIND_SQL);
         assert_eq!(current.confidence, "exact");
         assert_eq!(current.raw, text, "the raw tab keeps the input verbatim");
         assert_eq!(current.sql, "select id from user where id = ?");
         assert!(current.reason.is_empty());
-        let state = last_state(&host);
+        let tab = tab();
         assert_eq!(
-            state["model"]["tabs"]["sql"],
+            tab["model"]["tabs"]["sql"],
             "select id from user where id = ?"
         );
-        assert_eq!(state["model"]["tabs"]["raw"], text);
+        assert_eq!(tab["model"]["tabs"]["raw"], text);
     }
 
     #[test]
@@ -1131,8 +991,7 @@ mod tests {
         let text = r#"<mapper namespace="com.example.UserMapper">
             <select id="findById">SELECT id, name FROM users WHERE id = #{id}</select>
         </mapper>"#;
-        handle_workbench_event(message(json!({ "op": "render", "text": text })))
-            .expect("the kind is detected from the fragment");
+        send(json!({ "op": "preview-render", "text": text }));
         let current = model();
         assert_eq!(current.kind, KIND_XML);
         assert_eq!(current.confidence, "exact");
@@ -1146,16 +1005,13 @@ mod tests {
 
     #[test]
     fn an_unresolved_fragment_ships_no_sql_but_keeps_the_reason() {
-        let (host, _guard) = test_host();
+        let (_host, _guard) = test_host();
         let text = r#"<mapper namespace="a">
             <sql id="one"><include refid="two"/></sql>
             <sql id="two"><include refid="one"/></sql>
             <select id="s">SELECT <include refid="one"/> FROM t</select>
         </mapper>"#;
-        handle_workbench_event(message(
-            json!({ "op": "render", "text": text, "kind": "xml" }),
-        ))
-        .unwrap();
+        send(json!({ "op": "preview-render", "text": text, "kind": "xml" }));
         let current = model();
         assert_eq!(current.confidence, "unresolved");
         assert!(
@@ -1167,10 +1023,10 @@ mod tests {
             "{}",
             current.reason
         );
-        let state = last_state(&host);
-        assert_eq!(state["model"]["tabs"]["sql"], "");
+        let tab = tab();
+        assert_eq!(tab["model"]["tabs"]["sql"], "");
         assert!(
-            state["status"]["text"]
+            tab["status"]["text"]
                 .as_str()
                 .is_some_and(|text| !text.is_empty())
         );
@@ -1179,12 +1035,11 @@ mod tests {
     #[test]
     fn a_fragment_without_statements_is_unresolved() {
         let (_host, _guard) = test_host();
-        handle_workbench_event(message(json!({
-            "op": "render",
+        send(json!({
+            "op": "preview-render",
             "text": "<mapper namespace=\"a\"/>",
             "kind": "xml",
-        })))
-        .unwrap();
+        }));
         let current = model();
         assert_eq!(current.confidence, "unresolved");
         assert!(current.sql.is_empty());
@@ -1198,10 +1053,7 @@ mod tests {
     #[test]
     fn formatting_rewrites_the_input_and_re_renders_it() {
         let (_host, _guard) = test_host();
-        handle_workbench_event(message(
-            json!({ "op": "format", "text": "select id from user" }),
-        ))
-        .unwrap();
+        send(json!({ "op": "preview-format", "text": "select id from user" }));
         let current = model();
         assert_eq!(current.kind, KIND_SQL);
         assert_eq!(current.confidence, "exact");
@@ -1215,12 +1067,12 @@ mod tests {
 
     #[test]
     fn formatting_leaves_a_mapper_fragment_alone() {
-        let (host, _guard) = test_host();
+        let (_host, _guard) = test_host();
         let text = "<mapper namespace=\"a\"><select id=\"s\">select 1</select></mapper>";
-        handle_workbench_event(message(json!({ "op": "format", "text": text }))).unwrap();
+        send(json!({ "op": "preview-format", "text": text }));
         assert_eq!(model().raw, text, "XML is not SQL-formatted");
         assert_eq!(
-            last_state(&host)["status"]["text"],
+            tab()["status"]["text"],
             t("view.workbench.status.format_xml_skipped")
         );
     }
@@ -1241,16 +1093,16 @@ mod tests {
         assert!(!is_default);
 
         // A page that still sends the old op cannot change it.
-        handle_workbench_event(message(json!({ "op": "dialect", "value": "Oracle" }))).unwrap();
+        send(json!({ "op": "preview-dialect", "value": "Oracle" }));
         assert_eq!(model().dialect, "MySQL", "the op changes nothing");
-        let state = last_state(&host);
-        assert_eq!(state["dialect"]["name"], "PostgreSQL");
-        assert_eq!(state["dialect"]["isDefault"], false);
+        let tab = tab();
+        assert_eq!(tab["dialect"]["name"], "PostgreSQL");
+        assert_eq!(tab["dialect"]["isDefault"], false);
         assert_eq!(
-            state["status"]["text"],
+            tab["status"]["text"],
             t("view.workbench.status.dialect_readonly")
         );
-        assert_eq!(state["model"]["dialect"], "PostgreSQL");
+        assert_eq!(tab["model"]["dialect"], "PostgreSQL");
     }
 
     #[test]
@@ -1264,21 +1116,18 @@ mod tests {
     fn the_copy_message_reaches_the_clipboard() {
         let (host, _guard) = test_host();
         set_model(sample());
-        handle_workbench_event(message(json!({ "op": "copy" }))).unwrap();
+        send(json!({ "op": "preview-copy" }));
         assert_eq!(host.clipboard().as_deref(), Some(sample().sql.as_str()));
-        assert_eq!(
-            last_state(&host)["status"]["text"],
-            t("view.workbench.copied")
-        );
+        assert_eq!(tab()["status"]["text"], t("view.workbench.copied"));
     }
 
     #[test]
     fn copying_without_sql_reports_the_status_and_leaves_the_clipboard_alone() {
         let (host, _guard) = test_host();
-        handle_workbench_event(message(json!({ "op": "copy" }))).unwrap();
+        send(json!({ "op": "preview-copy" }));
         assert!(host.clipboard().is_none());
         assert_eq!(
-            last_state(&host)["status"]["text"],
+            tab()["status"]["text"],
             t("view.workbench.status.copy_empty")
         );
     }
@@ -1287,43 +1136,41 @@ mod tests {
     fn exporting_writes_the_sql_to_the_output_channel() {
         let (host, _guard) = test_host();
         set_model(sample());
-        handle_workbench_event(message(json!({ "op": "export" }))).unwrap();
+        send(json!({ "op": "preview-export" }));
         let out = &host.output()[common::CHANNEL];
         assert!(out.contains("mybatis-sql workbench export"), "{out}");
         assert!(
             compact(out).contains(&compact(&sample().sql)),
             "the exported body is the formatted statement: {out}"
         );
-        assert_eq!(
-            last_state(&host)["status"]["text"],
-            t("view.workbench.status.exported")
-        );
+        assert_eq!(tab()["status"]["text"], t("view.workbench.status.exported"));
     }
 
     #[test]
     fn exporting_without_sql_reports_the_status() {
         let (host, _guard) = test_host();
-        handle_workbench_event(message(json!({ "op": "export" }))).unwrap();
+        send(json!({ "op": "preview-export" }));
         assert!(host.output().get(common::CHANNEL).is_none());
         assert_eq!(
-            last_state(&host)["status"]["text"],
+            tab()["status"]["text"],
             t("view.workbench.status.export_empty")
         );
     }
 
     #[test]
     fn clearing_empties_the_model_and_tells_the_page() {
-        let (host, _guard) = test_host();
+        let (_host, _guard) = test_host();
         set_model(sample());
-        handle_workbench_event(message(json!({ "op": "clear" }))).unwrap();
+        send(json!({ "op": "preview-clear" }));
         let current = model();
         assert!(current.sql.is_empty());
         assert!(current.raw.is_empty());
         assert_eq!(current.confidence, "");
-        let state = last_state(&host);
-        assert_eq!(state["model"]["tabs"]["sql"], "");
-        assert_eq!(state["model"]["tabs"]["raw"], "");
-        assert_eq!(state["status"]["text"], t("view.workbench.status.cleared"));
+        let tab = tab();
+        assert_eq!(tab["model"]["tabs"]["sql"], "");
+        assert_eq!(tab["model"]["tabs"]["raw"], "");
+        assert_eq!(tab["replaceInput"], true);
+        assert_eq!(tab["status"]["text"], t("view.workbench.status.cleared"));
     }
 
     #[test]
@@ -1335,13 +1182,13 @@ mod tests {
             "<mapper namespace=\"a\"><select id=\"s\">select 1</select></mapper>",
         );
         host.answer_next_prompt(Some(&["/project/UserMapper.xml"]));
-        handle_workbench_event(message(json!({ "op": "load-file" }))).unwrap();
+        send(json!({ "op": "preview-load-file" }));
         let current = model();
         assert_eq!(current.source, "/project/UserMapper.xml");
         assert_eq!(current.kind, KIND_XML);
         assert!(!current.sql.is_empty());
         assert_eq!(
-            last_state(&host)["status"]["text"],
+            tab()["status"]["text"],
             t("view.workbench.status.loaded").replace("{0}", "/project/UserMapper.xml")
         );
     }
@@ -1353,9 +1200,8 @@ mod tests {
         host.add_file("/project/a.sql", "select 1");
         set_model(sample());
         host.answer_next_prompt(None);
-        handle_workbench_event(message(json!({ "op": "load-file" }))).unwrap();
+        send(json!({ "op": "preview-load-file" }));
         assert_eq!(model(), sample());
-        assert!(host.view_messages().is_empty());
     }
 
     #[test]
@@ -1363,24 +1209,10 @@ mod tests {
         let (host, _guard) = test_host();
         host.set_project_root(Some("/project"));
         host.add_file("/project/readme.md", "# notes");
-        handle_workbench_event(message(json!({ "op": "load-file" }))).unwrap();
+        send(json!({ "op": "preview-load-file" }));
         assert_eq!(
-            last_state(&host)["status"]["text"],
+            tab()["status"]["text"],
             t("view.workbench.status.load_no_files")
-        );
-    }
-
-    #[test]
-    fn buttons_copy_and_export() {
-        let (host, _guard) = test_host();
-        set_model(sample());
-        handle_workbench_event(ViewEvent::Button("copy".to_string())).unwrap();
-        assert_eq!(host.clipboard().as_deref(), Some(sample().sql.as_str()));
-
-        handle_workbench_event(ViewEvent::Button("export".to_string())).unwrap();
-        assert!(
-            compact(&host.output()[common::CHANNEL]).contains(&compact(&sample().sql)),
-            "export goes to the Output channel"
         );
     }
 
@@ -1396,62 +1228,57 @@ mod tests {
 
     #[test]
     fn the_state_carries_the_three_tabs_and_the_advice_line() {
-        let (host, _guard) = test_host();
-        handle_workbench_event(message(json!({
-            "op": "render",
+        let (_host, _guard) = test_host();
+        send(json!({
+            "op": "preview-render",
             "text": "select * from user where name like '%x%'",
             "kind": "sql",
-        })))
-        .unwrap();
-        let state = last_state(&host);
-        let tabs = &state["model"]["tabs"];
+        }));
+        let tab = tab();
+        let tabs = &tab["model"]["tabs"];
         for key in ["sql", "formatted", "raw", "columns"] {
             assert!(tabs.get(key).is_some(), "tabs.{key} is missing");
         }
         assert_eq!(tabs["columns"], "");
         assert!(
-            state["model"]["advice"]
+            tab["model"]["advice"]
                 .as_str()
                 .is_some_and(|advice| !advice.is_empty()),
             "the meta line carries an advice line"
-        );
-        assert!(
-            state["labels"]["columnsEmpty"].as_str().is_some(),
-            "the columns tab explains why it is empty"
         );
     }
 
     #[test]
     fn an_empty_input_reports_the_empty_status_and_keeps_what_was_typed() {
-        let (host, _guard) = test_host();
-        handle_workbench_event(message(json!({ "op": "render", "text": "   " }))).unwrap();
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": "   " }));
         let current = model();
         assert!(current.sql.is_empty());
         assert_eq!(current.raw, "   ");
-        assert_eq!(
-            last_state(&host)["status"]["text"],
-            t("view.workbench.status.empty")
-        );
+        assert_eq!(tab()["status"]["text"], t("view.workbench.status.empty"));
     }
 
     #[test]
-    fn main_dispatches_the_workbench_view() {
-        use openidea_plugin::views::Views;
-        let (host, _guard) = test_host();
+    fn the_tab_request_is_carried_until_the_page_reports_its_tab() {
+        let (_host, _guard) = test_host();
+        assert_eq!(select_tab(), None, "nothing requested yet");
+        request_tab();
+        assert_eq!(select_tab(), Some("preview"));
+        // Repeated pushes keep asking: a push sent before the page loaded must
+        // not be the only chance the page has to see the request.
+        assert_eq!(select_tab(), Some("preview"));
+        note_page_tab();
+        assert_eq!(select_tab(), None);
+    }
+
+    #[test]
+    fn an_unknown_op_and_an_unprefixed_op_change_nothing() {
+        let (_host, _guard) = test_host();
         set_model(sample());
-        let mut main = crate::Main;
-        let view = main.render(VIEW_ID, None, &host.invocation()).unwrap();
-        assert!(matches!(view.body, Body::Html(_)));
-        main.handle(
-            VIEW_ID,
-            ViewEvent::Button("copy".to_string()),
-            &host.invocation(),
-        )
-        .unwrap();
-        assert!(host.clipboard().is_some());
-        assert!(matches!(
-            main.render("no-such-view", None, &host.invocation()),
-            Err(Error::NotFound(_))
-        ));
+        send(json!({ "op": "preview-nope" }));
+        assert_eq!(model(), sample());
+        // The bare `copy` op is the log panel's own and must not reach here.
+        send(json!({ "op": "copy" }));
+        assert_eq!(model(), sample());
     }
 }
