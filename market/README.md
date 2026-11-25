@@ -41,12 +41,17 @@ scripts/build-index.sh
 - 每次发版都重跑。索引列举 `dist/` 里**所有** `.oiplugin`：只要旧版本包还在，
   旧 IDE 线就能装到它。
 - `MPSV_INDEX_OUT` 默认 `market/index.json`。
-- 需要同时给用户官方插件时，加官方索引一起合并：
+- 需要同时给用户官方插件时，加官方索引一起合并（`MPSV_OFFICIAL_INDEX` 可以是 URL
+  或本地文件）：
 
 ```sh
-MPSV_OFFICIAL_INDEX="https://raw.githubusercontent.com/l0ng-ai/openidea/master/index.json" \
-  scripts/build-index.sh
+MPSV_OFFICIAL_INDEX="<官方索引的 index.json 地址>" scripts/build-index.sh
 ```
+
+  官方索引的确切地址没有公开文档：本轮实测
+  `raw.githubusercontent.com/l0ng-ai/openidea/{master,main}/index.json` 都是 404。
+  先从 IDE 的市场设置或官方渠道拿到真实地址再合并；拿不到就不合并——自建索引只列
+  本仓插件也能正常安装与升级。
 
   脚本内部执行 `openidea-plugin merge <我的索引> <官方索引> --keep <我的 publisher>`：
   除自己以外的 publisher、插件与吊销记录全部取自官方索引，用户只填一个 URL 就能
