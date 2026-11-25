@@ -294,24 +294,20 @@ impl MapperSet {
             let namespace = root.attr("namespace").map(|s| s.to_string());
             let local = include::collect_fragments(&root);
             let file_index = files.len();
-            for (id, element) in &local {
-                match &namespace {
-                    Some(ns) => {
-                        let qualified = format!("{ns}.{id}");
-                        if fragments.contains_key(&qualified) {
-                            issues.push(LoadIssue {
-                                path: (*path).to_string(),
-                                message_key: KEY_STATEMENT_DUPLICATE.to_string(),
-                                detail: qualified,
-                            });
-                        } else {
-                            fragments.insert(qualified, element.clone());
-                        }
-                    }
-                    None => {
-                        fragments
-                            .entry(id.clone())
-                            .or_insert_with(|| element.clone());
+            // Only qualified keys are shared across files: a bare refid means
+            // "current namespace" in MyBatis, so registering `id` globally
+            // could silently bind a fragment from an unrelated mapper.
+            if let Some(ns) = &namespace {
+                for (id, element) in &local {
+                    let qualified = format!("{ns}.{id}");
+                    if fragments.contains_key(&qualified) {
+                        issues.push(LoadIssue {
+                            path: (*path).to_string(),
+                            message_key: KEY_STATEMENT_DUPLICATE.to_string(),
+                            detail: qualified,
+                        });
+                    } else {
+                        fragments.insert(qualified, element.clone());
                     }
                 }
             }
@@ -598,6 +594,20 @@ mod tests {
         assert_eq!(issues[0].message_key, KEY_FILE_UNPARSEABLE);
         assert_eq!(issues[1].message_key, KEY_STATEMENT_DUPLICATE);
         assert_eq!(set.render("a.s", &json!({})).sql, "1");
+    }
+
+    #[test]
+    fn bare_refid_does_not_resolve_into_another_namespace() {
+        let no_namespace = r#"<mapper><sql id="cols">x</sql><select id="s">SELECT <include refid="cols"/> FROM t</select></mapper>"#;
+        let other = r#"<mapper namespace="b"><select id="t">SELECT <include refid="cols"/> FROM t</select></mapper>"#;
+        let (set, _) = MapperSet::load(&[("a.xml", no_namespace), ("b.xml", other)]);
+        // Same-file fragment still resolves.
+        assert_eq!(compact(&set.render("s", &json!({})).sql), "SELECT x FROM t");
+        // A bare refid in namespace `b` must not pick up the unrelated file's
+        // fragment, even though it is the only `cols` in the set.
+        let out = set.render("b.t", &json!({}));
+        assert_eq!(out.confidence, Confidence::Partial);
+        assert!(out.sql.contains("include not found: cols"));
     }
 
     #[test]
