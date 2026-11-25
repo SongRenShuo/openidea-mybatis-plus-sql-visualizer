@@ -31,7 +31,10 @@ required = ["project.read", "events"]
 # editor.read: the `preview-sql` command reads the current editor's selection (or
 # the whole document) when it is invoked without arguments. Refusing it keeps the
 # argument forms working.
-optional = ["clipboard", "process:java", "net:127.0.0.1", "editor.read"]
+# clipboard.read: the log→SQL tab can pull the log text from the clipboard. Its
+# own medium-risk grant, separate from write-only `clipboard`; refusing it leaves
+# the paste-into-the-box path.
+optional = ["clipboard", "clipboard.read", "process:java", "net:127.0.0.1", "editor.read"]
 
 [[contributes.commands]]
 id = "render-xml"
