@@ -78,10 +78,14 @@ pub struct JavaIndexBudget {
 
 impl Default for JavaIndexBudget {
     fn default() -> Self {
+        // Measured on a 21-module, 17k-file demo project: the whole Java side
+        // indexed in ~1.5 s over ~50 MiB of text (`sqlv_index_stats`), so the
+        // caps cover a repository of that size instead of cutting it at 4k
+        // files — a skipped file simply has no jump target.
         Self {
-            max_files: 4096,
+            max_files: 20000,
             max_file_bytes: 2 * 1024 * 1024,
-            max_total_bytes: 16 * 1024 * 1024,
+            max_total_bytes: 64 * 1024 * 1024,
         }
     }
 }

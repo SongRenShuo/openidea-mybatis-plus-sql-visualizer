@@ -22,8 +22,10 @@ use std::collections::HashMap;
 use super::java_methods::dotted_suffix_matches;
 use super::xml::index_xml;
 
-/// Files refused by the cap or by an excluded path.
-const MAX_FILES: usize = 4096;
+/// Files refused by the cap or by an excluded path. 95 mapper files were
+/// skipped at the previous 4096 cap on a 21-module demo project whose whole
+/// indexing cost stayed under 2 s, so the cap now covers repositories that size.
+const MAX_FILES: usize = 12000;
 
 /// One statement element, as the XML states it.
 #[derive(Debug, Clone, PartialEq, Eq)]
