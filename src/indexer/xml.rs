@@ -165,10 +165,10 @@ pub fn index_xml(path: &str, text: &str) -> XmlFacts {
                 if let Some(reference) = named(&mut positions, element.attr("resultMap")) {
                     facts.result_map_refs.push(reference);
                 }
-                if element.name != "case" {
-                    if let Some(of_type) = named(&mut positions, element.attr("ofType")) {
-                        facts.type_refs.push(of_type);
-                    }
+                if element.name != "case"
+                    && let Some(of_type) = named(&mut positions, element.attr("ofType"))
+                {
+                    facts.type_refs.push(of_type);
                 }
             }
             _ => {}

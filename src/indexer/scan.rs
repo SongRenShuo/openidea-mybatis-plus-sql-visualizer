@@ -38,10 +38,6 @@ impl<'a> Element<'a> {
     pub fn attr(&self, name: &str) -> Option<&Attr<'a>> {
         self.attrs.iter().find(|a| a.name == name)
     }
-
-    pub fn attr_value(&self, name: &str) -> Option<&'a str> {
-        self.attr(name).map(|a| a.value)
-    }
 }
 
 /// Advances forward through a text and answers UTF-16 positions; offsets asked
@@ -404,7 +400,7 @@ mod tests {
     fn attribute_values_may_hold_gt() {
         let text = "<select id=\"a\" test=\"x &gt; y\">t</select>";
         let els = elements(text);
-        assert_eq!(els[0].attr_value("test"), Some("x &gt; y"));
-        assert_eq!(els[0].attr_value("id"), Some("a"));
+        assert_eq!(els[0].attr("test").map(|a| a.value), Some("x &gt; y"));
+        assert_eq!(els[0].attr("id").map(|a| a.value), Some("a"));
     }
 }
