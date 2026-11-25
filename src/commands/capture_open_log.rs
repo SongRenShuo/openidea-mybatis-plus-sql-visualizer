@@ -94,9 +94,16 @@ Preparing: DELETE FROM user WHERE id = ?
 Parameters: 2(Long)
 ";
 
+    /// The panel's row store is process-wide: `views::log_panel` tests hold the
+    /// same lock, so this test never sees their rows and they never see ours.
+    fn host_with_store_lock() -> (MockHost, std::sync::MutexGuard<'static, ()>) {
+        let guard = crate::views::test_state_lock();
+        (MockHost::install(), guard)
+    }
+
     #[test]
     fn commands_capture_open_log_parses_a_file_and_reveals_the_panel() {
-        let host = MockHost::install();
+        let (host, _guard) = host_with_store_lock();
         host.add_file("/project/app.log", LOG);
         run(&host.invocation(), Some("/project/app.log")).unwrap();
         let text = &host.output()[common::CHANNEL];
@@ -125,7 +132,7 @@ Parameters: 2(Long)
 
     #[test]
     fn commands_capture_open_log_accepts_the_at_form() {
-        let host = MockHost::install();
+        let (host, _guard) = host_with_store_lock();
         host.add_file("/project/app.log", LOG);
         run(&host.invocation(), Some("@/project/app.log")).unwrap();
         assert!(host.output()[common::CHANNEL].contains("entries: 2"));
@@ -133,7 +140,7 @@ Parameters: 2(Long)
 
     #[test]
     fn commands_capture_open_log_says_when_only_the_first_page_is_shown() {
-        let host = MockHost::install();
+        let (host, _guard) = host_with_store_lock();
         host.set_setting(bridge::PAGE_SIZE_SETTING, "1");
         host.add_file("/project/app.log", LOG);
         run(&host.invocation(), Some("/project/app.log")).unwrap();
@@ -145,7 +152,7 @@ Parameters: 2(Long)
 
     #[test]
     fn commands_capture_open_log_reports_a_file_without_sql() {
-        let host = MockHost::install();
+        let (host, _guard) = host_with_store_lock();
         host.add_file("/project/business.log", "nothing to see here\n");
         run(&host.invocation(), Some("/project/business.log")).unwrap();
         assert!(
@@ -157,7 +164,7 @@ Parameters: 2(Long)
 
     #[test]
     fn commands_capture_open_log_reports_a_missing_file() {
-        let host = MockHost::install();
+        let (host, _guard) = host_with_store_lock();
         let err = run(&host.invocation(), Some("/project/nope.log")).unwrap_err();
         assert!(
             matches!(err, Error::Failed(ref text) if text.contains(common::KEY_FILE_UNREADABLE)),

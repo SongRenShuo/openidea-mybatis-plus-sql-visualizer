@@ -1097,13 +1097,10 @@ mod tests {
     use super::*;
     use openidea_plugin::mock::MockHost;
 
-    /// The store is shared by the whole process; tests run in parallel threads.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
+    /// The row store and the workbench model are shared by the whole process;
+    /// the lock is the one both panels' tests and the `commands` tests take.
     fn test_host() -> (MockHost, MutexGuard<'static, ()>) {
-        let guard = TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = super::super::test_state_lock();
         let host = MockHost::install();
         clear();
         set_filter(Filter::default());
@@ -1176,6 +1173,7 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             confidence: crate::core::log::Confidence::Exact,
             raw_sql: sql.to_string(),
             affected_rows: None,
+            result_rows: None,
             raw_line: None,
             message_keys: Vec::new(),
         };

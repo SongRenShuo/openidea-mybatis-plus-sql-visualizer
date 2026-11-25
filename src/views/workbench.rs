@@ -906,13 +906,12 @@ fn escape_attr(text: &str) -> String {
 // Tests
 // ---------------------------------------------------------------------------
 
-/// Serialises tests that read or write the process-wide model. `commands`'
-/// `open-workbench` tests set it too; without one shared lock a parallel
-/// `views::workbench` test observes their state instead of its own.
+/// Serialises tests that read or write the process-wide model: the `commands`
+/// tests load logs and open the workbench too, and one lock per panel keeps a
+/// parallel test from observing the other's state.
 #[cfg(test)]
 pub(crate) fn test_store_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    super::test_state_lock()
 }
 
 #[cfg(test)]

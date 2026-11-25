@@ -5,3 +5,12 @@
 pub mod icons;
 pub mod log_panel;
 pub mod workbench;
+
+/// Serialises the tests of every panel: the row stores and the workbench model
+/// are process-wide, so a test in `commands` (loading a log, opening the
+/// workbench) would otherwise be observed by a parallel `views` test.
+#[cfg(test)]
+pub(crate) fn test_state_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
