@@ -394,6 +394,100 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "The line is too long to parse.",
         "行文本过长，未解析。",
     ),
+    // SQL log panel tabs (lane L22, docs/registration/L22.md).
+    ("view.logs.tab.logs", "SQL Logs", "SQL 日志"),
+    ("view.logs.tab.log_to_sql", "Log → SQL", "日志 → SQL"),
+    ("view.logs.tab.sql_to_java", "SQL → Java", "SQL → Java"),
+    ("view.logs.tab.history", "SQL History", "SQL 历史"),
+    (
+        "view.logs.tab.log_to_sql.raw",
+        "Original SQL (placeholder form)",
+        "原始 SQL（? 占位）",
+    ),
+    (
+        "view.logs.tab.log_to_sql.params",
+        "Parameters (in order)",
+        "参数（按顺序）",
+    ),
+    (
+        "view.logs.tab.log_to_sql.restored",
+        "Restored SQL",
+        "还原后的 SQL",
+    ),
+    (
+        "view.logs.tab.log_to_sql.empty",
+        "Select a row in the \"SQL Logs\" tab first (with none selected, the last statement is shown).",
+        "先在「SQL 日志」页签选一行（未选中时显示最后一条）。",
+    ),
+    ("view.logs.tab.log_to_sql.copy", "Copy SQL", "复制 SQL"),
+    (
+        "view.logs.tab.log_to_sql.send",
+        "Send to Workbench",
+        "发送到工作台",
+    ),
+    (
+        "view.logs.tab.sql_to_java.input",
+        "Paste a single SELECT statement",
+        "粘贴单条 SELECT 语句",
+    ),
+    (
+        "view.logs.tab.sql_to_java.entity",
+        "Entity class name (e.g. User)",
+        "实体类名（如 User）",
+    ),
+    ("view.logs.tab.sql_to_java.run", "Generate", "转换"),
+    ("view.logs.tab.sql_to_java.copy", "Copy Code", "复制代码"),
+    (
+        "view.logs.tab.sql_to_java.empty",
+        "Paste a SELECT statement, then click Generate.",
+        "输入 SELECT 语句后点「转换」。",
+    ),
+    (
+        "view.logs.tab.sql_to_java.params",
+        "Method parameters (in order)",
+        "方法参数（按顺序）",
+    ),
+    (
+        "view.logs.tab.sql_to_java.reason",
+        "No code generated",
+        "未生成代码",
+    ),
+    (
+        "view.logs.tab.sql_to_java.output",
+        "Generated code",
+        "生成的代码",
+    ),
+    (
+        "view.logs.tab.history.keyword",
+        "Search the captured log buffer…",
+        "搜索已捕获的日志缓冲区…",
+    ),
+    ("view.logs.tab.history.search", "Search", "搜索"),
+    (
+        "view.logs.tab.history.empty",
+        "Type a keyword to search the captured log buffer.",
+        "输入关键字搜索已捕获的日志缓冲区。",
+    ),
+    (
+        "view.logs.tab.history.no_match",
+        "No matching lines.",
+        "没有匹配的行。",
+    ),
+    ("view.logs.tab.history.count_suffix", "matches", "条命中"),
+    ("view.logs.tab.history.source", "Source", "来源"),
+    (
+        "view.logs.tab.history.truncated",
+        "Only the first matches are listed.",
+        "只列出前若干条命中。",
+    ),
+    ("view.logs.tab.confidence_prefix", "Confidence", "置信度"),
+    ("view.logs.tab.confidence.exact", "Exact", "精确"),
+    ("view.logs.tab.confidence.partial", "Partial", "部分"),
+    (
+        "view.logs.tab.confidence.unresolved",
+        "Unresolved",
+        "未解析",
+    ),
 ];
 
 /// Localised text for `key` in the IDE's current UI language.

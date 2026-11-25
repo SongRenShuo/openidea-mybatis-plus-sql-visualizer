@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use crate::commands::common;
 use crate::core::log::{
     DuplicateGroup, EntryClass, LogAnalysis, LogEntry, NPlusOneGroup, ParseOptions, parse,
+    restore_rendered,
 };
 use crate::i18n::t;
 use crate::settings;
@@ -494,6 +495,52 @@ struct Store {
     /// Once the page sends a filter, its `dedupe` choice wins over the setting.
     filter_touched: bool,
     paused: bool,
+    /// Line the "Log → SQL" tab restores (the page's selection; `None` means
+    /// "last statement"), kept so a later state push does not drop the tab.
+    log_to_sql_line: Option<usize>,
+    /// Last "SQL → Java" conversion, carried in `tabs.sqlToJava`.
+    sql_to_java: SqlToJavaTab,
+    /// Last history search over the buffered log text, carried in
+    /// `tabs.history`.
+    history: HistoryTab,
+}
+
+/// Result of one "SQL → Java" conversion (the tab keeps it across pushes).
+#[derive(Debug, Clone, Default, PartialEq)]
+struct SqlToJavaTab {
+    /// Generated code; `None` for `unresolved` and before the first run.
+    code: Option<String>,
+    /// `exact` / `partial` / `unresolved`; empty before the first run.
+    confidence: String,
+    /// Why no code was produced (message keys, one per line).
+    reason: String,
+    /// Java identifiers the generated chain expects, in order.
+    params: Vec<String>,
+    /// False until the page asks for a conversion.
+    ran: bool,
+}
+
+/// One line the history search matched, enriched from the parsed entries.
+#[derive(Debug, Clone, PartialEq)]
+struct HistoryMatch {
+    /// 1-based line number in the buffered log text.
+    line: usize,
+    time: String,
+    /// Restored SQL of that line when it is a parsed statement (else empty).
+    sql: String,
+    /// The matched log line, verbatim.
+    text: String,
+    has_sql: bool,
+}
+
+/// Result of one history search.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct HistoryTab {
+    keyword: String,
+    matches: Vec<HistoryMatch>,
+    total: usize,
+    truncated: bool,
+    ran: bool,
 }
 
 impl Default for Store {
@@ -505,6 +552,9 @@ impl Default for Store {
             filter: Filter::default(),
             filter_touched: false,
             paused: false,
+            log_to_sql_line: None,
+            sql_to_java: SqlToJavaTab::default(),
+            history: HistoryTab::default(),
         }
     }
 }
@@ -550,12 +600,16 @@ pub fn append_text(text: &str) {
     state.dirty = true;
 }
 
-/// Drops the buffered text and the derived groups (panel Clear button).
+/// Drops the buffered text and the derived groups (panel Clear button). The
+/// history tab searched that buffer, so its result goes too; the "SQL → Java"
+/// result does not depend on the log and survives.
 pub fn clear() {
     let mut state = store();
     state.text.clear();
     state.analysis = empty_analysis();
     state.dirty = false;
+    state.log_to_sql_line = None;
+    state.history = HistoryTab::default();
 }
 
 /// Whether live refresh is paused (rows keep accumulating meanwhile).
@@ -681,6 +735,9 @@ fn build_state() -> Value {
 
     let console_lines = state.text.lines().count() as u64;
     let paused = state.paused;
+    let log_to_sql = log_to_sql_payload(&state.analysis, state.log_to_sql_line);
+    let sql_to_java = sql_to_java_state(&state.sql_to_java);
+    let history = history_state(&state.history);
     drop(state);
 
     let stats = crate::capture::bridge::Stats::current();
@@ -688,6 +745,11 @@ fn build_state() -> Value {
     json!({
         "op": "state",
         "rows": rows_json,
+        "tabs": {
+            "logToSql": log_to_sql,
+            "sqlToJava": sql_to_java,
+            "history": history,
+        },
         "filter": {
             "types": filter.types.selected_tokens(),
             "types_mode": filter.types.mode(),
@@ -721,6 +783,232 @@ fn build_state() -> Value {
 pub fn push_state() -> Result<(), Error> {
     let state = build_state();
     host::post_view_message(VIEW_ID, &state.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Tab payloads (lane L22, docs/registration/L22.md)
+// ---------------------------------------------------------------------------
+
+/// Matches one history search returns (the handler's own default).
+const HISTORY_LIMIT: usize = 20;
+
+/// `tabs.logToSql`: the selected statement (or the last one when nothing is
+/// selected) in `?` form, its rendered parameters and the executable result.
+fn log_to_sql_payload(analysis: &LogAnalysis, line: Option<usize>) -> Value {
+    let entry = line
+        .and_then(|line| analysis.entries.iter().find(|entry| entry.line_no == line))
+        .filter(|entry| entry.has_sql())
+        .or_else(|| analysis.entries.iter().rev().find(|entry| entry.has_sql()));
+    let Some(entry) = entry else {
+        return json!({
+            "empty": true,
+            "line": null,
+            "rawSql": "",
+            "params": [],
+            "restored": "",
+            "confidence": "",
+        });
+    };
+    json!({
+        "empty": false,
+        "line": entry.line_no,
+        "rawSql": entry.raw_sql,
+        "params": entry.params,
+        "restored": restore_rendered(&entry.raw_sql, &entry.params),
+        "confidence": entry.confidence,
+    })
+}
+
+/// `tabs.sqlToJava`: the last conversion (absent until the page asks).
+fn sql_to_java_state(tab: &SqlToJavaTab) -> Value {
+    json!({
+        "ran": tab.ran,
+        "code": tab.code,
+        "confidence": tab.confidence,
+        "reason": tab.reason,
+        "params": tab.params,
+    })
+}
+
+/// `tabs.history`: the last search over the buffered log text.
+fn history_state(tab: &HistoryTab) -> Value {
+    let matches: Vec<Value> = tab
+        .matches
+        .iter()
+        .map(|item| {
+            json!({
+                "line": item.line,
+                "time": item.time,
+                "sql": item.sql,
+                "text": item.text,
+                "has_sql": item.has_sql,
+            })
+        })
+        .collect();
+    json!({
+        "ran": tab.ran,
+        "keyword": tab.keyword,
+        "total": tab.total,
+        "truncated": tab.truncated,
+        "matches": matches,
+    })
+}
+
+/// Runs the `sqlv_reverse_sql` handler for the page and keeps the result.
+fn run_sql_to_java(sql: &str, entity: &str) {
+    let sql = sql.trim();
+    if sql.is_empty() {
+        store().sql_to_java = SqlToJavaTab::default();
+        return;
+    }
+    let arguments = json!({ "sql": sql, "entity": entity }).to_string();
+    let raw = crate::mcp::handlers::reverse_sql::run(&arguments);
+    store().sql_to_java = sql_to_java_tab(&raw);
+}
+
+/// The tab result of one handler envelope. `unresolved` keeps no code and
+/// reports why; the confidence is passed through, never upgraded.
+fn sql_to_java_tab(raw: &str) -> SqlToJavaTab {
+    let value: Value = serde_json::from_str(raw).unwrap_or(Value::Null);
+    if value.get("ok").and_then(Value::as_bool) != Some(true) {
+        return SqlToJavaTab {
+            ran: true,
+            code: None,
+            confidence: "unresolved".to_string(),
+            reason: value
+                .pointer("/error/message_key")
+                .and_then(Value::as_str)
+                .unwrap_or("mcp.error.unknown_tool")
+                .to_string(),
+            params: Vec::new(),
+        };
+    }
+    let data = &value["data"];
+    let confidence = value
+        .get("confidence")
+        .and_then(Value::as_str)
+        .unwrap_or("unresolved")
+        .to_string();
+    let code = data.get("code").and_then(Value::as_str).map(str::to_string);
+    let reason = if code.is_some() {
+        String::new()
+    } else {
+        reason_lines(data)
+    };
+    let params = data
+        .get("params")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    SqlToJavaTab {
+        code,
+        confidence,
+        reason,
+        params,
+        ran: true,
+    }
+}
+
+/// `unresolved[]` of a generator result, one line per entry. A key without a
+/// translation stays visible as the key, the same contract the workbench uses.
+fn reason_lines(data: &Value) -> String {
+    data.get("unresolved")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let key = item
+                        .get("message_key")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    let detail = item.get("detail").cloned().unwrap_or(Value::Null);
+                    let has_detail = detail.as_object().is_some_and(|map| !map.is_empty());
+                    if has_detail {
+                        format!("{} {}", t(key), detail)
+                    } else {
+                        t(key)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
+/// Runs the `sqlv_history_search` handler over the buffered log text. This
+/// build keeps no persisted history, so the search covers exactly what the
+/// panel has captured (stated in `docs/LIMITS.md`).
+fn run_history(keyword: &str) {
+    let keyword = keyword.trim();
+    let text = store().text.clone();
+    if keyword.is_empty() {
+        store().history = HistoryTab::default();
+        return;
+    }
+    let mut tab = HistoryTab {
+        keyword: keyword.to_string(),
+        ran: true,
+        ..HistoryTab::default()
+    };
+    if text.trim().is_empty() {
+        store().history = tab;
+        return;
+    }
+    let arguments = json!({ "text": text, "query": keyword, "limit": HISTORY_LIMIT }).to_string();
+    let raw = crate::mcp::handlers::history_search::run(&arguments);
+    let value: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+    if value.get("ok").and_then(Value::as_bool) == Some(true) {
+        let data = &value["data"];
+        tab.total = data
+            .get("total_matches")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        tab.truncated = data
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let analysis = snapshot();
+        tab.matches = data
+            .get("matches")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| history_match(item, &analysis))
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+    store().history = tab;
+}
+
+/// One handler match enriched with the parsed entry that owns the line.
+fn history_match(item: &Value, analysis: &LogAnalysis) -> HistoryMatch {
+    let line = item.get("line_no").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let entry = analysis.entries.iter().find(|entry| entry.line_no == line);
+    HistoryMatch {
+        line,
+        time: entry
+            .and_then(|entry| entry.timestamp_ms)
+            .map(format_epoch_ms)
+            .unwrap_or_else(|| "-".to_string()),
+        sql: entry
+            .map(|entry| truncate_chars(&entry.sql, SQL_DISPLAY_CHARS))
+            .unwrap_or_default(),
+        text: item
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        has_sql: entry.is_some_and(|entry| entry.has_sql()),
+    }
 }
 
 fn labels_json() -> Value {
@@ -768,6 +1056,36 @@ fn labels_json() -> Value {
         "typeDelete": t("view.logs.type.delete"),
         "typeCreate": t("view.logs.type.create"),
         "typeDrop": t("view.logs.type.drop"),
+        // Tabs (lane L22).
+        "tabLogs": t("view.logs.tab.logs"),
+        "tabLogToSql": t("view.logs.tab.log_to_sql"),
+        "tabSqlToJava": t("view.logs.tab.sql_to_java"),
+        "tabHistory": t("view.logs.tab.history"),
+        "tabLogToSqlRaw": t("view.logs.tab.log_to_sql.raw"),
+        "tabLogToSqlParams": t("view.logs.tab.log_to_sql.params"),
+        "tabLogToSqlRestored": t("view.logs.tab.log_to_sql.restored"),
+        "tabLogToSqlEmpty": t("view.logs.tab.log_to_sql.empty"),
+        "tabLogToSqlCopy": t("view.logs.tab.log_to_sql.copy"),
+        "tabLogToSqlSend": t("view.logs.tab.log_to_sql.send"),
+        "tabSqlToJavaInput": t("view.logs.tab.sql_to_java.input"),
+        "tabSqlToJavaEntity": t("view.logs.tab.sql_to_java.entity"),
+        "tabSqlToJavaRun": t("view.logs.tab.sql_to_java.run"),
+        "tabSqlToJavaCopy": t("view.logs.tab.sql_to_java.copy"),
+        "tabSqlToJavaEmpty": t("view.logs.tab.sql_to_java.empty"),
+        "tabSqlToJavaParams": t("view.logs.tab.sql_to_java.params"),
+        "tabSqlToJavaReason": t("view.logs.tab.sql_to_java.reason"),
+        "tabSqlToJavaOutput": t("view.logs.tab.sql_to_java.output"),
+        "tabHistoryKeyword": t("view.logs.tab.history.keyword"),
+        "tabHistorySearch": t("view.logs.tab.history.search"),
+        "tabHistoryEmpty": t("view.logs.tab.history.empty"),
+        "tabHistoryNoMatch": t("view.logs.tab.history.no_match"),
+        "tabHistoryCountSuffix": t("view.logs.tab.history.count_suffix"),
+        "tabHistorySource": t("view.logs.tab.history.source"),
+        "tabHistoryTruncated": t("view.logs.tab.history.truncated"),
+        "tabConfidencePrefix": t("view.logs.tab.confidence_prefix"),
+        "tabConfidenceExact": t("view.logs.tab.confidence.exact"),
+        "tabConfidencePartial": t("view.logs.tab.confidence.partial"),
+        "tabConfidenceUnresolved": t("view.logs.tab.confidence.unresolved"),
     })
 }
 
@@ -886,6 +1204,72 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
                 if !sql.is_empty() {
                     crate::commands::open_workbench::run(ctx, Some(&sql))?;
                 }
+            }
+        }
+        // Tab strip (lane L22): accepted for symmetry only. Switching tabs is
+        // DOM-only on the page, so this pushes nothing back.
+        "tab" => {}
+        // "Log → SQL" tab: remember which line the page selected and re-push
+        // the tab payload (the page keeps its list, so nothing is lost).
+        "log-to-sql" => {
+            store().log_to_sql_line = message_line(&message);
+            let _ = push_state();
+        }
+        // "SQL → Java" tab: the input comes from the page, the conversion is
+        // the `sqlv_reverse_sql` handler.
+        "sql-to-java" => {
+            // `text` is the page's field; `sql` stays accepted for direct calls.
+            let sql = message
+                .get("text")
+                .or_else(|| message.get("sql"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let entity = message.get("entity").and_then(Value::as_str).unwrap_or("");
+            run_sql_to_java(sql, entity);
+            let _ = push_state();
+        }
+        // "SQL history" tab: the handler searches the buffered log text.
+        "history" => {
+            let keyword = message.get("keyword").and_then(Value::as_str).unwrap_or("");
+            run_history(keyword);
+            let _ = push_state();
+        }
+        // A history row: parsed statements open the workbench; any other
+        // matched line is copied verbatim (no silently dead click).
+        "history-open" => {
+            if let Some(line) = message_line(&message) {
+                match sql_of_line(line) {
+                    Some(sql) => {
+                        crate::commands::open_workbench::run(ctx, Some(&sql))?;
+                    }
+                    None => {
+                        // Not a parsed statement: hand the line over verbatim,
+                        // preferring the text the search matched.
+                        let mut text = store()
+                            .history
+                            .matches
+                            .iter()
+                            .find(|item| item.line == line)
+                            .map(|item| item.text.clone());
+                        if text.is_none() {
+                            text = store()
+                                .text
+                                .lines()
+                                .nth(line.saturating_sub(1))
+                                .map(str::to_string);
+                        }
+                        if let Some(text) = text {
+                            host::copy_to_clipboard(&text)?;
+                        }
+                    }
+                }
+            }
+        }
+        // "SQL → Java" copy: the page cannot reach the clipboard itself.
+        "copy-code" => {
+            let code = store().sql_to_java.code.clone();
+            if let Some(code) = code {
+                host::copy_to_clipboard(&code)?;
             }
         }
         _ => {}
@@ -1509,6 +1893,213 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             view.status.is_some(),
             "the paused state shows in the status"
         );
+    }
+
+    // Tabs (lane L22) -----------------------------------------------------
+
+    fn line_of(kind: EntryClass) -> usize {
+        snapshot()
+            .entries
+            .iter()
+            .find(|entry| entry.class == kind)
+            .unwrap()
+            .line_no
+    }
+
+    #[test]
+    fn log_to_sql_message_restores_the_selected_line() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        let line = line_of(EntryClass::Select);
+        handle_panel_message(&host, &format!("{{\"op\":\"log-to-sql\",\"line\":{line}}}")).unwrap();
+        let tab = &state_of(&host)["tabs"]["logToSql"];
+        assert_eq!(tab["line"], json!(line));
+        assert_eq!(tab["empty"], false);
+        assert_eq!(tab["rawSql"], "SELECT id FROM users WHERE id = ?");
+        assert_eq!(tab["params"], json!(["1"]));
+        assert_eq!(tab["restored"], "SELECT id FROM users WHERE id = 1");
+        assert_eq!(tab["confidence"], "exact");
+    }
+
+    #[test]
+    fn log_to_sql_falls_back_to_the_last_statement() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        let last = line_of(EntryClass::Update);
+        handle_panel_message(&host, "{\"op\":\"log-to-sql\"}").unwrap();
+        let tab = &state_of(&host)["tabs"]["logToSql"];
+        assert_eq!(
+            tab["line"],
+            json!(last),
+            "no selection shows the last statement"
+        );
+        assert!(
+            tab["restored"]
+                .as_str()
+                .is_some_and(|sql| sql.contains("= 3")),
+            "{tab}"
+        );
+    }
+
+    #[test]
+    fn log_to_sql_is_empty_when_nothing_was_captured() {
+        let (host, _guard) = test_host();
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let tab = &state_of(&host)["tabs"]["logToSql"];
+        assert_eq!(tab["empty"], true);
+        assert_eq!(tab["line"], Value::Null);
+        assert_eq!(tab["restored"], "");
+    }
+
+    #[test]
+    fn sql_to_java_message_reports_exact_and_unresolved_code() {
+        let (host, _guard) = test_host();
+        // `text` is the field the page sends.
+        let exact = r#"{"op":"sql-to-java","text":"SELECT id, name FROM user WHERE id = ?","entity":"User"}"#;
+        handle_panel_message(&host, exact).unwrap();
+        let tab = state_of(&host)["tabs"]["sqlToJava"].clone();
+        assert_eq!(tab["ran"], true);
+        assert_eq!(tab["confidence"], "exact");
+        assert!(
+            tab["code"]
+                .as_str()
+                .is_some_and(|code| code.contains("LambdaQueryWrapper<User>")),
+            "{tab}"
+        );
+        assert_eq!(tab["params"], json!(["param1"]));
+        assert_eq!(tab["reason"], "");
+
+        // An empty entity name cannot produce code: unresolved, no code, a reason.
+        // (`sql` stays accepted as an alias of `text`.)
+        let unresolved =
+            r#"{"op":"sql-to-java","sql":"SELECT id, name FROM user WHERE id = ?","entity":""}"#;
+        handle_panel_message(&host, unresolved).unwrap();
+        let tab = state_of(&host)["tabs"]["sqlToJava"].clone();
+        assert_eq!(tab["confidence"], "unresolved");
+        assert_eq!(tab["code"], Value::Null, "unresolved ships no code");
+        assert!(
+            tab["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("entity_required")),
+            "{tab}"
+        );
+    }
+
+    #[test]
+    fn history_message_lists_matches_and_reports_empty_results() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+
+        handle_panel_message(&host, "{\"op\":\"history\",\"keyword\":\"users\"}").unwrap();
+        let tab = state_of(&host)["tabs"]["history"].clone();
+        assert_eq!(tab["ran"], true);
+        assert_eq!(tab["keyword"], "users");
+        assert_eq!(tab["total"], 2, "{tab}");
+        let matches = tab["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 2);
+        assert!(matches.iter().all(|item| item["has_sql"] == true));
+        assert!(
+            matches[0]["sql"]
+                .as_str()
+                .is_some_and(|sql| sql.contains("SELECT id FROM users")),
+            "{matches:?}"
+        );
+        assert!(matches[0]["time"].as_str().is_some());
+
+        // No match is a result, not an error.
+        handle_panel_message(&host, "{\"op\":\"history\",\"keyword\":\"no-such-line\"}").unwrap();
+        let tab = state_of(&host)["tabs"]["history"].clone();
+        assert_eq!(tab["ran"], true);
+        assert_eq!(tab["total"], 0);
+        assert!(tab["matches"].as_array().unwrap().is_empty());
+
+        // An empty keyword clears the result instead of calling the handler.
+        handle_panel_message(&host, "{\"op\":\"history\",\"keyword\":\"\"}").unwrap();
+        let tab = state_of(&host)["tabs"]["history"].clone();
+        assert_eq!(tab["ran"], false);
+    }
+
+    #[test]
+    fn history_open_reveals_the_workbench_or_copies_a_non_statement_line() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(&host, "{\"op\":\"history-open\",\"line\":1}").unwrap();
+        assert!(
+            host.revealed_views()
+                .iter()
+                .any(|view| view == crate::views::workbench::VIEW_ID),
+            "a parsed statement opens the workbench"
+        );
+
+        // Line 2 is the Parameters row: not a statement, copied verbatim.
+        handle_panel_message(&host, "{\"op\":\"history-open\",\"line\":2}").unwrap();
+        assert!(
+            host.clipboard()
+                .is_some_and(|text| text.contains("Parameters")),
+            "{:?}",
+            host.clipboard()
+        );
+    }
+
+    #[test]
+    fn tab_message_is_accepted_without_pushing_state() {
+        // Switching tabs is DOM-only: the host never answers `tab`, so the
+        // page keeps the log list (and its scroll position) untouched.
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let before = host.view_messages().len();
+        handle_panel_message(&host, "{\"op\":\"tab\",\"tab\":\"history\"}").unwrap();
+        assert_eq!(host.view_messages().len(), before, "tab pushes nothing");
+        handle_panel_message(&host, "{\"op\":\"tab\"}").unwrap();
+        assert_eq!(host.view_messages().len(), before);
+    }
+
+    #[test]
+    fn the_page_has_four_tabs_and_keeps_the_log_list() {
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        for id in [
+            "tab-logs",
+            "tab-logToSql",
+            "tab-sqlToJava",
+            "tab-history",
+            "panelLogs",
+            "panelLogToSql",
+            "panelSqlToJava",
+            "panelHistory",
+        ] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        // The log tab's DOM (list + filters + status) must stay in place.
+        for id in ["list", "kw", "typeBtn", "statusLeft", "pauseBtn"] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        // Switching is `hidden` toggling only, and a state push with unchanged
+        // rows must not rebuild the list.
+        assert!(
+            page.contains("panel.hidden = !on"),
+            "tab switch hides panels"
+        );
+        assert!(page.contains("rowsSig"), "rows are signature guarded");
+        assert!(page.contains("event.key === 'Tab'"), "Ctrl+Tab cycling");
+        assert!(page.contains("op: 'log-to-sql'"), "log-to-sql op");
+        assert!(page.contains("op: 'sql-to-java'"), "sql-to-java op");
+        assert!(page.contains("op: 'history'"), "history op");
+
+        let labels = labels_json();
+        for key in [
+            "tabLogs",
+            "tabLogToSql",
+            "tabSqlToJava",
+            "tabHistory",
+            "tabLogToSqlEmpty",
+            "tabSqlToJavaEmpty",
+            "tabHistoryEmpty",
+            "tabConfidenceUnresolved",
+        ] {
+            assert!(labels.get(key).is_some(), "missing label {key}");
+        }
     }
 
     // Helpers -------------------------------------------------------------

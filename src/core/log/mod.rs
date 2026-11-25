@@ -41,3 +41,11 @@ pub use model::{
     ParseOptions, UnparsedLine, message_keys,
 };
 pub use parser::{Parser, classify_sql, parse};
+
+/// Executable form of a statement whose parameters were already rendered
+/// ([`LogEntry::params`]): the rendered literals replace the first `?`
+/// placeholders, in order. Shares the placeholder scanner with the parser's own
+/// restoration, so quotes are never applied twice.
+pub fn restore_rendered(sql: &str, rendered_params: &[String]) -> String {
+    restore::restore_literals(sql, rendered_params).sql
+}
