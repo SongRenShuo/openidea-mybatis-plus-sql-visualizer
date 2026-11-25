@@ -6,6 +6,7 @@
   "MyBatis SQL: Generate CRUD": "MyBatis SQL：生成 CRUD",
   "MyBatis SQL: Rollback Plan": "MyBatis SQL：回滚计划",
   "MyBatis SQL: Render SQL Log": "MyBatis SQL：还原 SQL 日志",
+  "MyBatis SQL: Preview SQL": "MyBatis SQL：预览 SQL",
   "MyBatis SQL Visualizer": "MyBatis SQL Visualizer",
   "UI and Actions": "界面与操作",
   "SQL Preview": "SQL 预览",

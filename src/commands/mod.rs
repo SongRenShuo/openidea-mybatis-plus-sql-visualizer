@@ -20,6 +20,7 @@ pub mod index_stats;
 pub mod open_logs;
 pub mod open_workbench;
 pub mod perf_advice;
+pub mod preview_sql;
 pub mod render_log;
 pub mod render_xml;
 pub mod rollback_plan;
