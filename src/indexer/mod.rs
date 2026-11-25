@@ -22,14 +22,22 @@
 //!
 //! Edges are name-level: a reference whose target is absent still resolves once
 //! the target document is indexed, which the host does on its own.
+//!
+//! ## Method locations
+//!
+//! [`index_java`] answers "what does this mapper declare" for the graph;
+//! [`JavaMethodIndex`] answers "where is this method" for a log row or a
+//! statement id. Both read text, neither needs PSI.
 
 pub mod graph;
 mod java;
+mod java_methods;
 pub(crate) mod scan;
 mod xml;
 
 pub use graph::MapperGraph;
 pub use java::{JavaFacts, JavaMethod, JavaProvider, JavaSql, TypeKind, index_java};
+pub use java_methods::{JavaIndexBudget, JavaMethodIndex, JavaMethodLocation};
 pub use xml::{XmlFacts, XmlResultMap, XmlStatement, index_xml};
 
 use openidea_plugin::Range;

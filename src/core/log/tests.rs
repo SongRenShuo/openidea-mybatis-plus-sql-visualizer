@@ -891,3 +891,163 @@ fn unfinished_jdbc_bracket_is_kept_as_partial() {
     );
     assert!(entry.raw_line.is_some());
 }
+
+// ---------------------------------------------------------------------------
+// Log source: logger-derived class/method, thread, correlation id
+// ---------------------------------------------------------------------------
+
+fn parse_sourced(lines: &[&str]) -> ParsedLog {
+    parse_with_sources(&lines.join("\n"), &ParseOptions::default())
+}
+
+#[test]
+fn mybatis_logger_name_yields_class_and_method_per_entry() {
+    let parsed = parse_sourced(&[
+        "2026-11-25 21:00:01.001 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.mapper.UserMapper.selectById : ==>  Preparing: SELECT * FROM user WHERE id = ?",
+        "2026-11-25 21:00:01.002 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.mapper.UserMapper.selectById : ==> Parameters: 7(Long)",
+        "2026-11-25 21:00:01.003 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.mapper.UserMapper.selectById : <==      Total: 1",
+        "2026-11-25 21:00:02.000 DEBUG 4242 --- [nio-8080-exec-2] c.e.m.order.OrderMapper.listAll : ==>  Preparing: SELECT * FROM orders",
+        "2026-11-25 21:00:02.001 DEBUG 4242 --- [nio-8080-exec-2] c.e.m.order.OrderMapper.listAll : <==      Total: 3",
+    ]);
+    assert_eq!(parsed.analysis.entries.len(), 2);
+
+    let first = parsed
+        .sources
+        .get(1)
+        .expect("source of the first statement");
+    let source = first.source.as_ref().expect("logger source");
+    assert_eq!(source.class_name, "c.e.m.mapper.UserMapper");
+    assert_eq!(source.class_simple, "UserMapper");
+    assert_eq!(source.method, "selectById");
+    assert_eq!(source.key(), "c.e.m.mapper.UserMapper#selectById");
+    assert_eq!(first.thread.as_deref(), Some("nio-8080-exec-1"));
+    assert!(first.request_id.is_none());
+
+    let second = parsed
+        .sources
+        .get(4)
+        .expect("source of the second statement");
+    let source = second.source.as_ref().expect("logger source");
+    assert_eq!(source.class_simple, "OrderMapper");
+    assert_eq!(source.method, "listAll");
+    assert_eq!(second.thread.as_deref(), Some("nio-8080-exec-2"));
+    assert_eq!(parsed.sources.len(), 2, "只存有来源的行");
+}
+
+#[test]
+fn correlation_ids_are_read_in_every_documented_shape() {
+    let shapes = [
+        (
+            "2026-11-25 21:00:01.001 INFO 4242 --- [http-nio-8080-exec-3] [traceId=4bf92f3577b34da6] c.e.m.UserMapper.selectById : ==>  Preparing: SELECT 1",
+            "4bf92f3577b34da6",
+        ),
+        (
+            "2026-11-25 21:00:01.001 INFO 4242 --- [http-nio-8080-exec-3] [requestId: r-42] c.e.m.UserMapper.selectById : ==>  Preparing: SELECT 1",
+            "r-42",
+        ),
+        (
+            "2026-11-25 21:00:01.001 INFO 4242 --- [http-nio-8080-exec-3] [X-Request-Id='abc-9'] c.e.m.UserMapper.selectById : ==>  Preparing: SELECT 1",
+            "abc-9",
+        ),
+        (
+            "2026-11-25 21:00:01.001 INFO 4242 --- [http-nio-8080-exec-3] [traceid=a.b.c] c.e.m.UserMapper.selectById : ==>  Preparing: SELECT 1",
+            "a.b.c",
+        ),
+    ];
+    for (line, expected) in shapes {
+        let parsed = parse_sourced(&[line]);
+        let line_source = parsed.sources.get(1).expect("provenance of the row");
+        assert_eq!(line_source.request_id.as_deref(), Some(expected), "{line}");
+        assert!(
+            line_source.source.is_some(),
+            "logger source survives the MDC bracket: {line}"
+        );
+        assert_eq!(
+            line_source.thread.as_deref(),
+            Some("http-nio-8080-exec-3"),
+            "{line}"
+        );
+    }
+}
+
+#[test]
+fn a_sql_predicate_is_not_a_correlation_id() {
+    let parsed = parse_sourced(&[
+        "2026-11-25 21:00:01.001 DEBUG 4242 --- [main] c.e.UserMapper.selectById : ==>  Preparing: SELECT * FROM t WHERE request_id = 'abc' AND traceId=?",
+        "2026-11-25 21:00:01.002 DEBUG 4242 --- [main] c.e.UserMapper.selectById : ==> Parameters: 1(Long), 2(Long)",
+    ]);
+    let line_source = parsed.sources.get(1).expect("provenance of the row");
+    assert!(
+        line_source.request_id.is_none(),
+        "SQL 谓词里的 request_id/traceId 不是请求来源"
+    );
+    assert_eq!(line_source.source.as_ref().unwrap().method, "selectById");
+}
+
+#[test]
+fn non_mybatis_families_state_no_statement_source() {
+    let parsed = parse_sourced(&[
+        "Hibernate: select id from users where id=?",
+        "2026-11-25 21:00:01.002 DEBUG 4242 --- [main] org.springframework.jdbc.core.JdbcTemplate : Executing prepared SQL statement [select id from users]",
+        "2026-11-25 21:00:01.003  INFO 4242 --- [pool-2-thread-1] p6spy : #1725000000000 | elapsed 5 ms | exec | INSERT INTO user_order (user_id) VALUES (?)",
+    ]);
+    assert_eq!(parsed.analysis.entries.len(), 3);
+    for entry in &parsed.analysis.entries {
+        assert!(
+            parsed.sources.source(entry.line_no).is_none(),
+            "logger 名不是 statement id，取不到来源：line {}",
+            entry.line_no
+        );
+    }
+    assert!(
+        parsed.sources.get(1).is_none(),
+        "无前缀的 Hibernate 行连线程都没有"
+    );
+    assert_eq!(
+        parsed.sources.get(2).unwrap().thread.as_deref(),
+        Some("main"),
+        "线程仍可读"
+    );
+    assert_eq!(
+        parsed.sources.get(3).unwrap().thread.as_deref(),
+        Some("pool-2-thread-1")
+    );
+}
+
+#[test]
+fn a_row_without_provenance_is_absent_rather_than_guessed() {
+    let parsed = parse_sourced(&["==>  Preparing: SELECT 1"]);
+    assert_eq!(parsed.analysis.entries.len(), 1);
+    assert!(parsed.sources.is_empty());
+    assert!(parsed.sources.get(1).is_none());
+}
+
+#[test]
+fn thread_falls_back_to_the_keyword_bounded_bracket() {
+    let parsed = parse_sourced(&[
+        "2026-11-25 21:00:01.001 INFO 4242 [exec-2] c.e.UserMapper.selectById : ==>  Preparing: SELECT 1",
+    ]);
+    assert_eq!(
+        parsed.sources.get(1).unwrap().thread.as_deref(),
+        Some("exec-2")
+    );
+}
+
+#[test]
+fn by_line_keeps_rows_that_are_not_analysis_entries() {
+    let text = "\
+2026-11-25 21:00:01.001 DEBUG 4242 --- [main] c.e.m.UserMapper.selectById : ==>  Preparing: SELECT 1
+2026-11-25 21:00:01.002 DEBUG 4242 --- [main] c.e.m.UserMapper.selectById : <==      Total: 1";
+    let single = parse_with_sources(text, &ParseOptions::default()).sources;
+    let pairs: Vec<(usize, LineSource)> = text
+        .lines()
+        .enumerate()
+        .map(|(index, line)| (index + 1, source_of_line(line)))
+        .collect();
+    let mapped = by_line(pairs);
+    assert_eq!(single.len(), 1, "只跟分析条目 join");
+    assert_eq!(mapped.len(), 2, "按行建索引保留 close 行");
+    assert_eq!(single.get(1), mapped.get(1));
+    assert_eq!(single.get(2), None);
+    assert!(mapped.get(2).is_some());
+}
