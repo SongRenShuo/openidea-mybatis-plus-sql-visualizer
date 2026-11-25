@@ -21,6 +21,7 @@
 //! [`pinned_sha256_hex`] before [`start`] will spawn it.
 
 pub mod lifecycle;
+pub mod proto;
 mod sha256;
 
 pub use lifecycle::{
@@ -28,6 +29,10 @@ pub use lifecycle::{
     EngineStatus, HealthMonitor, ResolvedEngine, Timeouts, dev_repo_candidates, jar_file_name,
     parse_health_version, resolve_engine_path, resolve_engine_path_with, retry_delays_ms, start,
     stop,
+};
+pub use proto::{
+    EngineError, ErrorValue, ExplainRequest, Kind, PROTOCOL_VERSION, RenderKind, RenderRequest,
+    Request, Response, SchemaRequest, Source, SourceRange,
 };
 pub use sha256::sha256_hex;
 
@@ -178,7 +183,7 @@ mod tests {
     fn the_pin_matches_the_recorded_engine_jar_digest() {
         assert_eq!(
             pinned_sha256_hex(),
-            "6aca4367e0a41bed712dc9e685bc599659faeb2d9eca9f814d7611c4c3bc13e6"
+            "00af8534603994d6cf870f59cd9dfe48d8bbc16e983ff2c3e9966e4bfd58bc33"
         );
     }
 }
