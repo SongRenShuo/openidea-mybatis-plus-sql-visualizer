@@ -58,6 +58,25 @@
     .chip:hover { background: var(--openidea-bg-hover); }
     .chip[aria-expanded="true"] { background: var(--openidea-bg-selected); border-color: var(--openidea-accent); }
     .chip svg { width: 12px; height: 12px; display: block; color: var(--openidea-fg-muted); }
+    /* Focus / muted chips in the filter row (lane L28). A focus chip is the
+       active filter and carries an × that clears it; the muted counter does the
+       same for the session's muted methods. Both stay in the left flow. */
+    .chips { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+    .fchip {
+      display: inline-flex; align-items: center; gap: 4px;
+      height: 22px; max-width: 260px; padding: 0 4px 0 8px;
+      background: var(--openidea-bg-selected); color: var(--openidea-fg-strong);
+      border: 1px solid var(--openidea-accent); border-radius: 11px;
+      font-size: 12px; white-space: nowrap;
+    }
+    .fchip .ftext { overflow: hidden; text-overflow: ellipsis; }
+    .fchip .fclose {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px; padding: 0; flex: 0 0 auto;
+      background: none; border: none; border-radius: 8px;
+      color: var(--openidea-fg-muted); cursor: pointer; font-size: 12px; line-height: 1;
+    }
+    .fchip .fclose:hover { background: var(--openidea-bg-hover); color: var(--openidea-fg); }
     .btn {
       display: inline-flex; align-items: center; gap: 4px;
       background: var(--openidea-bg-input); color: var(--openidea-fg);
@@ -155,11 +174,24 @@
     .row.sel { background: var(--openidea-bg-selected); }
     .row .bar { width: 3px; flex: 0 0 3px; }
     .row .content { flex: 1 1 auto; min-width: 0; padding: 5px 8px; }
-    .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px; color: var(--openidea-fg-muted); }
+    /* The metadata line is a plain left-to-right flow, the way the reference
+       panel draws it: #seq, time, duration, [db], (rows), ⨉N, ×N, N+1,
+       [file:line], [Class#method]. Nothing is pushed to the right — the only
+       right-aligned element of the panel is the "slow" capsule in the filter
+       row (`#slowBadge { margin-left: auto }`). */
+    .meta {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start;
+      gap: 8px; font-size: 11px; color: var(--openidea-fg-muted);
+    }
     .meta .seq { color: var(--openidea-fg-strong); font-weight: 600; font-family: var(--openidea-font-mono, monospace); }
     .meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }
     .meta .dur.hot { color: var(--openidea-warning); font-weight: 600; }
     .meta .part { white-space: nowrap; }
+    /* Provenance parts that filter on click (lane L28): the class#method and the
+       request id behave like links without losing the row's own click. */
+    .meta .focusable { cursor: pointer; }
+    .meta .focusable:hover { color: var(--openidea-link); text-decoration: underline; }
+    .meta .focusable.on { color: var(--openidea-link); font-weight: 600; }
     .sql {
       margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
       font-size: 12px; line-height: 1.4;
@@ -196,6 +228,11 @@
       color: var(--openidea-fg); padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 12px;
     }
     .ctxmenu button:hover { background: var(--openidea-bg-hover); }
+    /* A row that does not state the dimension gets a disabled item, never a
+       guessed target (lane L28). */
+    .ctxmenu button[disabled] { color: var(--openidea-fg-muted); opacity: 0.55; cursor: default; }
+    .ctxmenu button[disabled]:hover { background: none; }
+    .ctxmenu .sep { height: 1px; background: var(--openidea-border); margin: 4px 2px; }
     /* Tab strip (L24): one row of JBTabs-style cards over a 1px rule. The
        active tab is a raised page — 1px border on top/left/right, 4px top
        radius, its bottom edge merging into the strip's rule. No underline.
@@ -413,6 +450,7 @@
         </svg>
       </button>
       <label class="chk"><input type="checkbox" id="dedupe"><span id="dedupeLabel"></span></label>
+      <span id="focusChips" class="chips"></span>
       <span id="slowBadge" class="pill danger" hidden></span>
     </div>
   </div>
@@ -545,6 +583,15 @@
   </div>
 
   <div id="ctxMenu" class="ctxmenu" hidden>
+    <button type="button" data-act="jump-java"></button>
+    <button type="button" data-act="jump-xml"></button>
+    <div class="sep"></div>
+    <button type="button" data-act="focus-method"></button>
+    <button type="button" data-act="focus-request"></button>
+    <div class="sep"></div>
+    <button type="button" data-act="block-method"></button>
+    <button type="button" data-act="delete-line"></button>
+    <div class="sep"></div>
     <button type="button" data-act="copy-sql"></button>
     <button type="button" data-act="copy-time"></button>
     <button type="button" data-act="export"></button>
@@ -568,6 +615,7 @@
       var current = null;
       var selectedLine = null;
       var ctxLine = null;
+      var ctxRow = null;
       var typeMenuBuilt = false;
       // Tab strip (L22). Selection is DOM-only: no state request on switch.
       // The fifth tab (L23) is the preview workbench; it is permanent, so the
@@ -586,7 +634,10 @@
       var rowsSig = null;
       var ui = {
         types: { select: true, insert: true, update: true, delete: true, create: true, drop: true },
-        slowOnly: false, dedupe: true, matchCase: false, regex: false, keyword: ''
+        slowOnly: false, dedupe: true, matchCase: false, regex: false, keyword: '',
+        // The active focus chip ({kind, value}) or null. It rides the same
+        // `filter` op as the other filters (lane L28).
+        focus: null
       };
       var kwTimer = null;
 
@@ -622,8 +673,25 @@
         post({
           op: 'filter', types: toks, types_mode: mode,
           slow_only: ui.slowOnly, keyword: ui.keyword,
-          match_case: ui.matchCase, regex: ui.regex, dedupe: ui.dedupe
+          match_case: ui.matchCase, regex: ui.regex, dedupe: ui.dedupe,
+          focus: ui.focus
         });
+      }
+      // One chip at a time: setting a different value replaces it, the same value
+      // clears it (the reference panel's tab toggles the same way).
+      function setFocus(kind, value) {
+        if (!value) { return; }
+        if (ui.focus && ui.focus.kind === kind && ui.focus.value === value) {
+          ui.focus = null;
+        } else {
+          ui.focus = { kind: kind, value: value };
+        }
+        postFilter();
+      }
+      function clearFocus() {
+        if (!ui.focus) { return; }
+        ui.focus = null;
+        postFilter();
       }
       function scheduleFilter() {
         if (kwTimer) { clearTimeout(kwTimer); }
@@ -645,6 +713,9 @@
         ui.dedupe = f.dedupe !== false;
         ui.matchCase = !!f.match_case;
         ui.regex = !!f.regex;
+        ui.focus = (f.focus && f.focus.kind && f.focus.value)
+          ? { kind: f.focus.kind, value: f.focus.value }
+          : null;
         if (document.activeElement !== $('kw')) {
           ui.keyword = f.keyword || '';
           $('kw').value = ui.keyword;
@@ -661,6 +732,54 @@
         if (!node) { return; }
         node.setAttribute('aria-label', label || '');
         node.title = label || '';
+      }
+
+      // Focus / muted chips (lane L28) --------------------------------
+      function chipButton(label, title, onClose) {
+        var chip = document.createElement('span');
+        chip.className = 'fchip';
+        var text = document.createElement('span');
+        text.className = 'ftext';
+        text.textContent = label;
+        chip.appendChild(text);
+        var close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'fclose';
+        close.textContent = '×';
+        close.title = title || '';
+        close.setAttribute('aria-label', title || '');
+        close.addEventListener('click', function (event) {
+          event.stopPropagation();
+          onClose();
+        });
+        chip.appendChild(close);
+        return chip;
+      }
+
+      // The filter row shows what is narrowing the list: one focus chip (with
+      // an × that clears it) and the muted-method counter (same ×, clears all).
+      function renderFocusChips(state) {
+        var host = $('focusChips');
+        while (host.firstChild) { host.removeChild(host.firstChild); }
+        var focus = (state.filter || {}).focus;
+        if (focus && focus.value) {
+          var prefix = focus.kind === 'request'
+            ? (L.focusRequestPrefix || 'Request')
+            : (L.focusMethodPrefix || 'Method');
+          var label = prefix + ' · ' + focus.value;
+          var chip = chipButton(label, L.focusClear || 'Clear focus', clearFocus);
+          chip.title = label;
+          host.appendChild(chip);
+        }
+        var blocked = (state.counts || {}).blocked || 0;
+        if (blocked > 0) {
+          var muted = (L.blockedPrefix || 'Muted') + ' ' + blocked;
+          var mutedChip = chipButton(muted, L.blockedClear || '', function () {
+            post({ op: 'clear-blocked' });
+          });
+          mutedChip.title = muted;
+          host.appendChild(mutedChip);
+        }
       }
 
       function updateLabels() {
@@ -689,6 +808,12 @@
         setText($('ctxMenu').querySelector('[data-act="copy-sql"]'), L.menuCopySql);
         setText($('ctxMenu').querySelector('[data-act="copy-time"]'), L.menuCopyTime);
         setText($('ctxMenu').querySelector('[data-act="export"]'), L.menuExport);
+        setText($('ctxMenu').querySelector('[data-act="jump-java"]'), L.menuJumpJava);
+        setText($('ctxMenu').querySelector('[data-act="jump-xml"]'), L.menuJumpXml);
+        setText($('ctxMenu').querySelector('[data-act="focus-method"]'), L.menuFocusMethod);
+        setText($('ctxMenu').querySelector('[data-act="focus-request"]'), L.menuFocusRequest);
+        setText($('ctxMenu').querySelector('[data-act="delete-line"]'), L.menuDelete);
+        setText($('ctxMenu').querySelector('[data-act="block-method"]'), L.menuBlockMethod);
         setText($('empty'), L.empty);
         updateTabLabels();
         updateTypeButton();
@@ -787,6 +912,13 @@
         return el;
       }
 
+      // Last path segment, for a `[UserMapper.java:42]` part.
+      function baseName(path) {
+        if (!path) { return ''; }
+        var parts = String(path).split(/[\\/]/);
+        return parts[parts.length - 1] || path;
+      }
+
       function buildRow(row, slowThreshold) {
         var el = document.createElement('div');
         el.className = 'row';
@@ -824,8 +956,36 @@
           var n1 = makePart('badge n1', L.nPlusOne || 'N+1');
           meta.appendChild(n1);
         }
-        if (row.source) { meta.appendChild(makePart('part src', '[' + row.source + ']')); }
-        if (row.method) { meta.appendChild(makePart('part method', '[' + row.method + ']')); }
+        // Provenance (lane L28), last in the left flow: [file:line] then
+        // [Class#method], the reference panel's order. A row that stated no
+        // source simply has neither part — no placeholder.
+        if (row.jump_file && row.jump_line) {
+          meta.appendChild(makePart('part src', '[' + baseName(row.jump_file) + ':' + row.jump_line + ']'));
+        }
+        if (row.class_simple && row.method) {
+          var methodPart = makePart('part method focusable', '[' + row.class_simple + '#' + row.method + ']');
+          if (ui.focus && ui.focus.kind === 'method' && ui.focus.value === row.focus_key) {
+            methodPart.classList.add('on');
+          }
+          methodPart.title = row.focus_key || '';
+          methodPart.addEventListener('click', function (event) {
+            event.stopPropagation();
+            setFocus('method', row.focus_key);
+          });
+          meta.appendChild(methodPart);
+        }
+        if (row.request_id) {
+          var reqPart = makePart('part req focusable', '[' + row.request_id + ']');
+          if (ui.focus && ui.focus.kind === 'request' && ui.focus.value === row.request_id) {
+            reqPart.classList.add('on');
+          }
+          reqPart.title = row.request_id;
+          reqPart.addEventListener('click', function (event) {
+            event.stopPropagation();
+            setFocus('request', row.request_id);
+          });
+          meta.appendChild(reqPart);
+        }
         content.appendChild(meta);
 
         if (row.sql) {
@@ -850,7 +1010,7 @@
         el.addEventListener('contextmenu', function (event) {
           event.preventDefault();
           selectLine(row.line);
-          openCtx(event.clientX, event.clientY, row.line);
+          openCtx(event.clientX, event.clientY, row);
         });
 
         el.appendChild(bar);
@@ -979,7 +1139,11 @@
         for (var i = 0; i < rows.length; i++) {
           var r = rows[i];
           parts.push(r.line + '/' + r.seq + '/' + r.sql_type + '/' + r.category + '/' +
-            r.dedupe_count + '/' + r.group_count + '/' + (r.n_plus_one ? 1 : 0));
+            r.dedupe_count + '/' + r.group_count + '/' + (r.n_plus_one ? 1 : 0) + '/' +
+            (r.class_simple || '') + '#' + (r.method || '') + '/' +
+            (r.jump_file || '') + ':' + (r.jump_line == null ? '' : r.jump_line) + '/' +
+            (r.xml_file || '') + ':' + (r.xml_line == null ? '' : r.xml_line) + '/' +
+            (r.request_id || '') + '/' + (r.thread || ''));
         }
         return parts.join('|');
       }
@@ -1281,6 +1445,7 @@
         syncFromState(state);
         syncTypeCheckboxes();
         updateTypeButton();
+        renderFocusChips(state);
         var sig = rowsSignature(state.rows || []);
         if (sig !== rowsSig) {
           rowsSig = sig;
@@ -1306,16 +1471,32 @@
       }
 
       // Context menu --------------------------------------------------------
-      function openCtx(x, y, line) {
-        ctxLine = line;
+      // The menu acts on the row that opened it. An item whose dimension the
+      // row does not state is disabled, so the host is never asked to guess a
+      // jump target or a focus value.
+      function ctxItem(act) { return $('ctxMenu').querySelector('[data-act="' + act + '"]'); }
+      function enableItem(act, enabled) {
+        var node = ctxItem(act);
+        if (!node) { return; }
+        node.disabled = !enabled;
+        node.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+      }
+      function openCtx(x, y, row) {
+        ctxRow = row;
+        ctxLine = row ? row.line : null;
+        enableItem('jump-java', !!(row && row.jump_file));
+        enableItem('jump-xml', !!(row && row.xml_file));
+        enableItem('focus-method', !!(row && row.focus_key));
+        enableItem('focus-request', !!(row && row.request_id));
+        enableItem('block-method', !!(row && row.focus_key));
         var menu = $('ctxMenu');
         menu.hidden = false;
-        var width = menu.offsetWidth || 160;
-        var height = menu.offsetHeight || 96;
+        var width = menu.offsetWidth || 200;
+        var height = menu.offsetHeight || 220;
         menu.style.left = Math.min(x, window.innerWidth - width - 4) + 'px';
         menu.style.top = Math.min(y, window.innerHeight - height - 4) + 'px';
       }
-      function closeCtx() { $('ctxMenu').hidden = true; ctxLine = null; }
+      function closeCtx() { $('ctxMenu').hidden = true; ctxLine = null; ctxRow = null; }
 
       // Wiring --------------------------------------------------------------
       for (var tabIndex = 0; tabIndex < TAB_IDS.length; tabIndex++) {
@@ -1476,11 +1657,20 @@
       $('dedupe').addEventListener('change', function () { ui.dedupe = this.checked; postFilter(); });
 
       $('ctxMenu').addEventListener('click', function (event) {
-        var act = event.target && event.target.getAttribute && event.target.getAttribute('data-act');
+        var target = event.target && event.target.closest ? event.target.closest('[data-act]') : null;
+        var act = target && target.getAttribute('data-act');
         if (!act) { return; }
+        if (target.disabled) { return; }
+        var row = ctxRow;
         if (act === 'copy-sql') { post({ op: 'copy-line', line: ctxLine }); }
         else if (act === 'copy-time') { post({ op: 'copy-time', line: ctxLine }); }
         else if (act === 'export') { post({ op: 'export' }); }
+        else if (act === 'jump-java') { post({ op: 'jump-java', line: ctxLine }); }
+        else if (act === 'jump-xml') { post({ op: 'jump-xml', line: ctxLine }); }
+        else if (act === 'focus-method' && row) { setFocus('method', row.focus_key); }
+        else if (act === 'focus-request' && row) { setFocus('request', row.request_id); }
+        else if (act === 'delete-line') { post({ op: 'delete-line', line: ctxLine }); }
+        else if (act === 'block-method') { post({ op: 'block-method', line: ctxLine }); }
         closeCtx();
       });
 

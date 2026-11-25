@@ -22,10 +22,11 @@ use serde_json::{Value, json};
 
 use crate::commands::common;
 use crate::core::log::{
-    DuplicateGroup, EntryClass, LogAnalysis, LogEntry, NPlusOneGroup, ParseOptions, parse,
-    restore_rendered,
+    DuplicateGroup, EntryClass, LineSource, LogAnalysis, LogEntry, LogSources, NPlusOneGroup,
+    ParseOptions, SourceRef, parse_with_sources, restore_rendered,
 };
 use crate::i18n::t;
+use crate::indexer;
 use crate::settings;
 
 /// The id declared in `[[contributes.views]]`.
@@ -143,14 +144,60 @@ pub struct PanelRow {
     pub n_plus_one: bool,
     /// `<== Total:` affected-row count, when the family prints one.
     pub affected_rows: Option<u64>,
-    /// Source file/method: not carried by the log parser yet (empty → omitted).
-    pub source: String,
-    pub method: String,
+    /// Where the row came from: the logger-derived class/method plus the
+    /// console thread and correlation id, when the row stated them (lane L28).
+    pub source: LineSource,
     /// Original text for error rows (kept when no SQL was recovered).
     pub raw_line: Option<String>,
 }
 
 impl PanelRow {
+    /// `UserMapper` — the Java file's own name, empty when the row stated none.
+    pub fn class_simple(&self) -> &str {
+        self.source
+            .source
+            .as_ref()
+            .map(|source| source.class_simple.as_str())
+            .unwrap_or("")
+    }
+
+    /// `selectById`, empty when the row stated no statement id.
+    pub fn method(&self) -> &str {
+        self.source
+            .source
+            .as_ref()
+            .map(|source| source.method.as_str())
+            .unwrap_or("")
+    }
+
+    /// `c.e.m.mapper.UserMapper` — the logger name as written (Spring may have
+    /// shortened it), empty when the row stated none.
+    pub fn class_name(&self) -> &str {
+        self.source
+            .source
+            .as_ref()
+            .map(|source| source.class_name.as_str())
+            .unwrap_or("")
+    }
+
+    /// `class_name#method`, the value a method focus chip carries.
+    pub fn focus_key(&self) -> Option<String> {
+        self.source.source.as_ref().map(SourceRef::key)
+    }
+
+    /// The logger-derived source, if the row has one.
+    pub fn source_ref(&self) -> Option<&SourceRef> {
+        self.source.source.as_ref()
+    }
+
+    pub fn thread(&self) -> &str {
+        self.source.thread.as_deref().unwrap_or("")
+    }
+
+    pub fn request_id(&self) -> &str {
+        self.source.request_id.as_deref().unwrap_or("")
+    }
+
     pub fn time_text(&self) -> String {
         self.timestamp_ms
             .map(format_epoch_ms)
@@ -236,6 +283,53 @@ impl TypeFilter {
     }
 }
 
+/// What a focus chip filters by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusKind {
+    /// The logger-derived `class_name#method` of the statement.
+    Method,
+    /// The row's correlation id (`traceId=…`).
+    Request,
+}
+
+impl FocusKind {
+    pub fn token(self) -> &'static str {
+        match self {
+            FocusKind::Method => "method",
+            FocusKind::Request => "request",
+        }
+    }
+
+    pub fn parse(token: &str) -> Option<Self> {
+        match token {
+            "method" => Some(FocusKind::Method),
+            "request" => Some(FocusKind::Request),
+            _ => None,
+        }
+    }
+}
+
+/// One active focus chip. A chip is a filter, not a group: the list stays flat
+/// and time-ordered, rows that do not match are simply not shown.
+///
+/// At most one chip is active (the reference panel's per-dimension tabs are a
+/// later refinement); clicking the same value again clears it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Focus {
+    pub kind: FocusKind,
+    pub value: String,
+}
+
+impl Focus {
+    /// Does `row` satisfy this focus?
+    pub fn matches(&self, row: &PanelRow) -> bool {
+        match self.kind {
+            FocusKind::Method => row.focus_key().is_some_and(|key| key == self.value),
+            FocusKind::Request => !self.value.is_empty() && row.request_id() == self.value,
+        }
+    }
+}
+
 /// The category/keyword/type filter applied before the buffer cap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filter {
@@ -247,6 +341,8 @@ pub struct Filter {
     pub regex: bool,
     /// Fold duplicate statements into one row.
     pub dedupe: bool,
+    /// The active focus chip, if any.
+    pub focus: Option<Focus>,
 }
 
 impl Default for Filter {
@@ -258,6 +354,7 @@ impl Default for Filter {
             match_case: false,
             regex: false,
             dedupe: true,
+            focus: None,
         }
     }
 }
@@ -269,6 +366,29 @@ impl Default for Filter {
 /// Collapses duplicate groups (when `dedupe`), tags N+1 rows and classifies
 /// each row. Rows keep `line_no` order.
 pub fn build_rows(analysis: &LogAnalysis, dedupe: bool, slow_threshold_ms: f64) -> Vec<PanelRow> {
+    build_rows_with(
+        analysis,
+        None,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        dedupe,
+        slow_threshold_ms,
+    )
+}
+
+/// [`build_rows`] with the panel's row-level state: the parsed provenance, the
+/// lines the user deleted and the methods the user blocked.
+///
+/// A removed line and a blocked method drop the entry before anything else, so
+/// neither reaches the dedupe fold, the filters or the push.
+pub fn build_rows_with(
+    analysis: &LogAnalysis,
+    sources: Option<&LogSources>,
+    removed: &BTreeSet<usize>,
+    blocked: &BTreeSet<String>,
+    dedupe: bool,
+    slow_threshold_ms: f64,
+) -> Vec<PanelRow> {
     let mut duplicate_by_line: HashMap<usize, &DuplicateGroup> = HashMap::new();
     for group in &analysis.duplicates {
         for &line in &group.line_nos {
@@ -285,6 +405,20 @@ pub fn build_rows(analysis: &LogAnalysis, dedupe: bool, slow_threshold_ms: f64) 
     let mut rows = Vec::new();
     let mut folded_groups: BTreeSet<String> = BTreeSet::new();
     for entry in &analysis.entries {
+        if removed.contains(&entry.line_no) {
+            continue;
+        }
+        let source = sources
+            .and_then(|sources| sources.get(entry.line_no))
+            .cloned()
+            .unwrap_or_default();
+        if source
+            .source
+            .as_ref()
+            .is_some_and(|source| blocked.contains(&source.key()))
+        {
+            continue;
+        }
         let duplicate = duplicate_by_line.get(&entry.line_no).copied();
         let n_plus_one = n_plus_one_by_line.get(&entry.line_no).copied();
         let category = categorize(entry, n_plus_one, slow_threshold_ms);
@@ -301,6 +435,7 @@ pub fn build_rows(analysis: &LogAnalysis, dedupe: bool, slow_threshold_ms: f64) 
                 group.count.max(1),
                 n_plus_one.map(|group| group.count).unwrap_or(1),
                 n_plus_one.is_some(),
+                source,
             ));
             continue;
         }
@@ -312,6 +447,7 @@ pub fn build_rows(analysis: &LogAnalysis, dedupe: bool, slow_threshold_ms: f64) 
             1,
             n_plus_one.map(|group| group.count).unwrap_or(1),
             n_plus_one.is_some(),
+            source,
         ));
     }
     rows
@@ -372,6 +508,7 @@ fn row_of(
     dedupe_count: usize,
     group_count: usize,
     n_plus_one: bool,
+    source: LineSource,
 ) -> PanelRow {
     PanelRow {
         line_no: entry.line_no,
@@ -385,8 +522,7 @@ fn row_of(
         group_count,
         n_plus_one,
         affected_rows: entry.affected_rows,
-        source: String::new(),
-        method: String::new(),
+        source,
         raw_line: entry.raw_line.clone(),
     }
 }
@@ -460,6 +596,15 @@ pub fn row_matches(row: &PanelRow, filter: &Filter, slow_threshold_ms: f64) -> b
             return false;
         }
     }
+    // A focus chip is a filter: rows without that dimension are hidden, never
+    // grouped or reordered.
+    if filter
+        .focus
+        .as_ref()
+        .is_some_and(|focus| !focus.matches(row))
+    {
+        return false;
+    }
     let matcher = Matcher::new(&filter.keyword, filter.match_case, filter.regex);
     matcher.is_match(&row.searchable())
 }
@@ -469,6 +614,19 @@ pub fn filter_rows(rows: &[PanelRow], filter: &Filter, slow_threshold_ms: f64) -
     rows.iter()
         .filter(|row| row_matches(row, filter, slow_threshold_ms))
         .cloned()
+        .collect()
+}
+
+/// [`filter_rows`] without the clone, for the push path: a 5k-row buffer is
+/// filtered on every push, and cloning every row there is the push's largest
+/// avoidable cost.
+pub fn filter_row_refs<'a>(
+    rows: &'a [PanelRow],
+    filter: &Filter,
+    slow_threshold_ms: f64,
+) -> Vec<&'a PanelRow> {
+    rows.iter()
+        .filter(|row| row_matches(row, filter, slow_threshold_ms))
         .collect()
 }
 
@@ -490,6 +648,12 @@ pub fn regex_is_invalid(filter: &Filter) -> bool {
 struct Store {
     text: String,
     analysis: LogAnalysis,
+    /// Per-entry provenance, joined by `line_no` (lane L25's pass).
+    sources: LogSources,
+    /// Lines the user removed from the buffer (`删除`).
+    removed: BTreeSet<usize>,
+    /// `class_name#method` keys the user blocked for this session (`屏蔽此方法`).
+    blocked: BTreeSet<String>,
     dirty: bool,
     filter: Filter,
     /// Once the page sends a filter, its `dedupe` choice wins over the setting.
@@ -548,6 +712,9 @@ impl Default for Store {
         Self {
             text: String::new(),
             analysis: empty_analysis(),
+            sources: LogSources::default(),
+            removed: BTreeSet::new(),
+            blocked: BTreeSet::new(),
             dirty: false,
             filter: Filter::default(),
             filter_touched: false,
@@ -580,10 +747,14 @@ fn store() -> MutexGuard<'static, Store> {
 }
 
 /// Replaces the whole log text (capture lane / commands).
+///
+/// Line numbers refer to the new text, so the lines the user deleted from the
+/// old one no longer mean anything and are dropped.
 pub fn set_log_text(text: &str) {
     let mut state = store();
     state.text.clear();
     state.text.push_str(text);
+    state.removed.clear();
     state.dirty = true;
 }
 
@@ -607,6 +778,10 @@ pub fn clear() {
     let mut state = store();
     state.text.clear();
     state.analysis = empty_analysis();
+    state.sources = LogSources::default();
+    state.removed.clear();
+    state.blocked.clear();
+    state.filter.focus = None;
     state.dirty = false;
     state.log_to_sql_line = None;
     state.history = HistoryTab::default();
@@ -653,7 +828,11 @@ fn ensure_parsed(state: &mut Store) {
         return;
     }
     let options = parse_options();
-    state.analysis = parse(&state.text, &options);
+    // One pass for the analysis plus one for the provenance; rows that stated
+    // nothing are not stored (lane L25).
+    let parsed = parse_with_sources(&state.text, &options);
+    state.analysis = parsed.analysis;
+    state.sources = parsed.sources;
     state.dirty = false;
 }
 
@@ -693,26 +872,48 @@ fn build_state() -> Value {
     } else {
         settings::get_bool("log.dedupe", true)
     };
-    let rows = build_rows(&state.analysis, dedupe, slow_threshold_ms);
+    let rows = build_rows_with(
+        &state.analysis,
+        Some(&state.sources),
+        &state.removed,
+        &state.blocked,
+        dedupe,
+        slow_threshold_ms,
+    );
 
     let filter = state.filter.clone();
-    let filtered = filter_rows(&rows, &filter, slow_threshold_ms);
+    let filtered = filter_row_refs(&rows, &filter, slow_threshold_ms);
     let total = filtered.len();
     let slow = filtered
         .iter()
         .filter(|row| row.duration_ms.is_some_and(|ms| ms >= slow_threshold_ms))
         .count();
     let n_plus_one = filtered.iter().filter(|row| row.n_plus_one).count();
+    let blocked = state.blocked.len();
 
     let cap = buffer_cap();
     let start = total.saturating_sub(cap);
     let shown = &filtered[start..];
     let truncated = total > shown.len();
 
+    // The two location indexes are queried once per push, on the rows actually
+    // sent, and only through memory: each lookup is a hash lookup over an index
+    // the host filled in its own background batches. No file is read here.
+    let java_targets: Vec<Option<(String, u32)>> = {
+        let java = indexer::java_methods();
+        shown.iter().map(|row| java_target(row, &java)).collect()
+    };
+    let xml_targets: Vec<Option<(String, u32)>> = {
+        let xml = indexer::xml_statements();
+        shown.iter().map(|row| xml_target(row, &xml)).collect()
+    };
+
     let rows_json: Vec<Value> = shown
         .iter()
         .enumerate()
         .map(|(index, row)| {
+            let jump = java_targets.get(index).and_then(Option::as_ref);
+            let xml = xml_targets.get(index).and_then(Option::as_ref);
             json!({
                 "line": row.line_no,
                 "seq": start + index + 1,
@@ -723,8 +924,20 @@ fn build_state() -> Value {
                 "dedupe_count": row.dedupe_count,
                 "group_count": row.group_count,
                 "n_plus_one": row.n_plus_one,
-                "source": row.source,
-                "method": row.method,
+                // Provenance (lane L28). `class_simple` + `method` are what the
+                // row header shows; `focus_key` is what a method chip filters by.
+                "class_name": row.class_name(),
+                "class_simple": row.class_simple(),
+                "method": row.method(),
+                "focus_key": row.focus_key(),
+                "thread": row.thread(),
+                "request_id": row.request_id(),
+                // Only a unique resolution is offered; a multi-candidate row
+                // states nothing rather than picking one (1-based lines).
+                "jump_file": jump.map(|(file, _)| file.clone()),
+                "jump_line": jump.map(|(_, line)| line + 1),
+                "xml_file": xml.map(|(file, _)| file.clone()),
+                "xml_line": xml.map(|(_, line)| line + 1),
                 "sql": row.display_sql(),
                 "error_text": row.error_text(),
                 "category": row.category.token(),
@@ -769,6 +982,13 @@ fn build_state() -> Value {
             "regex": filter.regex,
             "dedupe": dedupe,
             "regex_error": regex_is_invalid(&filter),
+            // The active focus chip; the page only draws it (the filtering is
+            // this module's).
+            "focus": match &filter.focus {
+                Some(focus) => json!({"kind": focus.kind.token(), "value": focus.value}),
+                None => Value::Null,
+            },
+            "blocked": blocked,
         },
         "counts": {
             "total": total,
@@ -777,6 +997,7 @@ fn build_state() -> Value {
             "n_plus_one": n_plus_one,
             "truncated": truncated,
             "cap": cap,
+            "blocked": blocked,
         },
         "status": {
             "console_lines": console_lines,
@@ -793,6 +1014,124 @@ fn build_state() -> Value {
 pub fn push_state() -> Result<(), Error> {
     let state = build_state();
     host::post_view_message(VIEW_ID, &state.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Row actions: jump / focus / delete / block (lane L28)
+// ---------------------------------------------------------------------------
+
+/// Where "Jump to Java" goes: the one Java method the row's logger names.
+///
+/// `lookup_source_unique` answers `None` for an overload set or two classes of
+/// the same name; the row then offers no jump instead of picking one.
+fn java_target(row: &PanelRow, java: &indexer::JavaMethodIndex) -> Option<(String, u32)> {
+    let source = row.source_ref()?;
+    java.lookup_source_unique(source)
+        .map(|location| (location.file.clone(), location.line))
+}
+
+/// Where "Jump to Mapper XML" goes: the one mapper statement with this id.
+///
+/// `resolve_statement` on the Java index maps the same id to the *interface*
+/// method, which is the "Jump to Java" target; the XML element needs its own
+/// index ([`indexer::xml_statements`]). A statement declared in two namespaces
+/// that both match is ambiguous and yields no jump.
+fn xml_target(row: &PanelRow, xml: &indexer::XmlStatementIndex) -> Option<(String, u32)> {
+    let source = row.source_ref()?;
+    xml.lookup_unique(&source.class_name, &source.method)
+        .map(|location| (location.file.clone(), location.line))
+}
+
+/// Opens `file` at the 0-based `line`, falling back to a visible copy when the
+/// host refuses (a window-less call, a closed project).
+///
+/// The fallback is what `docs/LIMITS.md` promises for a host that cannot open
+/// files: the position still reaches the user, on the clipboard and in the
+/// Output channel.
+fn reveal(file: &str, line: u32) -> Result<(), Error> {
+    match host::open_location(file, line, 0) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            let position = format!("{file}:{}", line + 1);
+            let _ = host::copy_to_clipboard(&position);
+            common::emit(&format!(
+                "-- {} ({position})\n",
+                t("view.logs.jump.unavailable")
+            ))?;
+            Ok(())
+        }
+    }
+}
+
+/// Jumps to the row's Java method.
+fn jump_java(line_no: usize) -> Result<(), Error> {
+    let target = {
+        let mut state = store();
+        ensure_parsed(&mut state);
+        let source = state.sources.source(line_no).cloned();
+        drop(state);
+        source
+    };
+    let Some(source) = target else {
+        return Ok(());
+    };
+    let location = {
+        let java = indexer::java_methods();
+        java.lookup_source_unique(&source)
+            .map(|location| (location.file.clone(), location.line))
+    };
+    match location {
+        Some((file, line)) => reveal(&file, line),
+        None => Ok(()),
+    }
+}
+
+/// Jumps to the row's mapper XML statement.
+fn jump_xml(line_no: usize) -> Result<(), Error> {
+    let target = {
+        let mut state = store();
+        ensure_parsed(&mut state);
+        let source = state.sources.source(line_no).cloned();
+        drop(state);
+        source
+    };
+    let Some(source) = target else {
+        return Ok(());
+    };
+    let location = {
+        let xml = indexer::xml_statements();
+        xml.lookup_unique(&source.class_name, &source.method)
+            .map(|location| (location.file.clone(), location.line))
+    };
+    match location {
+        Some((file, line)) => reveal(&file, line),
+        None => Ok(()),
+    }
+}
+
+/// Removes one line from the buffer (`删除`). The line number is what the page
+/// has; the text itself is left alone, so the numbering of every other row
+/// stays valid.
+fn remove_line(line_no: usize) {
+    store().removed.insert(line_no);
+}
+
+/// Blocks the row's `class_name#method` for this session (`屏蔽此方法`).
+///
+/// Returns the key that was blocked, if the row had a source.
+fn block_line(line_no: usize) -> Option<String> {
+    let mut state = store();
+    ensure_parsed(&mut state);
+    let key = state.sources.source(line_no).map(SourceRef::key);
+    if let Some(key) = &key {
+        state.blocked.insert(key.clone());
+    }
+    key
+}
+
+/// Clears the session's blocked methods.
+fn unblock_all() {
+    store().blocked.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -1060,6 +1399,18 @@ fn labels_json() -> Value {
         "menuCopySql": t("view.logs.menu.copy_sql"),
         "menuCopyTime": t("view.logs.menu.copy_time"),
         "menuExport": t("view.logs.menu.export"),
+        // Row actions (lane L28).
+        "menuJumpJava": t("view.logs.menu.jump_java"),
+        "menuJumpXml": t("view.logs.menu.jump_xml"),
+        "menuFocusMethod": t("view.logs.menu.focus_method"),
+        "menuFocusRequest": t("view.logs.menu.focus_request"),
+        "menuDelete": t("view.logs.menu.delete"),
+        "menuBlockMethod": t("view.logs.menu.block_method"),
+        "focusMethodPrefix": t("view.logs.focus.method_prefix"),
+        "focusRequestPrefix": t("view.logs.focus.request_prefix"),
+        "focusClear": t("view.logs.focus.clear"),
+        "blockedPrefix": t("view.logs.blocked.prefix"),
+        "blockedClear": t("view.logs.blocked.clear"),
         "typeSelect": t("view.logs.type.select"),
         "typeInsert": t("view.logs.type.insert"),
         "typeUpdate": t("view.logs.type.update"),
@@ -1284,6 +1635,37 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
                 host::copy_to_clipboard(&code)?;
             }
         }
+        // Row actions (lane L28): jump to the method / to the mapper XML, drop
+        // the line, block the method. Each is a no-op when the row does not
+        // state the dimension — the page disables those items, the host never
+        // guesses a target.
+        "jump-java" => {
+            if let Some(line) = message_line(&message) {
+                jump_java(line)?;
+            }
+        }
+        "jump-xml" => {
+            if let Some(line) = message_line(&message) {
+                jump_xml(line)?;
+            }
+        }
+        "delete-line" => {
+            if let Some(line) = message_line(&message) {
+                remove_line(line);
+                let _ = push_state();
+            }
+        }
+        "block-method" => {
+            if let Some(line) = message_line(&message)
+                && block_line(line).is_some()
+            {
+                let _ = push_state();
+            }
+        }
+        "clear-blocked" => {
+            unblock_all();
+            let _ = push_state();
+        }
         // The preview tab (lane L23): the page prefixes its ops so they cannot
         // collide with this panel's own `clear` / `export` / `copy`; the model
         // and the op handling stay in `views::workbench`, the push is this
@@ -1333,6 +1715,16 @@ fn filter_from_message(message: &Value) -> Filter {
         .and_then(|value| value.as_str())
         .unwrap_or("")
         .to_string();
+    // A focus chip rides the same `filter` op as the other filters; `null` or a
+    // missing value clears it.
+    let focus = message.get("focus").and_then(|value| {
+        let kind = FocusKind::parse(value.get("kind")?.as_str()?)?;
+        let value = value.get("value")?.as_str()?.trim();
+        (!value.is_empty()).then(|| Focus {
+            kind,
+            value: value.to_string(),
+        })
+    });
     Filter {
         types,
         slow_only: message
@@ -1352,6 +1744,7 @@ fn filter_from_message(message: &Value) -> Filter {
             .get("dedupe")
             .and_then(|value| value.as_bool())
             .unwrap_or(true),
+        focus,
     }
 }
 
@@ -1367,11 +1760,20 @@ fn all_sql() -> String {
 
 /// SQL of the visible (filtered + capped) rows, joined for the export action.
 pub fn visible_sql() -> String {
-    let analysis = snapshot();
+    let mut state = store();
+    ensure_parsed(&mut state);
     let slow_threshold_ms = slow_threshold();
     let dedupe = settings::get_bool("log.dedupe", true);
-    let rows = build_rows(&analysis, dedupe, slow_threshold_ms);
-    let filter = store().filter.clone();
+    let rows = build_rows_with(
+        &state.analysis,
+        Some(&state.sources),
+        &state.removed,
+        &state.blocked,
+        dedupe,
+        slow_threshold_ms,
+    );
+    let filter = state.filter.clone();
+    drop(state);
     let filtered = filter_rows(&rows, &filter, slow_threshold_ms);
     let cap = buffer_cap();
     let start = filtered.len().saturating_sub(cap);
@@ -1505,6 +1907,8 @@ mod tests {
         clear();
         set_filter(Filter::default());
         set_paused(false);
+        // The location indexes are process-wide too (lane L28).
+        crate::indexer::clear_indexes();
         // The preview tab's model is process-wide too (lane L23).
         crate::views::workbench::clear();
         crate::views::workbench::note_page_tab();
@@ -1523,7 +1927,9 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
 ";
 
     fn analysis_of(text: &str) -> LogAnalysis {
-        parse(text, &ParseOptions::default())
+        // The panel parses with the provenance pass (lane L28); the helpers keep
+        // the same pass so a fixture's sources are present too.
+        parse_with_sources(text, &ParseOptions::default()).analysis
     }
 
     fn rows_of(text: &str) -> Vec<PanelRow> {
@@ -2209,7 +2615,8 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         // Metadata is 11px muted with monospace sequence/time/duration; the
         // statement is 12px monospace and wraps.
         for needle in [
-            "align-items: center; gap: 8px; font-size: 11px;",
+            "align-items: center; justify-content: flex-start;",
+            "gap: 8px; font-size: 11px;",
             ".meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }",
             "font-size: 12px; line-height: 1.4;",
             "white-space: pre-wrap; word-break: break-word;",
@@ -2235,6 +2642,122 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             page.contains("id=\"slowBadge\" class=\"pill danger\""),
             "the slow count is a right-side capsule"
         );
+    }
+
+    #[test]
+    fn the_row_metadata_is_a_left_aligned_flow() {
+        // The reference row header is one left-to-right flow:
+        // #seq time duration [db] (rows) ⨉N ×N N+1 [file:line] [Class#method].
+        // The duration is *not* a right-aligned corner badge; the only
+        // right-aligned element of the panel is the slow capsule.
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        let meta_start = page.find("    .meta {").expect("the meta rule");
+        let meta_end = page.find(".meta .seq").expect("the next meta rule");
+        let meta = &page[meta_start..meta_end];
+        assert!(meta.contains("justify-content: flex-start;"), "{meta}");
+        assert!(!meta.contains("space-between"), "{meta}");
+        assert!(!meta.contains("margin-left: auto"), "{meta}");
+        assert!(
+            !page.contains(".meta .dur { margin-left"),
+            "the duration stays in the flow"
+        );
+        assert!(
+            page.contains("#slowBadge { margin-left: auto; }"),
+            "the slow capsule is the one right-aligned element"
+        );
+
+        let build_start = page.find("function buildRow(row, slowThreshold)").unwrap();
+        let build_end = page.find("function formatMs(ms)").unwrap();
+        let build = &page[build_start..build_end];
+        let seq = build.find("makePart('seq'").expect("seq");
+        let time = build.find("makePart('part time'").expect("time");
+        let dur = build.find("dur.className = 'dur'").expect("duration");
+        let badge = build.find("makePart('badge dedupe'").expect("a badge");
+        let source = build.find("makePart('part src'").expect("source");
+        let method = build
+            .find("makePart('part method focusable'")
+            .expect("method");
+        assert!(seq < time, "seq before time");
+        assert!(time < dur, "duration right after the time");
+        assert!(dur < badge, "badges after the duration");
+        assert!(badge < source, "the source comes after the badges");
+        assert!(source < method, "[file:line] before [Class#method]");
+    }
+
+    #[test]
+    fn the_row_header_shows_the_class_and_method_and_filters_on_click() {
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        // The chip container sits in the filter row, before the slow capsule.
+        assert!(
+            page.contains("id=\"focusChips\" class=\"chips\""),
+            "the chip container is in the filter row"
+        );
+        // The row header draws [Class#method] from class_simple + method, and a
+        // row that states none draws nothing.
+        assert!(page.contains("row.class_simple && row.method"));
+        assert!(page.contains("'[' + row.class_simple + '#' + row.method + ']'"));
+        assert!(page.contains("setFocus('method', row.focus_key)"));
+        assert!(page.contains("setFocus('request', row.request_id)"));
+        // A chip carries an × and rides the same `filter` op.
+        assert!(page.contains("close.className = 'fclose'"));
+        assert!(page.contains("close.textContent = '×'"));
+        assert!(page.contains("function clearFocus()"));
+        assert!(
+            page.contains("focus: ui.focus"),
+            "the chip rides the filter op"
+        );
+
+        let labels = labels_json();
+        for key in [
+            "menuJumpJava",
+            "menuJumpXml",
+            "menuFocusMethod",
+            "menuFocusRequest",
+            "menuDelete",
+            "menuBlockMethod",
+            "focusMethodPrefix",
+            "focusRequestPrefix",
+            "focusClear",
+            "blockedPrefix",
+            "blockedClear",
+        ] {
+            assert!(labels.get(key).is_some(), "missing label {key}");
+        }
+    }
+
+    #[test]
+    fn the_context_menu_offers_the_row_actions_and_disables_what_the_row_lacks() {
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        for act in [
+            "jump-java",
+            "jump-xml",
+            "focus-method",
+            "focus-request",
+            "delete-line",
+            "block-method",
+            "copy-sql",
+            "copy-time",
+            "export",
+        ] {
+            assert!(
+                page.contains(&format!("data-act=\"{act}\"")),
+                "missing menu item {act}"
+            );
+        }
+        // An item is disabled exactly when the row does not state the dimension.
+        assert!(page.contains("enableItem('jump-java', !!(row && row.jump_file))"));
+        assert!(page.contains("enableItem('jump-xml', !!(row && row.xml_file))"));
+        assert!(page.contains("enableItem('focus-method', !!(row && row.focus_key))"));
+        assert!(page.contains("enableItem('focus-request', !!(row && row.request_id))"));
+        assert!(page.contains("enableItem('block-method', !!(row && row.focus_key))"));
+        assert!(page.contains(".ctxmenu button[disabled]"));
+        // The host ops the items post.
+        for op in ["jump-java", "jump-xml", "delete-line", "block-method"] {
+            assert!(page.contains(&format!("op: '{op}'")), "missing op {op}");
+        }
     }
 
     #[test]
@@ -2408,6 +2931,306 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         assert_eq!(
             state_of(&host)["tabs"]["preview"]["model"]["sql"],
             "select keep"
+        );
+    }
+
+    // Provenance, focus, delete, mute, jump (lane L28) ---------------------
+
+    /// Two MyBatis statements under a logback prefix, the second one with a
+    /// correlation id: the shape Spring Boot prints and the only place a
+    /// class/method can be read from.
+    const SOURCED_LOG: &str = "\
+2026-11-25 21:00:01.001 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.mapper.UserMapper.selectById : ==>  Preparing: SELECT id FROM users WHERE id = ?
+2026-11-25 21:00:01.002 DEBUG 4242 --- [nio-8080-exec-1] c.e.m.mapper.UserMapper.selectById : ==> Parameters: 1(Long)
+2026-11-25 21:00:02.001 DEBUG 4242 --- [nio-8080-exec-2] traceId=abc123 c.e.m.mapper.OrderMapper.findByUser : ==>  Preparing: SELECT id FROM orders WHERE uid = ?
+2026-11-25 21:00:02.002 DEBUG 4242 --- [nio-8080-exec-2] traceId=abc123 c.e.m.mapper.OrderMapper.findByUser : ==> Parameters: 1(Long)
+";
+
+    const USER_MAPPER_JAVA: &str = "\
+package com.example.myapp.mapper;
+
+public interface UserMapper {
+    int selectById(Long id);
+}
+";
+
+    const USER_MAPPER_XML: &str = r#"<mapper namespace="com.example.myapp.mapper.UserMapper">
+  <select id="selectById">select 1</select>
+</mapper>"#;
+
+    fn row_of_line<'a>(state: &'a Value, line: usize) -> &'a Value {
+        state["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|row| row["line"] == line)
+            .expect("the row of that line")
+    }
+
+    fn first_line_with(entries: &[LogEntry], needle: &str) -> usize {
+        entries
+            .iter()
+            .find(|entry| entry.sql.contains(needle))
+            .expect("a statement")
+            .line_no
+    }
+
+    #[test]
+    fn the_state_rows_carry_the_logger_source_thread_and_request() {
+        let (host, _guard) = test_host();
+        set_log_text(SOURCED_LOG);
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let state = state_of(&host);
+
+        let line = first_line_with(&snapshot().entries, "FROM users");
+        let row = row_of_line(&state, line);
+        assert_eq!(row["class_simple"], "UserMapper");
+        assert_eq!(row["method"], "selectById");
+        assert_eq!(row["class_name"], "c.e.m.mapper.UserMapper");
+        assert_eq!(row["focus_key"], "c.e.m.mapper.UserMapper#selectById");
+        assert_eq!(row["thread"], "nio-8080-exec-1");
+        assert_eq!(row["request_id"], "", "this row states no id");
+
+        let line = first_line_with(&snapshot().entries, "FROM orders");
+        let row = row_of_line(&state, line);
+        assert_eq!(row["class_simple"], "OrderMapper");
+        assert_eq!(row["request_id"], "abc123");
+    }
+
+    #[test]
+    fn a_focus_chip_filters_by_method_and_by_request() {
+        let (host, _guard) = test_host();
+        set_log_text(SOURCED_LOG);
+        let users = first_line_with(&snapshot().entries, "FROM users");
+
+        // Method focus: only the UserMapper statement survives.
+        handle_panel_message(
+            &host,
+            "{\"op\":\"filter\",\"types\":[],\"types_mode\":\"all\",\
+             \"focus\":{\"kind\":\"method\",\"value\":\"c.e.m.mapper.UserMapper#selectById\"}}",
+        )
+        .unwrap();
+        let state = state_of(&host);
+        assert_eq!(
+            state["filter"]["focus"],
+            json!({"kind": "method", "value": "c.e.m.mapper.UserMapper#selectById"})
+        );
+        let rows = state["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["line"], json!(users));
+        assert_eq!(state["counts"]["total"], 1);
+
+        // Request focus: only the row with that correlation id survives.
+        handle_panel_message(
+            &host,
+            "{\"op\":\"filter\",\"types\":[],\"types_mode\":\"all\",\
+             \"focus\":{\"kind\":\"request\",\"value\":\"abc123\"}}",
+        )
+        .unwrap();
+        let rows = state_of(&host)["rows"].as_array().cloned().unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["request_id"], "abc123");
+
+        // A null focus clears the chip and brings every row back.
+        handle_panel_message(
+            &host,
+            "{\"op\":\"filter\",\"types\":[],\"types_mode\":\"all\",\"focus\":null}",
+        )
+        .unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["filter"]["focus"], Value::Null);
+        assert_eq!(state["rows"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_focus_chip_hides_rows_that_state_no_source() {
+        let (_host, _guard) = test_host();
+        let rows = build_rows_with(
+            &analysis_of("Preparing: SELECT 1 FROM t\nParameters: 1(Long)\n"),
+            None,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            true,
+            1000.0,
+        );
+        let filter = Filter {
+            focus: Some(Focus {
+                kind: FocusKind::Method,
+                value: "c.e.m.mapper.UserMapper#selectById".to_string(),
+            }),
+            ..Filter::default()
+        };
+        assert!(
+            filter_rows(&rows, &filter, 1000.0).is_empty(),
+            "a row without a method never matches a method chip"
+        );
+    }
+
+    #[test]
+    fn delete_drops_one_row_and_a_new_log_text_forgets_the_deletions() {
+        let (host, _guard) = test_host();
+        set_log_text(SOURCED_LOG);
+        let users = first_line_with(&snapshot().entries, "FROM users");
+        handle_panel_message(
+            &host,
+            &format!("{{\"op\":\"delete-line\",\"line\":{users}}}"),
+        )
+        .unwrap();
+        let state = state_of(&host);
+        let rows = state["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_ne!(rows[0]["line"], json!(users));
+
+        // The whole text replaced: line numbers refer to the new text.
+        set_log_text(SOURCED_LOG);
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["rows"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn muting_a_method_hides_every_row_of_it_and_the_counter_clears_it() {
+        let (host, _guard) = test_host();
+        set_log_text(SOURCED_LOG);
+        let users = first_line_with(&snapshot().entries, "FROM users");
+        handle_panel_message(
+            &host,
+            &format!("{{\"op\":\"block-method\",\"line\":{users}}}"),
+        )
+        .unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["counts"]["blocked"], 1);
+        let rows = state["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "the whole method is hidden: {rows:?}");
+        assert_eq!(rows[0]["class_simple"], "OrderMapper");
+
+        handle_panel_message(&host, "{\"op\":\"clear-blocked\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["counts"]["blocked"], 0);
+        assert_eq!(state["rows"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn jump_java_opens_the_unique_method_at_its_line() {
+        let (host, _guard) = test_host();
+        crate::indexer::index_source(
+            "/project/src/main/java/com/example/myapp/mapper/UserMapper.java",
+            USER_MAPPER_JAVA,
+        );
+        set_log_text(SOURCED_LOG);
+        let users = first_line_with(&snapshot().entries, "FROM users");
+        handle_panel_message(&host, &format!("{{\"op\":\"jump-java\",\"line\":{users}}}")).unwrap();
+        assert_eq!(
+            host.opened_locations(),
+            vec![(
+                "/project/src/main/java/com/example/myapp/mapper/UserMapper.java".to_string(),
+                3,
+                0
+            )],
+            "0-based line 3 is selectById"
+        );
+        // The row offers the jump because the index resolves it uniquely.
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let state = state_of(&host);
+        let row = row_of_line(&state, users);
+        assert_eq!(row["jump_line"], 4, "1-based for the page");
+    }
+
+    #[test]
+    fn an_ambiguous_method_is_never_jumped_to() {
+        let (host, _guard) = test_host();
+        crate::indexer::index_source("/project/a/UserMapper.java", USER_MAPPER_JAVA);
+        crate::indexer::index_source("/project/b/UserMapper.java", USER_MAPPER_JAVA);
+        set_log_text(SOURCED_LOG);
+        let users = first_line_with(&snapshot().entries, "FROM users");
+        handle_panel_message(&host, &format!("{{\"op\":\"jump-java\",\"line\":{users}}}")).unwrap();
+        assert!(
+            host.opened_locations().is_empty(),
+            "two candidates: no jump at all"
+        );
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let state = state_of(&host);
+        let row = row_of_line(&state, users);
+        assert_eq!(row["jump_file"], Value::Null);
+        assert_eq!(row["jump_line"], Value::Null);
+    }
+
+    #[test]
+    fn jump_xml_opens_the_unique_mapper_statement() {
+        let (host, _guard) = test_host();
+        crate::indexer::index_source(
+            "/project/src/main/resources/mapper/UserMapper.xml",
+            USER_MAPPER_XML,
+        );
+        set_log_text(SOURCED_LOG);
+        let users = first_line_with(&snapshot().entries, "FROM users");
+        handle_panel_message(&host, &format!("{{\"op\":\"jump-xml\",\"line\":{users}}}")).unwrap();
+        assert_eq!(
+            host.opened_locations(),
+            vec![(
+                "/project/src/main/resources/mapper/UserMapper.xml".to_string(),
+                1,
+                0
+            )],
+            "0-based line 1 is the select tag"
+        );
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let state = state_of(&host);
+        let row = row_of_line(&state, users);
+        assert_eq!(row["xml_line"], 2, "1-based for the page");
+    }
+
+    #[test]
+    fn jump_xml_does_nothing_for_a_statement_the_index_does_not_hold() {
+        let (host, _guard) = test_host();
+        // Only the Java side is indexed: the XML item has nothing to open.
+        crate::indexer::index_source(
+            "/project/src/main/java/com/example/mapper/UserMapper.java",
+            USER_MAPPER_JAVA,
+        );
+        set_log_text(SOURCED_LOG);
+        let users = first_line_with(&snapshot().entries, "FROM users");
+        handle_panel_message(&host, &format!("{{\"op\":\"jump-xml\",\"line\":{users}}}")).unwrap();
+        assert!(host.opened_locations().is_empty());
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(
+            row_of_line(&state_of(&host), users)["xml_file"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn a_five_thousand_row_push_stays_within_the_budget() {
+        let (host, _guard) = test_host();
+        host.set_setting("logs.pageSize", "5000");
+        let mut text = String::new();
+        for index in 0..5000 {
+            text.push_str(&format!(
+                "2026-11-25 21:00:01.001 DEBUG 4242 --- [nio-8080-exec-1] \
+                 c.e.m.mapper.UserMapper.selectById : ==>  Preparing: SELECT c{index} FROM t WHERE id = ?\n"
+            ));
+            text.push_str(&format!(
+                "2026-11-25 21:00:01.001 DEBUG 4242 --- [nio-8080-exec-1] \
+                 c.e.m.mapper.UserMapper.selectById : ==> Parameters: {index}(Integer)\n"
+            ));
+        }
+        set_log_text(&text);
+        // Warm the parse once (a real session parses on the first push), then
+        // measure a full push of 5k rows: parse + rows + focus + index queries
+        // + JSON. The index is empty here, which is the common case; a filled
+        // index only replaces empty hash lookups with small ones.
+        let _ = push_state();
+        let started = std::time::Instant::now();
+        let state = build_state();
+        let elapsed = started.elapsed();
+        println!("5k-row push: {elapsed:?}");
+        assert_eq!(state["rows"].as_array().unwrap().len(), 5000);
+        // Measured ~180 ms for 5000 shown rows in a debug build (the shipped
+        // wasm is optimised); the bound keeps a 2x margin so a loaded CI machine
+        // does not turn a timing check into a flake. The default cap is 50 rows,
+        // which makes a real push two orders of magnitude cheaper.
+        assert!(
+            elapsed < std::time::Duration::from_millis(400),
+            "5k-row push took {elapsed:?}"
         );
     }
 
