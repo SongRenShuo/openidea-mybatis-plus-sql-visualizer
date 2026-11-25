@@ -24,6 +24,8 @@
     .actionbar {
       display: flex; align-items: center; gap: 2px; flex: 0 0 auto;
       padding: 3px 6px; border-bottom: 1px solid var(--openidea-border);
+      /* Anchors the blocked-methods popup (L26), which drops from a button. */
+      position: relative;
     }
     .iconbtn {
       display: inline-flex; align-items: center; justify-content: center;
@@ -151,6 +153,16 @@
       background: var(--openidea-bg-selected);
       background: color-mix(in srgb, var(--openidea-danger) 16%, transparent);
     }
+    /* The ⨉N / ×N badges are clickable buttons (lane L26): a button reset on
+       the capsule, so the group expands / collapses on click. */
+    button.badge {
+      background: none; border: none; cursor: pointer; font: inherit;
+    }
+    button.badge:hover { filter: brightness(1.15); }
+    /* A row that belongs to an expanded group (lane L26): indented under its
+       head, each occurrence showing its own time and duration. */
+    .row .content.member { padding-left: 22px; }
+    .row .content.member .meta { color: var(--openidea-fg-muted); }
     /* Right-aligned counter capsule in the filter row. */
     .pill {
       display: inline-flex; align-items: center; height: 16px; padding: 0 8px;
@@ -423,6 +435,63 @@
         <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M11.0017 2H11.5998C12.373 2 12.9998 2.6268 12.9998 3.4V3.91081C13.0011 3.94038 13.0017 3.97011 13.0017 4V11.5482C13.6063 11.1124 13.9998 10.4021 13.9998 9.6V3.4C13.9998 2.07452 12.9253 1 11.5998 1H6.39978C5.59677 1 4.88587 1.39437 4.4502 2H6.39978H11.0017Z"/>
       </svg>
     </button>
+    <!-- Capture start/stop (L26): one button, the icon follows the agent
+         connection state reported by the host. -->
+    <button id="captureBtn" class="iconbtn" type="button">
+      <svg id="captureRunIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path fill="currentColor" d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z"/>
+      </svg>
+      <svg id="captureStopIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden>
+        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="currentColor"/>
+      </svg>
+    </button>
+    <!-- Scroll to bottom / restore follow (L26). -->
+    <button id="scrollEndBtn" class="iconbtn" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M7.85355 10.8536C8.04882 10.6583 8.04882 10.3417 7.85355 10.1464C7.65829 9.95119 7.34171 9.95119 7.14645 10.1464L5 12.2929L4.99999 2.5C4.99999 2.22386 4.77614 2 4.49999 2C4.22385 2 3.99999 2.22386 3.99999 2.5L3.99999 12.2929L1.85355 10.1464C1.65829 9.95118 1.34171 9.95118 1.14645 10.1464C0.951184 10.3417 0.951184 10.6583 1.14645 10.8536L4.14645 13.8536C4.34171 14.0488 4.65829 14.0488 4.85355 13.8536L7.85355 10.8536Z"/>
+        <path d="M11 2.5H14C14.2761 2.5 14.5 2.72386 14.5 3V5C14.5 5.27614 14.2761 5.5 14 5.5H11C10.7239 5.5 10.5 5.27614 10.5 5V3C10.5 2.72386 10.7239 2.5 11 2.5Z" stroke="currentColor"/>
+        <path d="M11 7.5H14C14.2761 7.5 14.5 7.72386 14.5 8V10C14.5 10.2761 14.2761 10.5 14 10.5H11C10.7239 10.5 10.5 10.2761 10.5 10V8C10.5 7.72386 10.7239 7.5 11 7.5Z" stroke="currentColor"/>
+      </svg>
+    </button>
+    <!-- Sort by duration (L26): toggles time order / duration order. -->
+    <button id="sortBtn" class="iconbtn" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M7.5 3.5H14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M9.5 8H14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M11.5 12.5H14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+        <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M7.85355 9.85355C8.04881 9.65829 8.04881 9.34171 7.85355 9.14645C7.65829 8.95118 7.34171 8.95118 7.14645 9.14645L5 11.2929L5 3.5C5 3.22386 4.77615 3 4.5 3C4.22386 3 4 3.22386 4 3.5L4 11.2929L1.85355 9.14645C1.65829 8.95118 1.34171 8.95118 1.14645 9.14645C0.951184 9.34171 0.951184 9.65829 1.14645 9.85355L4.14644 12.8536C4.23693 12.944 4.36193 13 4.5 13C4.63885 13 4.76447 12.9434 4.85507 12.852L7.85355 9.85355Z"/>
+      </svg>
+    </button>
+    <!-- Blocked methods popup (L26). -->
+    <button id="blockedBtn" class="iconbtn" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <circle cx="8" cy="8" r="1.72" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M8.0000 12.0250C5.2670 12.0250 2.5648 10.2367 1.7105 8.0000C2.5648 5.7633 5.2670 3.9750 8.0000 3.9750C10.7330 3.9750 13.4352 5.7633 14.2895 8.0000C13.4352 10.2367 10.7330 12.0250 8.0000 12.0250Z" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M2.250 13.750L13.750 2.250" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div id="blockedMenu" class="menu" hidden>
+      <div id="blockedList"></div>
+      <div class="menu-sep"></div>
+      <div class="menu-footer">
+        <span id="blockedEmpty" class="muted"></span>
+        <button id="blockedClear" class="linkbtn" type="button"></button>
+      </div>
+    </div>
+    <!-- Settings entry (L26): no platform API opens the settings page, so the
+         button posts an op that points the user there. -->
+    <button id="settingsBtn" class="iconbtn" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M3.22655 4.36961C2.92233 4.76924 2.66735 5.20781 2.47037 5.67626L3.30992 7.0943C3.6406 7.65283 3.6406 8.34718 3.30992 8.9057L2.47037 10.3237C2.66736 10.7922 2.92233 11.2308 3.22656 11.6304L4.87261 11.6124C5.52165 11.6053 6.12297 11.9524 6.44133 12.5181L7.24899 13.953C7.49593 13.984 7.74792 14 8.00408 14C8.2602 14 8.51214 13.984 8.75904 13.9531L9.56671 12.5181C9.88507 11.9524 10.4864 11.6053 11.1354 11.6124L12.7816 11.6304C13.0858 11.2308 13.3408 10.7923 13.5377 10.3239L12.6981 8.9057C12.3674 8.34718 12.3674 7.65283 12.6981 7.0943L13.5377 5.67613C13.3408 5.20773 13.0858 4.76921 12.7816 4.36961L11.1354 4.38764C10.4864 4.39475 9.88507 4.04758 9.56671 3.48194L8.75904 2.04693C8.51214 2.01599 8.2602 2 8.00408 2C7.74792 2 7.49594 2.016 7.24899 2.04695L6.44133 3.48194C6.12297 4.04758 5.52165 4.39475 4.87261 4.38764L3.22655 4.36961ZM10.655 8.00001C10.655 9.46412 9.46811 10.651 8.004 10.651C6.5399 10.651 5.353 9.46412 5.353 8.00001C5.353 6.53591 6.5399 5.34902 8.004 5.34902C9.46811 5.34902 10.655 6.53591 10.655 8.00001ZM4.88356 3.3877C5.16752 3.39081 5.4306 3.23892 5.56988 2.99146L6.43817 1.44875C6.54914 1.25159 6.7401 1.1101 6.96387 1.07676C7.30327 1.0262 7.65062 1 8.00408 1C8.3575 1 8.7048 1.02619 9.04414 1.07674C9.26792 1.11007 9.45889 1.25157 9.56986 1.44873L10.4382 2.99146C10.5774 3.23892 10.8405 3.39081 11.1245 3.3877L12.8938 3.36832C13.1196 3.36585 13.3372 3.46012 13.4781 3.63661C13.9099 4.17766 14.2632 4.78416 14.5207 5.43884C14.6034 5.6491 14.5763 5.88489 14.4612 6.07931L13.5586 7.60376C13.4139 7.84811 13.4139 8.15189 13.5586 8.39625L14.4612 9.92069C14.5763 10.1151 14.6034 10.3509 14.5207 10.5612C14.2632 11.2158 13.9099 11.8223 13.4781 12.3634C13.3372 12.5399 13.1196 12.6342 12.8938 12.6317L11.1245 12.6123C10.8405 12.6092 10.5774 12.7611 10.4382 13.0085L9.56986 14.5513C9.45889 14.7484 9.26792 14.8899 9.04414 14.9233C8.7048 14.9738 8.3575 15 8.00408 15C7.65062 15 7.30327 14.9738 6.96387 14.9232C6.7401 14.8899 6.54914 14.7484 6.43817 14.5512L5.56988 13.0085C5.4306 12.7611 5.16752 12.6092 4.88356 12.6123L3.1144 12.6317C2.8886 12.6342 2.67096 12.5399 2.5301 12.3634C2.09822 11.8223 1.74489 11.2158 1.48738 10.561C1.40469 10.3508 1.43184 10.115 1.54695 9.92057L2.44942 8.39625C2.5941 8.15189 2.5941 7.84811 2.44942 7.60376L1.54695 6.07944C1.43184 5.88502 1.40469 5.64924 1.48738 5.43898C1.74489 4.78425 2.09822 4.1777 2.53009 3.63661C2.67096 3.46012 2.8886 3.36585 3.1144 3.36832L4.88356 3.3877ZM9.655 8.00001C9.655 8.91183 8.91582 9.65101 8.004 9.65101C7.09218 9.65101 6.353 8.91183 6.353 8.00001C6.353 7.08819 7.09218 6.34902 8.004 6.34902C8.91582 6.34902 9.655 7.08819 9.655 8.00001Z"/>
+      </svg>
+    </button>
+    <!-- Help (L26): prints a shortcut cheat sheet to the Output channel. -->
+    <button id="helpBtn" class="iconbtn" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <circle cx="7.79995" cy="14.15" r="0.85" fill="currentColor"/>
+        <path fill="currentColor" d="M7.97962 8.25128C8.20415 8.01392 8.49793 7.73622 8.8602 7.41844C9.23243 7.09036 9.52729 6.80791 9.74572 6.57075L9.74668 6.56973C9.96622 6.33799 10.1503 6.0594 10.2982 5.73275L10.2988 5.73133C10.45 5.4108 10.5268 5.0457 10.5268 4.634C10.5268 4.13537 10.4222 3.69607 10.2158 3.31349C10.0093 2.93099 9.71876 2.63442 9.34261 2.42208L9.34155 2.42149C8.96585 2.20334 8.53389 2.093 8.04277 2.093C7.53263 2.093 7.08144 2.20651 6.68653 2.43124C6.29797 2.65595 5.9944 2.97134 5.77499 3.3796C5.67273 3.57247 5.59473 3.77918 5.54126 4C5.51644 4.10252 5.49691 4.20808 5.48269 4.31671C5.44318 4.61868 5.20739 4.867 4.90285 4.867H4.77896C4.47828 4.867 4.23781 4.61717 4.24929 4.31671C4.25956 4.2093 4.27359 4.10373 4.2914 4C4.36501 3.57119 4.50313 3.17391 4.7064 2.80885C5.03226 2.23534 5.4864 1.7906 6.06642 1.47769C6.64663 1.15834 7.30949 1 8.05227 1C8.77568 1 9.4194 1.15185 9.98062 1.45842C10.5475 1.75827 10.9888 2.17975 11.3023 2.72194C11.6162 3.26467 11.7718 3.88719 11.7718 4.5865C11.7718 5.13576 11.6813 5.62465 11.4976 6.05106C11.3166 6.47121 11.0924 6.82638 10.8239 7.11469C10.567 7.39722 10.2283 7.71973 9.80882 8.08202C9.47419 8.37245 9.2138 8.61414 9.02667 8.8075C8.85057 8.98968 8.70116 9.20284 8.57871 9.44772L8.57826 9.44864C8.4595 9.6802 8.39927 9.93983 8.39927 10.2295C8.39927 10.4946 8.18437 10.7095 7.91927 10.7095H7.71977C7.42844 10.7095 7.19227 10.4733 7.19227 10.182C7.19227 9.77678 7.26749 9.41044 7.42025 9.08501C7.57001 8.76595 7.75635 8.48769 7.97962 8.25128Z"/>
+      </svg>
+    </button>
   </div>
 
   <div class="filterbar">
@@ -640,6 +709,14 @@
         focus: null
       };
       var kwTimer = null;
+      // Follow (L26): whether the list auto-scrolls to the newest row. The
+      // page owns the flag and reports flips; the host keeps a mirror for the
+      // status line. `suppressScroll` swallows the scroll event a rebuild
+      // produces so a re-render does not look like a user scroll.
+      var follow = true;
+      var suppressScroll = false;
+      // Display order (L26): 'time' (capture order) or 'duration'.
+      var sortMode = 'time';
 
       function $(id) { return document.getElementById(id); }
       function post(message) {
@@ -724,6 +801,12 @@
         $('dedupe').checked = ui.dedupe;
         $('caseBtn').classList.toggle('on', ui.matchCase);
         $('regexBtn').classList.toggle('on', ui.regex);
+        // Display preferences (L26): the host mirrors the page's last report,
+        // so a push never silently changes what the user picked.
+        sortMode = (state.sort === 'duration') ? 'duration' : 'time';
+        if (state.status && typeof state.status.follow === 'boolean') {
+          follow = state.status.follow;
+        }
       }
 
       // Icon buttons carry no text: the label lives in title + aria-label so
@@ -795,6 +878,29 @@
         $('resumeIcon').hidden = !paused;
         labelIconButton($('clearBtn'), L.clear || 'Clear');
         labelIconButton($('copyAllBtn'), L.copyAll || 'Copy SQL');
+        // Capture (L26): the icon follows the agent connection state — a run
+        // glyph while disconnected (click starts), a stop glyph while connected.
+        var connected = !!(current && current.status && current.status.agent_connected);
+        var captureBtn = $('captureBtn');
+        labelIconButton(captureBtn, connected
+          ? (L.captureStop || 'Stop capture')
+          : (L.captureStart || 'Start capture'));
+        captureBtn.classList.toggle('run', !connected);
+        $('captureRunIcon').hidden = connected;
+        $('captureStopIcon').hidden = !connected;
+        // Sort (L26): the icon's label names the action, the tooltip the mode
+        // the list is actually in.
+        labelIconButton($('sortBtn'), L.sortDuration || 'Sort by duration');
+        var sorted = (current && current.sort === 'duration') ? 'duration' : 'time';
+        $('sortBtn').title = sorted === 'duration'
+          ? (L.sortDurationTitle || '')
+          : (L.sortTimeTitle || '');
+        labelIconButton($('scrollEndBtn'), L.scrollEnd || 'Scroll to bottom');
+        labelIconButton($('blockedBtn'), L.blocked || 'Blocked methods');
+        labelIconButton($('settingsBtn'), L.settings || 'Settings');
+        labelIconButton($('helpBtn'), L.help || 'Help');
+        setText($('blockedEmpty'), L.blockedEmpty);
+        setText($('blockedClear'), L.blockedClear);
         labelIconButton($('searchBtn'), L.search || 'Search');
         setText($('dedupeLabel'), L.dedupe);
         setText($('slowOnlyLabel'), L.slowOnly);
@@ -912,6 +1018,22 @@
         return el;
       }
 
+      // A clickable badge (lane L26): the ⨉N / ×N capsule is a button that
+      // toggles its group's expansion; the host owns the expanded set.
+      function badgeButton(text, cls, title, onClick) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'badge ' + cls;
+        button.textContent = text;
+        button.title = title || '';
+        button.setAttribute('aria-label', title || '');
+        button.addEventListener('click', function (event) {
+          event.stopPropagation();
+          onClick();
+        });
+        return button;
+      }
+
       // Last path segment, for a `[UserMapper.java:42]` part.
       function baseName(path) {
         if (!path) { return ''; }
@@ -919,7 +1041,7 @@
         return parts[parts.length - 1] || path;
       }
 
-      function buildRow(row, slowThreshold) {
+      function buildRow(row, slowThreshold, isMember) {
         var el = document.createElement('div');
         el.className = 'row';
         el.setAttribute('data-line', String(row.line));
@@ -930,6 +1052,8 @@
 
         var content = document.createElement('div');
         content.className = 'content';
+        // A member of an expanded group (L26) is indented under its head.
+        if (isMember) { content.classList.add('member'); }
 
         var meta = document.createElement('div');
         meta.className = 'meta';
@@ -945,12 +1069,26 @@
         if (row.db) { meta.appendChild(makePart('part db', '[' + row.db + ']')); }
         if (row.rows_affected != null) { meta.appendChild(makePart('part rows', '(' + row.rows_affected + ')')); }
         if (row.dedupe_count > 1) {
-          var db = makePart('badge dedupe', (L.dedupeBadgePrefix || '') + row.dedupe_count);
-          meta.appendChild(db);
+          var dedupeText = (L.dedupeBadgePrefix || '') + row.dedupe_count;
+          var dedupeTitle = row.expanded ? (L.groupCollapse || '') : (L.groupExpand || '');
+          if (row.dedupe_key) {
+            meta.appendChild(badgeButton(dedupeText, 'dedupe', dedupeTitle, function () {
+              post({ op: 'toggle-group', line: row.line, kind: 'dedupe' });
+            }));
+          } else {
+            meta.appendChild(makePart('badge dedupe', dedupeText));
+          }
         }
         if (row.group_count > 1) {
-          var gb = makePart('badge group', (L.groupBadgePrefix || '') + row.group_count);
-          meta.appendChild(gb);
+          var groupText = (L.groupBadgePrefix || '') + row.group_count;
+          var groupTitle = row.expanded ? (L.groupCollapse || '') : (L.groupExpand || '');
+          if (row.n_plus_one_key) {
+            meta.appendChild(badgeButton(groupText, 'group', groupTitle, function () {
+              post({ op: 'toggle-group', line: row.line, kind: 'group' });
+            }));
+          } else {
+            meta.appendChild(makePart('badge group', groupText));
+          }
         }
         if (row.n_plus_one) {
           var n1 = makePart('badge n1', L.nPlusOne || 'N+1');
@@ -1037,28 +1175,49 @@
         if (changed && line != null) { post({ op: 'log-to-sql', line: line }); }
       }
 
+      // Lane L26: at the bottom means `scrollTop + clientHeight >= scrollHeight
+      // - 4`; the tolerance covers sub-pixel and rounding differences.
+      function atBottom() {
+        var list = $('list');
+        return list.scrollTop + list.clientHeight >= list.scrollHeight - 4;
+      }
+
       function renderList(state) {
         var list = $('list');
         var rows = state.rows || [];
         var threshold = state.slow_threshold_ms;
-        var wasAtBottom = (list.scrollHeight - list.scrollTop - list.clientHeight) < 40;
+        var wasAtBottom = atBottom();
 
         while (list.firstChild) { list.removeChild(list.firstChild); }
         if (rows.length === 0) {
           list.hidden = true;
           $('empty').hidden = false;
+          suppressScroll = true;
           return;
         }
         list.hidden = false;
         $('empty').hidden = true;
         var frag = document.createDocumentFragment();
+        // A row belongs to an expanded group when its group key repeats the
+        // previous row's key (the host emits the occurrences contiguously);
+        // those rows render indented, each with its own time and duration.
+        var prevDedupe = '';
+        var prevNPlusOne = '';
         for (var i = 0; i < rows.length; i++) {
-          frag.appendChild(buildRow(rows[i], threshold));
+          var row = rows[i];
+          var isMember = !!((row.dedupe_key && row.dedupe_key === prevDedupe) ||
+            (row.n_plus_one_key && row.n_plus_one_key === prevNPlusOne));
+          frag.appendChild(buildRow(row, threshold, isMember));
+          prevDedupe = row.dedupe_key || '';
+          prevNPlusOne = row.n_plus_one_key || '';
         }
         list.appendChild(frag);
         if (selectedLine != null) { selectLine(selectedLine); }
         var paused = state.status && state.status.paused;
-        if (!paused && wasAtBottom) { list.scrollTop = list.scrollHeight; }
+        // Auto-scroll only while following (L26); the rebuild's own scroll
+        // event is swallowed so it never looks like the user scrolled away.
+        suppressScroll = true;
+        if (!paused && follow && wasAtBottom) { list.scrollTop = list.scrollHeight; }
       }
 
       function updateCounts(state) {
@@ -1090,11 +1249,19 @@
           mid = (L.totalPrefix || '') + ' ' + (c.total || 0) + ' ' + (L.totalSuffix || '');
         }
         setText($('statusMid'), mid.replace(/\s+/g, ' ').trim());
-        if (s.agent_connected) {
-          setText($('statusRight'), (L.statusAgentEventsPrefix || '') + ' ' + (s.agent_events || 0));
+        // The right segment names the first mode that changes what the user
+        // sees: refresh paused, follow paused, then the capture channel (L26).
+        var right;
+        if (s.paused) {
+          right = L.paused || '';
+        } else if (s.follow === false) {
+          right = L.followOff || '';
+        } else if (s.agent_connected) {
+          right = (L.statusAgentEventsPrefix || '') + ' ' + (s.agent_events || 0);
         } else {
-          setText($('statusRight'), L.statusAgentOff || '');
+          right = L.statusAgentOff || '';
         }
+        setText($('statusRight'), right);
       }
 
       // Tabs ----------------------------------------------------------------
@@ -1140,6 +1307,7 @@
           var r = rows[i];
           parts.push(r.line + '/' + r.seq + '/' + r.sql_type + '/' + r.category + '/' +
             r.dedupe_count + '/' + r.group_count + '/' + (r.n_plus_one ? 1 : 0) + '/' +
+            (r.dedupe_key || '') + '/' + (r.n_plus_one_key || '') + '/' + (r.expanded ? 1 : 0) + '/' +
             (r.class_simple || '') + '#' + (r.method || '') + '/' +
             (r.jump_file || '') + ':' + (r.jump_line == null ? '' : r.jump_line) + '/' +
             (r.xml_file || '') + ':' + (r.xml_line == null ? '' : r.xml_line) + '/' +
@@ -1446,6 +1614,7 @@
         syncTypeCheckboxes();
         updateTypeButton();
         renderFocusChips(state);
+        renderBlocked(state);
         var sig = rowsSignature(state.rows || []);
         if (sig !== rowsSig) {
           rowsSig = sig;
@@ -1468,6 +1637,33 @@
       function openTypeMenu(open) {
         $('typeMenu').hidden = !open;
         $('typeBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+
+      // Blocked-methods popup (L26): the eye-off button lists the muted
+      // class#method keys and offers to restore them all.
+      function openBlockedMenu(open) {
+        $('blockedMenu').hidden = !open;
+        $('blockedBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+
+      function renderBlocked(state) {
+        var list = $('blockedList');
+        while (list.firstChild) { list.removeChild(list.firstChild); }
+        var keys = (state.filter && state.filter.blocked) || [];
+        if (keys.length === 0) {
+          $('blockedEmpty').hidden = false;
+          setText($('blockedEmpty'), L.blockedEmpty || '');
+          $('blockedClear').hidden = true;
+          return;
+        }
+        $('blockedEmpty').hidden = true;
+        $('blockedClear').hidden = false;
+        for (var i = 0; i < keys.length; i++) {
+          var item = document.createElement('div');
+          item.className = 'menu-item';
+          item.textContent = keys[i];
+          list.appendChild(item);
+        }
       }
 
       // Context menu --------------------------------------------------------
@@ -1654,6 +1850,47 @@
       $('pauseBtn').addEventListener('click', function () { post({ op: 'toggle-pause' }); });
       $('clearBtn').addEventListener('click', function () { post({ op: 'clear' }); });
       $('copyAllBtn').addEventListener('click', function () { post({ op: 'copy-all' }); });
+
+      // Toolbar actions (lane L26).
+      $('captureBtn').addEventListener('click', function () {
+        var connected = !!(current && current.status && current.status.agent_connected);
+        post({ op: connected ? 'capture-stop' : 'capture-start' });
+      });
+      $('scrollEndBtn').addEventListener('click', function () {
+        follow = true;
+        $('list').scrollTop = $('list').scrollHeight;
+        post({ op: 'scroll-end' });
+      });
+      $('sortBtn').addEventListener('click', function () {
+        sortMode = sortMode === 'duration' ? 'time' : 'duration';
+        post({ op: 'sort', sort: sortMode });
+      });
+      $('blockedBtn').addEventListener('click', function (event) {
+        event.stopPropagation();
+        openBlockedMenu($('blockedMenu').hidden);
+      });
+      $('blockedMenu').addEventListener('click', function (event) { event.stopPropagation(); });
+      $('blockedClear').addEventListener('click', function () {
+        post({ op: 'clear-blocked' });
+        openBlockedMenu(false);
+      });
+      $('settingsBtn').addEventListener('click', function () { post({ op: 'settings' }); });
+      $('helpBtn').addEventListener('click', function () { post({ op: 'help' }); });
+
+      // Follow (lane L26): scrolling away from the bottom pauses it, scrolling
+      // back restores it; the host mirrors the flag for the status line.
+      $('list').addEventListener('scroll', function () {
+        if (suppressScroll) { suppressScroll = false; return; }
+        var bottom = atBottom();
+        if (bottom && !follow) {
+          follow = true;
+          post({ op: 'follow', follow: true });
+        } else if (!bottom && follow) {
+          follow = false;
+          post({ op: 'follow', follow: false });
+        }
+      });
+
       $('dedupe').addEventListener('change', function () { ui.dedupe = this.checked; postFilter(); });
 
       $('ctxMenu').addEventListener('click', function (event) {
@@ -1674,7 +1911,7 @@
         closeCtx();
       });
 
-      document.addEventListener('click', function () { openTypeMenu(false); closeCtx(); });
+      document.addEventListener('click', function () { openTypeMenu(false); openBlockedMenu(false); closeCtx(); });
       document.addEventListener('keydown', function (event) {
         // Ctrl+Tab / Ctrl+Shift+Tab cycle the four tabs. The IDE may consume
         // this chord before the page sees it; the mouse always works.
@@ -1695,6 +1932,7 @@
         }
         if (event.key === 'Escape') {
           if (!$('ctxMenu').hidden) { closeCtx(); return; }
+          if (!$('blockedMenu').hidden) { openBlockedMenu(false); return; }
           if (!$('typeMenu').hidden) { openTypeMenu(false); return; }
           if (!$('searchRow').hidden) {
             $('searchRow').hidden = true;
