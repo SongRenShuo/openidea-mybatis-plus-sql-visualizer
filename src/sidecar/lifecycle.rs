@@ -287,12 +287,15 @@ pub fn parse_health_version(stdout: &str) -> Option<String> {
         if line.is_empty() {
             continue;
         }
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
-            if value.get("ok").and_then(|v| v.as_bool()) == Some(true) {
-                if let Some(v) = value.get("version").and_then(|v| v.as_str()) {
-                    return Some(v.to_string());
-                }
-            }
+        let value: serde_json::Value = match serde_json::from_str(line) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if value.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+            continue;
+        }
+        if let Some(version) = value.get("version").and_then(|v| v.as_str()) {
+            return Some(version.to_string());
         }
     }
     None

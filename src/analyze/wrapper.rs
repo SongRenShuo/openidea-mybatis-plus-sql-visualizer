@@ -221,7 +221,7 @@ pub fn render(text: &str, columns: &EntityColumns, dialect: &Dialect) -> Wrapper
     };
 
     let mut pending = Connector::And;
-    let nodes = parse_calls(&calls, &mut pending, &mut chain, &mut ctx, &mut false);
+    let nodes = parse_calls(&calls, &mut pending, &mut chain, &mut ctx);
 
     chain.conditions = nodes;
 
@@ -451,7 +451,6 @@ fn parse_calls(
     pending: &mut Connector,
     chain: &mut WrapperChain,
     ctx: &mut Ctx,
-    group_ctx: &mut bool,
 ) -> Vec<CondNode> {
     let mut nodes = Vec::new();
     for call in calls {
@@ -478,8 +477,7 @@ fn parse_calls(
                     chain.unsupported.push(format!("{}(group)", call.name));
                 } else {
                     let mut inner_pending = Connector::And;
-                    let inner =
-                        parse_calls(&inner_calls, &mut inner_pending, chain, ctx, &mut true);
+                    let inner = parse_calls(&inner_calls, &mut inner_pending, chain, ctx);
                     nodes.push(CondNode::Group { connector, inner });
                 }
             }
@@ -530,7 +528,6 @@ fn parse_calls(
             }
         }
     }
-    let _ = group_ctx;
     nodes
 }
 
@@ -586,11 +583,10 @@ fn parse_leaf(op: Op, raw_args: &[String], connector: Connector, ctx: &mut Ctx) 
     // Conditional form `eq(boolean condition, column, value)`: skip when false.
     let mut args: &[String] = raw_args;
     if args.len() > base {
-        if let Some(cond) = args.first().and_then(|a| parse_bool(a)) {
-            if !cond {
-                return LeafOutcome::Skip;
-            }
-            args = &args[1..];
+        match args.first().and_then(|a| parse_bool(a)) {
+            Some(false) => return LeafOutcome::Skip,
+            Some(true) => args = &args[1..],
+            None => {}
         }
     }
 
