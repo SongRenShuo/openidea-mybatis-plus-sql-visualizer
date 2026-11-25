@@ -23,14 +23,6 @@ impl Param {
             ty: None,
         }
     }
-
-    pub(crate) fn untyped(value: impl Into<String>) -> Self {
-        let value = value.into();
-        Self {
-            value: if value.is_empty() { None } else { Some(value) },
-            ty: None,
-        }
-    }
 }
 
 /// Parse a MyBatis `Parameters:` payload: `1(Long), abc(String), null`.
@@ -42,7 +34,7 @@ pub(crate) fn parse_mybatis(text: &str) -> Vec<Param> {
     let mut out = Vec::new();
     let mut rest = text.trim();
     loop {
-        rest = rest.trim_start_matches(|c: char| c == ',' || c == ' ' || c == '\t');
+        rest = rest.trim_start_matches([',', ' ', '\t']);
         if rest.is_empty() {
             break;
         }
@@ -117,18 +109,18 @@ fn find_typed(rest: &str) -> Option<(&str, &str, usize)> {
     let b = rest.as_bytes();
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'(' {
-            if let Some(type_end) = read_type(rest, i + 1) {
-                let mut j = type_end + 1;
-                while j < b.len() && (b[j] == b' ' || b[j] == b'\t') {
-                    j += 1;
-                }
-                if j == b.len() || b[j] == b',' {
-                    let value = rest[..i].trim();
-                    let ty = &rest[i + 1..type_end];
-                    let consumed = if j < b.len() { j + 1 } else { b.len() };
-                    return Some((value, ty, consumed));
-                }
+        if b[i] == b'('
+            && let Some(type_end) = read_type(rest, i + 1)
+        {
+            let mut j = type_end + 1;
+            while j < b.len() && (b[j] == b' ' || b[j] == b'\t') {
+                j += 1;
+            }
+            if j == b.len() || b[j] == b',' {
+                let value = rest[..i].trim();
+                let ty = &rest[i + 1..type_end];
+                let consumed = if j < b.len() { j + 1 } else { b.len() };
+                return Some((value, ty, consumed));
             }
         }
         i += 1;

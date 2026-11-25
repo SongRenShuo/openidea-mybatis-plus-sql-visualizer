@@ -132,10 +132,12 @@ fn p6spy_duration(fields: &[&str]) -> Option<f64> {
     }
     for field in fields {
         let token = field.trim();
-        if token.len() <= 9 && token.bytes().all(|b| b.is_ascii_digit()) && !token.is_empty() {
-            if let Ok(value) = token.parse::<f64>() {
-                return Some(value);
-            }
+        if token.len() <= 9
+            && token.bytes().all(|b| b.is_ascii_digit())
+            && !token.is_empty()
+            && let Ok(value) = token.parse::<f64>()
+        {
+            return Some(value);
         }
     }
     None

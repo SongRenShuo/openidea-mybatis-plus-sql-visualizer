@@ -4,7 +4,7 @@
 //! hand-written scanners in the wasm module), so every matcher here is a
 //! linear scan over ASCII bytes.
 
-use super::model::{EntryClass, message_keys};
+use super::model::EntryClass;
 
 /// Case-insensitive substring search. `needle` must be ASCII lower-case.
 pub(crate) fn find_ci(haystack: &str, needle_lower: &str) -> Option<usize> {
@@ -34,11 +34,6 @@ pub(crate) fn find_ci(haystack: &str, needle_lower: &str) -> Option<usize> {
 /// Byte index just after `needle`, or `None`.
 pub(crate) fn after_ci(haystack: &str, needle_lower: &str) -> Option<usize> {
     find_ci(haystack, needle_lower).map(|i| i + needle_lower.len())
-}
-
-/// Trim ASCII spaces and tabs (not newlines; callers work per line).
-pub(crate) fn trim_ascii(s: &str) -> &str {
-    s.trim_matches(|c| c == ' ' || c == '\t')
 }
 
 /// First whitespace-delimited token, upper-cased for classification.
@@ -314,6 +309,3 @@ pub(crate) fn unparsed_line(line_no: usize, text: &str, key: &str) -> super::mod
         message_key: key.to_string(),
     }
 }
-
-/// Convenience for the "SQL-looking but unrecognised" unparsed key.
-pub(crate) const UNRECOGNIZED_SQL: &str = message_keys::UNPARSED_UNRECOGNIZED_SQL;
