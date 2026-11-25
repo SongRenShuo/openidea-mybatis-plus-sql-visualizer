@@ -155,8 +155,12 @@ name = "version"    # 许可：Apache-2.0；理由：一句
 1. `git status --short` 必须干净（含工作树）；有脏改动先让该车道提交。
 2. `git merge --no-ff feat/<lane>`；冲突优先按「车道新代码 + 主控已合注册」取并集，**禁止整侧 --ours/--theirs**。
 3. 合并后本地跑「一次 `cargo test` + 一次 `openidea-plugin build && check`」，同时推 `ci/gate-<n>` 取 CI 全量结论；
-   CI 红了在车道分支修，重合。CI 的 fmt/clippy 是权威，本地不必重复跑 clippy。
+   CI 红了在车道分支修，重合。CI 的 fmt/clippy 是权威，本地不必重复跑 clippy——**但推 gate 前建议跑一次
+   `cargo clippy --all-targets -- -D warnings`**（增量几秒），因为车道的本地门禁不含 clippy，lint 红了要
+   多一轮往返。读结论必须用 `gh run view <id>` 或 `gh run list` 看状态；**禁止**把
+   `gh run watch … | tail` 的退出码当结论（管道末命令的 0 会掩盖 failure）。
 4. `git merge-base --is-ancestor feat/<lane> master` 为真才 `git branch -d`；worktree 先 remove 再删分支。
+   **删除前提是 CI gate 结论为 success**，不是本地门禁绿。
 5. 全部合并后：应用 registration → 一次 `chore: 注册汇总` 提交 → 全量门禁 → 真机 link 走查 → 写 `docs/开发日志.md`。
 6. 只有用户明确授权后才 push / tag / release。
 
