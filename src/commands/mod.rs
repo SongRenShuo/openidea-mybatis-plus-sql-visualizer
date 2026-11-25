@@ -13,9 +13,16 @@
 // would trip `dead_code` in a non-test build.
 #![allow(dead_code)]
 
+pub mod capture_open_log;
+pub mod capture_poll;
+pub mod capture_start;
+pub mod capture_status;
+pub mod capture_stop;
 pub mod check_sql;
 pub mod common;
 pub mod generate_crud;
+pub mod open_logs;
+pub mod open_workbench;
 pub mod perf_advice;
 pub mod render_log;
 pub mod render_xml;

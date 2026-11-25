@@ -1,9 +1,9 @@
 //! End-to-end checks for the command shells against the mock IDE.
 //!
 //! `src/lib.rs` keeps `mod commands;` private (the controller owns dispatch), so
-//! an integration test cannot `use` the crate's command modules. The two
-//! `#[path]` declarations compile the same sources into this test binary; the
-//! shells depend only on `crate::core` and `crate::commands`, both present here.
+//! an integration test cannot `use` the crate's command modules. The `#[path]`
+//! declarations compile the same sources into this test binary; the shells
+//! exercised here depend only on `crate::core` and `crate::commands`.
 //!
 //! Test names carry `commands` so the lane gate `cargo test commands` runs them.
 
@@ -11,8 +11,30 @@
 // reaches through `lib.rs` look unused from this crate's point of view.
 #![allow(dead_code, unused_imports, unused_variables)]
 
-#[path = "../src/commands/mod.rs"]
-mod commands;
+// Only the shells this file exercises. `src/commands/mod.rs` additionally
+// declares the capture/workbench shells (lane L12), which reach into
+// `crate::capture` and `crate::views`; including the whole tree here would drag
+// the view layer and a `Main` plugin instance into this binary.
+mod commands {
+    #![allow(dead_code, unused_imports)]
+
+    #[path = "../../src/commands/check_sql.rs"]
+    pub mod check_sql;
+    #[path = "../../src/commands/common.rs"]
+    pub mod common;
+    #[path = "../../src/commands/generate_crud.rs"]
+    pub mod generate_crud;
+    #[path = "../../src/commands/perf_advice.rs"]
+    pub mod perf_advice;
+    #[path = "../../src/commands/render_log.rs"]
+    pub mod render_log;
+    #[path = "../../src/commands/render_xml.rs"]
+    pub mod render_xml;
+    #[path = "../../src/commands/rollback_plan.rs"]
+    pub mod rollback_plan;
+
+    pub const CHANNEL: &str = common::CHANNEL;
+}
 #[path = "../src/core/mod.rs"]
 mod core;
 
