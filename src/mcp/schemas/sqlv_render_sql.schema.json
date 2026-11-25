@@ -1,0 +1,55 @@
+{
+  "title": "sqlv_render_sql",
+  "type": "object",
+  "description": "Render one MyBatis mapper statement to SQL with ? placeholders and bound parameters.",
+  "additionalProperties": false,
+  "properties": {
+    "statement_id": {
+      "type": "string",
+      "description": "Statement id: bare (findById) or namespace-qualified (com.example.UserMapper.findById)."
+    },
+    "xml": {
+      "type": "string",
+      "description": "One mapper XML document. Use documents instead when cross-namespace includes are involved."
+    },
+    "documents": {
+      "type": "array",
+      "description": "Several mapper documents (path + text) so namespace-qualified includes resolve across files.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Display path used in diagnostics."
+          },
+          "text": {
+            "type": "string",
+            "description": "Mapper XML text."
+          }
+        },
+        "required": ["path", "text"]
+      }
+    },
+    "params": {
+      "type": ["object", "array", "null"],
+      "description": "Parameter values bound to #{...} and ${...}; a JSON object keyed by mapper variable name, or an array for scalar parameters."
+    }
+  },
+  "required": ["statement_id"],
+  "oneOf": [
+    {
+      "required": ["xml"],
+      "not": {
+        "required": ["documents"]
+      }
+    },
+    {
+      "required": ["documents"],
+      "not": {
+        "required": ["xml"]
+      }
+    }
+  ]
+}

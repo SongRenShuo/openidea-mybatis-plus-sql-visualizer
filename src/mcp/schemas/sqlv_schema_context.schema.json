@@ -1,0 +1,103 @@
+{
+  "title": "sqlv_schema_context",
+  "type": "object",
+  "description": "Format a caller-supplied schema (tables, columns, indexes) as compact DDL-like text for an agent prompt.",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "object",
+      "description": "Schema snapshot; the caller is responsible for obtaining it.",
+      "additionalProperties": false,
+      "properties": {
+        "tables": {
+          "type": "array",
+          "description": "Tables in display order.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Table name.",
+                "minLength": 1
+              },
+              "schema": {
+                "type": "string",
+                "description": "Optional schema/catalog qualifier."
+              },
+              "columns": {
+                "type": "array",
+                "description": "Columns in declaration order.",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Column name.",
+                      "minLength": 1
+                    },
+                    "type": {
+                      "type": "string",
+                      "description": "SQL type, e.g. bigint or varchar(64)."
+                    },
+                    "nullable": {
+                      "type": "boolean",
+                      "description": "True when NULL is allowed."
+                    },
+                    "primary_key": {
+                      "type": "boolean",
+                      "description": "True for primary key columns."
+                    },
+                    "auto_increment": {
+                      "type": "boolean",
+                      "description": "True for database-generated values."
+                    },
+                    "comment": {
+                      "type": "string",
+                      "description": "Column comment, kept as a trailing note."
+                    }
+                  },
+                  "required": ["name"]
+                }
+              },
+              "indexes": {
+                "type": "array",
+                "description": "Indexes defined on the table.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Index name.",
+                      "minLength": 1
+                    },
+                    "columns": {
+                      "type": "array",
+                      "description": "Index columns in order.",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unique": {
+                      "type": "boolean",
+                      "description": "Whether the index is unique."
+                    }
+                  },
+                  "required": ["name", "columns"]
+                }
+              }
+            },
+            "required": ["name", "columns"]
+          }
+        }
+      },
+      "required": ["tables"]
+    }
+  },
+  "required": ["schema"]
+}

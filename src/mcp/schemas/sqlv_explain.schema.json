@@ -1,0 +1,17 @@
+{
+  "title": "sqlv_explain",
+  "type": "object",
+  "description": "Format an EXPLAIN result supplied by the caller as a tree or table. This tool does not execute SQL; without a result it returns unresolved.",
+  "additionalProperties": false,
+  "properties": {
+    "result": {
+      "type": ["object", "array", "null"],
+      "description": "EXPLAIN output already obtained by the caller (MySQL tabular rows or a nested plan object)."
+    },
+    "format": {
+      "type": "string",
+      "description": "Output layout.",
+      "enum": ["table", "tree"]
+    }
+  }
+}
