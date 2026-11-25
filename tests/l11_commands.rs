@@ -15,23 +15,33 @@
 // declares the capture/workbench shells (lane L12), which reach into
 // `crate::capture` and `crate::views`; including the whole tree here would drag
 // the view layer and a `Main` plugin instance into this binary.
+//
+// The `#[path]` modules are declared at the top level (base directory `tests/`)
+// and re-exported under `commands`, which is what the shells import as
+// `crate::commands::…`. Keeping the attributes out of an inline module matters:
+// there the base directory would be the nonexistent `tests/commands/`, which
+// Linux refuses to normalise.
+#[path = "../src/commands/check_sql.rs"]
+pub mod check_sql;
+#[path = "../src/commands/common.rs"]
+pub mod common;
+#[path = "../src/commands/generate_crud.rs"]
+pub mod generate_crud;
+#[path = "../src/commands/perf_advice.rs"]
+pub mod perf_advice;
+#[path = "../src/commands/render_log.rs"]
+pub mod render_log;
+#[path = "../src/commands/render_xml.rs"]
+pub mod render_xml;
+#[path = "../src/commands/rollback_plan.rs"]
+pub mod rollback_plan;
+
 mod commands {
     #![allow(dead_code, unused_imports)]
 
-    #[path = "../../src/commands/check_sql.rs"]
-    pub mod check_sql;
-    #[path = "../../src/commands/common.rs"]
-    pub mod common;
-    #[path = "../../src/commands/generate_crud.rs"]
-    pub mod generate_crud;
-    #[path = "../../src/commands/perf_advice.rs"]
-    pub mod perf_advice;
-    #[path = "../../src/commands/render_log.rs"]
-    pub mod render_log;
-    #[path = "../../src/commands/render_xml.rs"]
-    pub mod render_xml;
-    #[path = "../../src/commands/rollback_plan.rs"]
-    pub mod rollback_plan;
+    pub use super::{
+        check_sql, common, generate_crud, perf_advice, render_log, render_xml, rollback_plan,
+    };
 
     pub const CHANNEL: &str = common::CHANNEL;
 }
