@@ -6,6 +6,10 @@ authors = ["songrenshuo"]
 homepage = "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer"
 license = "Apache-2.0"
 categories = ["tools"]
+# Package logo, the same 40×40 icon the IntelliJ plugin ships (Settings › Plugins
+# and the marketplace). `icon-dark` is the real dark variant.
+icon = "icons/pluginIcon.svg"
+icon-dark = "icons/pluginIcon-dark.svg"
 engines.openidea = "^1.15"
 # Built by `openidea-plugin build`. The code is loaded the first time one of its
 # commands runs; the commands below show in Find Action before that.
@@ -106,17 +110,45 @@ vmOptions = ["-Dmpsv.capture.transport=ws"]
 menu = "projectView.context"
 command = "capture-open-log"
 
+[[contributes.menus]]
+menu = "projectView.context"
+command = "render-xml"
+
+[[contributes.menus]]
+menu = "projectView.context"
+command = "check-sql"
+
+[[contributes.menus]]
+menu = "projectView.context"
+command = "perf-advice"
+
+[[contributes.menus]]
+menu = "projectView.context"
+command = "generate-crud"
+
+[[contributes.menus]]
+menu = "projectView.context"
+command = "rollback-plan"
+
+[[contributes.menus]]
+menu = "projectView.context"
+command = "render-log"
+
+[[contributes.menus]]
+menu = "projectView.context"
+command = "open-workbench"
+
 # Panels (L5). `sqlv-logs` is drawn by code; `sqlv-workbench` is the package page.
 [[contributes.views]]
 id = "sqlv-logs"
 title = "SQL Logs"
-icon = "icons/marker-statement.svg"
+icon = "icons/sqlLog.svg"
 location = "bottom"
 
 [[contributes.views]]
 id = "sqlv-workbench"
 title = "SQL Workbench"
-icon = "icons/mapper-xml.svg"
+icon = "icons/sqlGutter.svg"
 location = "right"
 web = "web/workbench.html"
 
