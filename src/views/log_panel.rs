@@ -684,8 +684,17 @@ window.openidea.postMessage(JSON.stringify(message));}}\
 var cat=document.getElementById('log-category');\
 var kw=document.getElementById('log-keyword');\
 function apply(){post({op:'set-filter',category:cat.value,keyword:kw.value});}\
+var timer=null;\
+function flush(){if(timer){clearTimeout(timer);timer=null;}apply();}\
+function schedule(){if(timer){clearTimeout(timer);}timer=setTimeout(flush,300);}\
 if(cat){cat.addEventListener('change',apply);}\
-if(kw){kw.addEventListener('change',apply);}\
+if(kw){\
+kw.addEventListener('input',schedule);\
+kw.addEventListener('change',flush);\
+kw.addEventListener('keydown',function(e){\
+if(e.key==='Enter'){e.preventDefault();flush();}});}\
+if(kw&&kw.value&&(!document.hasFocus||document.hasFocus())){\
+try{var len=kw.value.length;kw.focus();kw.setSelectionRange(len,len);}catch(_){}}\
 var buttons=document.querySelectorAll('button.expand');\
 for(var i=0;i<buttons.length;i++){(function(b){\
 b.addEventListener('click',function(){post({op:'toggle-group',key:b.getAttribute('data-key')});});\
@@ -1207,6 +1216,65 @@ mod tests {
         let html = html_of(&render_panel(None));
         assert_eq!(row_count(&html), 1);
         assert!(html.contains("SELECT * FROM user"));
+    }
+
+    #[test]
+    fn keyword_box_applies_on_input_enter_and_restores_focus() {
+        let (_host, _guard) = test_host();
+        let html = html_of(&render_panel(None));
+        assert!(
+            html.contains("addEventListener('input'"),
+            "typing in the keyword box applies without waiting for blur"
+        );
+        assert!(html.contains("keydown"), "Enter applies immediately");
+        assert!(
+            html.contains("setTimeout") && html.contains("clearTimeout"),
+            "typing is debounced so every keystroke does not refresh"
+        );
+        assert!(
+            html.contains("kw.focus()"),
+            "focus returns to the keyword box after the re-render"
+        );
+        assert!(
+            html.contains("setSelectionRange"),
+            "the caret is put back at the end of the keyword"
+        );
+        assert!(
+            html.contains("cat.addEventListener('change'"),
+            "the category dropdown still applies on change"
+        );
+        assert!(
+            !html.contains("cat.addEventListener('input'"),
+            "the category dropdown is not debounced"
+        );
+    }
+
+    #[test]
+    fn set_filter_message_narrows_the_panel_rows() {
+        let (_host, _guard) = test_host();
+        set_log_text(
+            "==>  Preparing: SELECT * FROM users WHERE id = ?\n==> Parameters: 1(Long)\n\
+             ==>  Preparing: SELECT * FROM orders WHERE id = ?\n==> Parameters: 2(Long)\n",
+        );
+        let rows = build_rows(&snapshot(), true, &BTreeSet::new(), 1_000.0);
+        let before = paginate(&rows, &store().filter.clone(), None);
+        assert_eq!(before.total, 2, "the fixture holds both statements");
+
+        handle_panel_event(ViewEvent::Message(
+            r#"{"op":"set-filter","category":null,"keyword":"orders"}"#.to_string(),
+        ))
+        .unwrap();
+
+        let filter = store().filter.clone();
+        assert_eq!(filter.keyword, "orders");
+        let after = paginate(&rows, &filter, None);
+        assert_eq!(after.total, 1, "only the matching statement is kept");
+        assert!(after.rows[0].searchable().contains("orders"));
+        assert_eq!(
+            row_count(html_of(&render_panel(None))),
+            1,
+            "the rendered page is narrowed too"
+        );
     }
 
     // Utilities ------------------------------------------------------------
