@@ -151,10 +151,10 @@ pub fn markers_in(doc: &Document) -> Vec<LineMarker> {
     for statement in &facts.statements {
         let Some(id) = &statement.id else { continue };
         let mut target: Option<(&str, &crate::indexer::Named)> = None;
-        if let Some(result_map) = &statement.result_map {
-            if let Some(found) = facts.local_result_map(&result_map.name) {
-                target = Some(("result map", found));
-            }
+        if let Some(result_map) = &statement.result_map
+            && let Some(found) = facts.local_result_map(&result_map.name)
+        {
+            target = Some(("result map", found));
         }
         if target.is_none() {
             for include in &statement.includes {
@@ -182,15 +182,15 @@ pub fn markers_in(doc: &Document) -> Vec<LineMarker> {
                 .iter()
                 .any(|include| refers_to(include.name.as_str(), &fragment.name, &facts.namespace))
         });
-        if let Some(user) = user {
-            if let Some(id) = &user.id {
-                push(LineMarker {
-                    line: fragment.range.start.line,
-                    icon: Some("navigate".to_owned()),
-                    tooltip: format!("MyBatis: used by statement {}", id.name),
-                    target: Some(location(doc, id.range)),
-                });
-            }
+        if let Some(user) = user
+            && let Some(id) = &user.id
+        {
+            push(LineMarker {
+                line: fragment.range.start.line,
+                icon: Some("navigate".to_owned()),
+                tooltip: format!("MyBatis: used by statement {}", id.name),
+                target: Some(location(doc, id.range)),
+            });
         }
     }
     for result_map in &facts.result_maps {
@@ -201,15 +201,15 @@ pub fn markers_in(doc: &Document) -> Vec<LineMarker> {
                 .as_ref()
                 .is_some_and(|reference| refers_to(&reference.name, &id.name, &facts.namespace))
         });
-        if let Some(user) = user {
-            if let Some(user_id) = &user.id {
-                push(LineMarker {
-                    line: id.range.start.line,
-                    icon: Some("navigate".to_owned()),
-                    tooltip: format!("MyBatis: used by statement {}", user_id.name),
-                    target: Some(location(doc, user_id.range)),
-                });
-            }
+        if let Some(user) = user
+            && let Some(user_id) = &user.id
+        {
+            push(LineMarker {
+                line: id.range.start.line,
+                icon: Some("navigate".to_owned()),
+                tooltip: format!("MyBatis: used by statement {}", user_id.name),
+                target: Some(location(doc, user_id.range)),
+            });
         }
     }
     out
