@@ -1,7 +1,13 @@
-//! Annotation SQL rendering (T1-4): `@Select`/`@Update`/`@Insert`/`@Delete`,
-//! `@SelectProvider`-style references and `<script>` bodies.
+//! Annotation SQL rendering (T1-4): `@Select`/`@Update`/`@Insert`/`@Delete`
+//! and `<script>` bodies.
 //!
 //! Lane L1 owns this file; see `docs/TASKS.md` T1-4.
+//!
+//! Provider annotations (`@SelectProvider` / `@InsertProvider` / …) are out of
+//! scope: they require evaluating user code, which a text-level extractor
+//! cannot do. Occurrences inside comments or string literals are matched like
+//! real annotations (the extractor has no PSI); the navigation lane can prefer
+//! PSI results where it has them.
 //!
 //! Two layers, deliberately separate:
 //!

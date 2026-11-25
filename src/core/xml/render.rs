@@ -771,4 +771,12 @@ mod tests {
         let (sql, _, _) = render("SELECT a,b\nFROM t", json!({}));
         assert_eq!(sql, "SELECT a,b\nFROM t");
     }
+
+    #[test]
+    fn cdata_and_entities_reach_the_sql() {
+        // CDATA is literal text (its `<` must not be parsed as markup), while
+        // `&lt;` in plain text is decoded to `<`.
+        let (sql, _, _) = render("<![CDATA[a < b]]> AND x &lt; 3", json!({}));
+        assert_eq!(sql, "a < b  AND x < 3");
+    }
 }
