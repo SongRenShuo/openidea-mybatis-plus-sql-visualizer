@@ -583,12 +583,12 @@ impl Analysis {
                 i = next;
                 continue;
             }
-            if self.is_top_word(i, "JOIN") {
-                if let Some((tr, next)) = self.read_table_ref(i + 1) {
-                    out.push(tr);
-                    i = next;
-                    continue;
-                }
+            if self.is_top_word(i, "JOIN")
+                && let Some((tr, next)) = self.read_table_ref(i + 1)
+            {
+                out.push(tr);
+                i = next;
+                continue;
             }
             i += 1;
         }
@@ -884,10 +884,10 @@ pub(crate) fn resolve_table(refs: &[TableRef], col: &ColumnRef) -> Option<String
     let mut candidates = refs
         .iter()
         .filter(|tr| column_belongs(&tr.name, &col.column));
-    if let Some(first) = candidates.next() {
-        if candidates.next().is_none() {
-            return Some(first.name.clone());
-        }
+    if let Some(first) = candidates.next()
+        && candidates.next().is_none()
+    {
+        return Some(first.name.clone());
     }
     None
 }

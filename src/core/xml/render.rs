@@ -168,21 +168,18 @@ impl Sink for FilteredSink<'_> {
     fn append(&mut self, sql: &str) {
         let rewritten = parse_tokens(sql, "#{", "}", &mut |content| {
             let mut new_content = content.to_string();
-            if let Some(item) = &self.item {
-                if let Some(rewritten) =
+            if let Some(item) = &self.item
+                && let Some(rewritten) =
                     rewrite_name(content, item, &format!("__frch_{item}_{}", self.unique))
-                {
-                    new_content = rewritten;
-                }
+            {
+                new_content = rewritten;
             }
-            if new_content == content {
-                if let Some(index) = &self.index {
-                    if let Some(rewritten) =
-                        rewrite_name(content, index, &format!("__frch_{index}_{}", self.unique))
-                    {
-                        new_content = rewritten;
-                    }
-                }
+            if new_content == content
+                && let Some(index) = &self.index
+                && let Some(rewritten) =
+                    rewrite_name(content, index, &format!("__frch_{index}_{}", self.unique))
+            {
+                new_content = rewritten;
             }
             format!("#{{{new_content}}}")
         });
@@ -513,9 +510,7 @@ pub fn resolve_path(bindings: &BTreeMap<String, Value>, path: &str) -> Value {
     while pos < path.len() {
         let rest = &path[pos..];
         if let Some(after_dot) = rest.strip_prefix('.') {
-            let end = after_dot
-                .find(|c| c == '.' || c == '[')
-                .unwrap_or(after_dot.len());
+            let end = after_dot.find(['.', '[']).unwrap_or(after_dot.len());
             let name = &after_dot[..end];
             current = match &current {
                 Value::Object(map) => map.get(name).cloned().unwrap_or(Value::Null),

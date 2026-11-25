@@ -281,17 +281,17 @@ fn java_edges(facts: &JavaFacts) -> Edges {
                 result_id.range,
             ));
         }
-        if let Some(provider) = &method.provider {
-            if let Some(provider_type) = &provider.provider_type {
-                edges
-                    .references
-                    .push(anchor(type_key(&provider_type.name), provider_type.range));
-                if let Some(method_name) = &provider.method {
-                    edges.references.push(anchor(
-                        java_key(&provider_type.name, &method_name.name),
-                        method_name.range,
-                    ));
-                }
+        if let Some(provider) = &method.provider
+            && let Some(provider_type) = &provider.provider_type
+        {
+            edges
+                .references
+                .push(anchor(type_key(&provider_type.name), provider_type.range));
+            if let Some(method_name) = &provider.method {
+                edges.references.push(anchor(
+                    java_key(&provider_type.name, &method_name.name),
+                    method_name.range,
+                ));
             }
         }
     }

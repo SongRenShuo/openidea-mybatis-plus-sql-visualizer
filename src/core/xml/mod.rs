@@ -32,7 +32,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use xmltree::{Element, XmlNode};
+use xmltree::Element;
 
 pub const KEY_PARSE_FAILED: &str = "xml.parse.failed";
 pub const KEY_ROOT_INVALID: &str = "xml.mapper.root_invalid";
@@ -300,14 +300,17 @@ impl MapperSet {
             if let Some(ns) = &namespace {
                 for (id, element) in &local {
                     let qualified = format!("{ns}.{id}");
-                    if fragments.contains_key(&qualified) {
-                        issues.push(LoadIssue {
-                            path: (*path).to_string(),
-                            message_key: KEY_STATEMENT_DUPLICATE.to_string(),
-                            detail: qualified,
-                        });
-                    } else {
-                        fragments.insert(qualified, element.clone());
+                    match fragments.entry(qualified) {
+                        std::collections::btree_map::Entry::Occupied(entry) => {
+                            issues.push(LoadIssue {
+                                path: (*path).to_string(),
+                                message_key: KEY_STATEMENT_DUPLICATE.to_string(),
+                                detail: entry.key().clone(),
+                            });
+                        }
+                        std::collections::btree_map::Entry::Vacant(slot) => {
+                            slot.insert(element.clone());
+                        }
                     }
                 }
             }
@@ -412,20 +415,6 @@ impl MapperSet {
             _ => RenderOutput::unresolved(KEY_STATEMENT_AMBIGUOUS, qualified_id.to_string()),
         }
     }
-}
-
-/// Helper used by tests: an empty `<mapper/>`.
-pub(crate) fn empty_mapper() -> Element {
-    Element {
-        name: "mapper".to_string(),
-        attrs: Vec::new(),
-        children: Vec::new(),
-    }
-}
-
-/// Helper used by tests: removes and returns an element's children.
-pub(crate) fn take_children(element: &mut Element) -> Vec<XmlNode> {
-    std::mem::take(&mut element.children)
 }
 
 #[cfg(test)]
@@ -640,12 +629,5 @@ mod tests {
         assert_eq!(out.confidence, Confidence::Exact);
         assert_eq!(compact(&out.sql), "SELECT * FROM t WHERE id IN (?,?,?)");
         assert_eq!(out.params, vec![json!(1), json!(2), json!(3)]);
-    }
-
-    #[test]
-    fn helpers_are_stable() {
-        let mut element = empty_mapper();
-        assert!(take_children(&mut element).is_empty());
-        assert_eq!(element.name, "mapper");
     }
 }

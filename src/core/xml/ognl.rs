@@ -472,10 +472,12 @@ impl<'a> Parser<'a> {
 }
 
 fn parse_number_value(raw: &str) -> Value {
-    if !raw.contains('.') && !raw.contains('e') && !raw.contains('E') {
-        if let Ok(i) = raw.parse::<i64>() {
-            return Value::Number(i.into());
-        }
+    if !raw.contains('.')
+        && !raw.contains('e')
+        && !raw.contains('E')
+        && let Ok(i) = raw.parse::<i64>()
+    {
+        return Value::Number(i.into());
     }
     match raw.parse::<f64>() {
         Ok(f) => serde_json::Number::from_f64(f)

@@ -20,10 +20,10 @@ pub(crate) struct Region {
 /// methods. Non-mapper XML yields nothing.
 pub(crate) fn regions(text: &str) -> Vec<Region> {
     let elements = scan::elements(text);
-    if let Some(root) = elements.iter().find(|e| e.parent.is_none()) {
-        if root.name == "mapper" {
-            return xml_regions(text, &elements);
-        }
+    if let Some(root) = elements.iter().find(|e| e.parent.is_none())
+        && root.name == "mapper"
+    {
+        return xml_regions(text, &elements);
     }
     java_regions(text)
 }
@@ -110,10 +110,10 @@ pub(crate) fn skip_ws(text: &str, i: usize) -> usize {
 pub(crate) fn unquote(name: &str) -> &str {
     let name = name.trim();
     for (open, close) in [('`', '`'), ('"', '"'), ('[', ']')] {
-        if let Some(rest) = name.strip_prefix(open) {
-            if let Some(inner) = rest.strip_suffix(close) {
-                return inner.trim();
-            }
+        if let Some(rest) = name.strip_prefix(open)
+            && let Some(inner) = rest.strip_suffix(close)
+        {
+            return inner.trim();
         }
     }
     name

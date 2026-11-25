@@ -244,13 +244,13 @@ impl Renderer<'_> {
             return Ok(());
         }
         let mut body = normalized;
-        if text.post_parse {
-            if let Some(index) = self.state.iterate_stack.last().copied() {
-                if self.state.iterates[index].allow_next {
-                    self.advance(index);
-                }
-                body = self.iterate_property_replace(&body, index);
+        if text.post_parse
+            && let Some(index) = self.state.iterate_stack.last().copied()
+        {
+            if self.state.iterates[index].allow_next {
+                self.advance(index);
             }
+            body = self.iterate_property_replace(&body, index);
         }
         let parsed = token::parse_inline(&body);
         for warning in parsed.warnings {
@@ -291,15 +291,14 @@ impl Renderer<'_> {
             }
         }
         self.pop_marker(tag_id);
-        if tag.kind == TagKind::Iterate {
-            if let Some(index) = self.state.attributes.remove(&tag_id) {
-                if self.state.iterate_stack.last().copied() == Some(index) {
-                    self.state.iterate_stack.pop();
-                } else if let Some(position) =
-                    self.state.iterate_stack.iter().position(|i| *i == index)
-                {
-                    self.state.iterate_stack.remove(position);
-                }
+        if tag.kind == TagKind::Iterate
+            && let Some(index) = self.state.attributes.remove(&tag_id)
+        {
+            if self.state.iterate_stack.last().copied() == Some(index) {
+                self.state.iterate_stack.pop();
+            } else if let Some(position) = self.state.iterate_stack.iter().position(|i| *i == index)
+            {
+                self.state.iterate_stack.remove(position);
             }
         }
         Ok(())
@@ -332,23 +331,22 @@ impl Renderer<'_> {
         if tag.kind == TagKind::Iterate {
             return self.end_iterate(tag, tag_id, body);
         }
-        if tag.kind != TagKind::Dynamic {
-            if let Some(index) = self.state.iterate_stack.last().copied() {
-                if self.state.iterates[index].allow_next {
-                    self.advance(index);
-                }
-            }
+        if tag.kind != TagKind::Dynamic
+            && let Some(index) = self.state.iterate_stack.last().copied()
+            && self.state.iterates[index].allow_next
+        {
+            self.advance(index);
         }
         Ok(base_end_fragment(tag, body))
     }
 
     fn do_prepend(&mut self, tag: &IbatisTag, tag_id: usize, body: &mut String) {
         if tag.kind == TagKind::Iterate {
-            if let Some(index) = self.state.attributes.get(&tag_id).copied() {
-                if self.state.iterates[index].is_prepend_enabled {
-                    self.base_prepend(tag, body);
-                    self.state.iterates[index].is_prepend_enabled = false;
-                }
+            if let Some(index) = self.state.attributes.get(&tag_id).copied()
+                && self.state.iterates[index].is_prepend_enabled
+            {
+                self.base_prepend(tag, body);
+                self.state.iterates[index].is_prepend_enabled = false;
             }
             return;
         }
@@ -570,15 +568,15 @@ impl Renderer<'_> {
     fn resolve_property(&mut self, tag: &IbatisTag) -> Option<String> {
         let property = tag.property.clone()?;
         let iterate = self.state.iterate_stack.last().copied();
-        if let Some(index) = iterate {
-            if self.state.iterates[index].allow_next {
-                self.advance(index);
-            }
+        if let Some(index) = iterate
+            && self.state.iterates[index].allow_next
+        {
+            self.advance(index);
         }
-        if property.contains('[') {
-            if let Some(index) = iterate {
-                return Some(self.add_index_to_tag_property(index, &property));
-            }
+        if property.contains('[')
+            && let Some(index) = iterate
+        {
+            return Some(self.add_index_to_tag_property(index, &property));
         }
         Some(property)
     }
@@ -672,10 +670,8 @@ impl Renderer<'_> {
     }
 
     fn pop_marker(&mut self, tag_id: usize) {
-        if let Some((top_id, _)) = self.state.markers.last() {
-            if *top_id == tag_id {
-                self.state.markers.pop();
-            }
+        if self.state.markers.last().map(|(top_id, _)| *top_id) == Some(tag_id) {
+            self.state.markers.pop();
         }
     }
 
@@ -1003,11 +999,11 @@ mod tests {
     #[test]
     fn comparison_tags() {
         let out = render("conds", json!({"age": 10, "known": 1, "nam": "y"}));
-        assert!(out.sql.contains("age = 18") == false);
+        assert!(!out.sql.contains("age = 18"));
         assert!(out.sql.contains("nam <> x"));
-        assert!(out.sql.contains("age > 10") == false);
+        assert!(!out.sql.contains("age > 10"));
         assert!(out.sql.contains("age >= 10"));
-        assert!(out.sql.contains("age < 10") == false);
+        assert!(!out.sql.contains("age < 10"));
         assert!(out.sql.contains("age <= 10"));
     }
 
