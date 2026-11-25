@@ -957,6 +957,10 @@ mod tests {
 
     #[test]
     fn polling_without_a_session_is_a_readable_error() {
+        // The mock host is per-thread: without installing one here the first
+        // host call panics with "no mock host" (it passed on Windows only by
+        // reusing the thread a previous test had installed one on).
+        let _host = install();
         let _guard = guard();
         assert_eq!(
             poll_inner(0, &mut |_| {}).unwrap_err(),
