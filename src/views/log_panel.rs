@@ -42,6 +42,27 @@ const SQL_DISPLAY_CHARS: usize = 180;
 const DEFAULT_BUFFER_CAP: i64 = 50;
 const MAX_BUFFER_CAP: i64 = 100_000;
 
+/// `logs.displayMode` (lane L34): how the list shows a statement.
+/// `keyword_wrap` is the default and the reference's three-line cell.
+const DISPLAY_MODE_SETTING: &str = "logs.displayMode";
+/// `log.showDuration` (lane L34): the row header's duration segment.
+const SHOW_DURATION_SETTING: &str = "log.showDuration";
+
+/// Normalises `logs.displayMode` to its three tokens; an unknown stored value
+/// falls back to `keyword_wrap` instead of guessing a fold.
+///
+/// The mapping from mode to statement lines lives in the page (`modeLineLimit`
+/// in `web/log-panel.html`): `single` 1 line, `multi` no fold, `keyword_wrap`
+/// the reference's three lines plus `… (+N)`. The state carries the token, so
+/// the page never re-reads the setting.
+pub fn display_mode(value: &str) -> &'static str {
+    match value {
+        "single" => "single",
+        "multi" => "multi",
+        _ => "keyword_wrap",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -1234,6 +1255,13 @@ fn build_state() -> Value {
     let send_to_tab = state.send_to_tab.clone();
     drop(state);
 
+    // Lane L34: the two log-list display settings. Both are read on every push,
+    // so a change lands with the next state and needs no restart. The page owns
+    // the folding, so it receives the resolved mode and its line limit rather
+    // than re-implementing the mapping.
+    let display = display_mode(&settings::get_string(DISPLAY_MODE_SETTING, "keyword_wrap"));
+    let show_duration = settings::get_bool(SHOW_DURATION_SETTING, true);
+
     // The fifth tab (lane L23) is the preview workbench: the model and the
     // ops live in `views::workbench`, the state, the page and the push channel
     // are this panel's. `selectTab` is `null` unless something asked for it
@@ -1311,6 +1339,9 @@ fn build_state() -> Value {
         },
         "sort": sort.token(),
         "slow_threshold_ms": slow_threshold_ms,
+        // Lane L34: `logs.displayMode` / `log.showDuration`.
+        "displayMode": display,
+        "showDuration": show_duration,
         "labels": labels_json(),
     })
 }
@@ -2221,6 +2252,14 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
         "tab" => {
             crate::views::workbench::note_page_tab();
             store().send_to_tab = None;
+            // Lane L34: reporting the tab is also the point where a hand-off
+            // (open-workbench / open-line / history-open / preview-sql) has
+            // landed, so `render.formatOnPreview` is applied here. A changed
+            // model needs its own push: the page is already showing the tab and
+            // would otherwise keep the unformatted statement.
+            if crate::views::workbench::format_handoff_sql() {
+                let _ = push_state();
+            }
         }
         // Lane L32: "发送到 SQL→Java" / "发送到 日志→SQL". The two tabs' input
         // panes are the next lane's work; what this lane owes them is the
@@ -3021,6 +3060,77 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         let raw = state.to_string();
         assert!(!raw.contains("<div"), "no html markup in state");
         assert!(!raw.contains("<tr"), "no html markup in state");
+    }
+
+    #[test]
+    fn display_mode_normalises_the_setting() {
+        // A stored value outside the enum falls back to the default instead of
+        // guessing a fold; the three tokens are what the page branches on.
+        assert_eq!(display_mode("single"), "single");
+        assert_eq!(display_mode("multi"), "multi");
+        assert_eq!(display_mode("keyword_wrap"), "keyword_wrap");
+        assert_eq!(display_mode("weird"), "keyword_wrap");
+    }
+
+    #[test]
+    fn the_state_carries_the_display_mode() {
+        // The page owns the folding and branches on the pushed token, so the
+        // host only normalises the setting; every push carries it.
+        for (stored, mode) in [
+            ("single", "single"),
+            ("multi", "multi"),
+            ("keyword_wrap", "keyword_wrap"),
+        ] {
+            let (host, _guard) = test_host();
+            host.set_setting("logs.displayMode", &format!("\"{stored}\""));
+            set_log_text(MIXED_LOG);
+            handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+            assert_eq!(state_of(&host)["displayMode"], mode, "{stored}");
+        }
+    }
+
+    #[test]
+    fn the_state_carries_the_duration_flag() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(
+            state_of(&host)["showDuration"],
+            true,
+            "the reference default shows the duration"
+        );
+        host.set_setting("log.showDuration", "false");
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["showDuration"], false);
+    }
+
+    #[test]
+    fn the_page_applies_the_display_mode_and_the_duration_flag() {
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        // Lane L34: the three modes map to the statement lines a row shows —
+        // one, none (0 = unfold), or the reference's three-line cell.
+        assert!(page.contains("sqlLineLimit = modeLineLimit(state.displayMode);"));
+        assert!(page.contains("function modeLineLimit(mode)"));
+        assert!(page.contains("if (mode === 'single') { return 1; }"));
+        assert!(page.contains("if (mode === 'multi') { return 0; }"));
+        assert!(page.contains("return SQL_MAX_LINES;"));
+        assert!(page.contains("var limit = sqlLineLimit;"));
+        assert!(page.contains("if (limit <= 0 || lines.length <= limit)"));
+        assert!(page.contains("var SQL_MAX_LINES = 3;"));
+        // The duration segment (and the slow tint on it) is dropped when the
+        // flag is off; the rest of the header stays.
+        assert!(page.contains("showDuration = state.showDuration !== false;"));
+        // The segment is only built when the flag is on, so hiding it cannot
+        // leave an empty `.dur` node behind.
+        let guard = page
+            .find("if (showDuration) {")
+            .expect("the duration is conditional");
+        assert!(page[guard..].contains("meta.appendChild(dur);"));
+        // The settings are part of the list identity, so a change re-renders
+        // the rows even when no new row was captured.
+        assert!(page.contains("function displayKey(state)"));
+        assert!(page.contains("+ '#' + (state.dialect || '') + '#' + displayKey(state);"));
     }
 
     #[test]
@@ -4381,6 +4491,58 @@ Preparing: DELETE FROM users WHERE id = ?
         assert!(
             state_of(&host)["selectTab"].is_null(),
             "the page confirmed its tab, so the request is done"
+        );
+    }
+
+    #[test]
+    fn a_tab_report_formats_a_handed_off_statement() {
+        // Lane L34: `open-workbench` / `open-line` / `preview-sql` set the
+        // model and ask for the preview tab; the page's `tab` report is where
+        // the hand-off lands, and `render.formatOnPreview` (default on)
+        // formats it before the push.
+        let (host, _guard) = test_host();
+        let input = "select id from t where a = 1";
+        crate::views::workbench::set_model(crate::views::workbench::WorkbenchModel::new(
+            input,
+            Vec::new(),
+            "MySQL",
+        ));
+        crate::views::workbench::request_input_replace();
+        handle_panel_message(&host, "{\"op\":\"tab\",\"tab\":\"preview\"}").unwrap();
+        let preview = &state_of(&host)["tabs"]["preview"];
+        let sql = preview["model"]["sql"].as_str().expect("the model sql");
+        assert_ne!(sql, input, "the handed-off statement is formatted");
+        assert!(sql.to_uppercase().contains("SELECT"), "{sql}");
+        assert_eq!(
+            preview["replaceInput"], true,
+            "the input box is rewritten with the formatted statement too"
+        );
+    }
+
+    #[test]
+    fn a_tab_report_keeps_the_handed_off_statement_when_formatting_is_off() {
+        let (host, _guard) = test_host();
+        host.set_setting("render.formatOnPreview", "false");
+        let input = "  select id\nfrom t where a=1  ";
+        crate::views::workbench::set_model(crate::views::workbench::WorkbenchModel::new(
+            input,
+            Vec::new(),
+            "MySQL",
+        ));
+        crate::views::workbench::request_input_replace();
+        handle_panel_message(&host, "{\"op\":\"tab\",\"tab\":\"preview\"}").unwrap();
+        // Nothing to format means no extra push; the model is read directly and
+        // the next state (a `ready`, a filter, a capture refresh) carries it.
+        assert_eq!(
+            crate::views::workbench::model().sql,
+            input,
+            "with the setting off the statement is byte-identical"
+        );
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(
+            state_of(&host)["tabs"]["preview"]["model"]["sql"],
+            input,
+            "the pushed state keeps every byte too"
         );
     }
 
