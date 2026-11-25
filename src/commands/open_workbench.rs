@@ -43,7 +43,6 @@ fn open(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
         configured
     };
 
-    let payload = bridge::workbench_payload(&sql, &dialect, source.as_deref());
     let mut model = workbench::WorkbenchModel::new(&sql, Vec::new(), &dialect);
     model.confidence = if sql.trim().is_empty() {
         String::new()
@@ -55,7 +54,9 @@ fn open(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     }
     workbench::set_model(model);
 
-    host::post_view_message(workbench::VIEW_ID, &payload)
+    // The page renders the `state` shape and shows the statement in the input
+    // pane; the legacy `{op:"load"}` is not understood by it any more.
+    workbench::push_state_with("", true)
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
     host::reveal_view(workbench::VIEW_ID)
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
@@ -63,8 +64,7 @@ fn open(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "-- open-workbench: posted {} bytes to {} (dialect: {}, sql: {} chars)",
-        payload.len(),
+        "-- open-workbench: sent to {} (dialect: {}, sql: {} chars)",
         workbench::VIEW_ID,
         dialect,
         sql.chars().count()
@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn commands_open_workbench_posts_a_load_message_and_reveals_the_page() {
+    fn commands_open_workbench_posts_a_state_message_and_reveals_the_page() {
         with_model_restore(|| {
             let host = MockHost::install();
             run(&host.invocation(), Some("select * from user")).unwrap();
@@ -101,7 +101,8 @@ mod tests {
             assert_eq!(messages.len(), 1, "{messages:?}");
             assert_eq!(messages[0].0, workbench::VIEW_ID);
             let value: Value = serde_json::from_str(&messages[0].1).expect("valid JSON");
-            assert_eq!(value["op"], "load");
+            assert_eq!(value["op"], "state");
+            assert_eq!(value["replaceInput"], true);
             assert_eq!(value["model"]["sql"], "select * from user");
             assert_eq!(value["model"]["params"], json!([]));
             assert!(
@@ -109,10 +110,10 @@ mod tests {
                     .as_str()
                     .is_some_and(|d| !d.is_empty())
             );
-            assert!(value["labels"]["sql"].as_str().is_some());
+            assert!(value["labels"].is_object());
             assert_eq!(host.revealed_views(), [workbench::VIEW_ID.to_string()]);
             assert!(
-                host.output()[common::CHANNEL].contains("-- open-workbench: posted"),
+                host.output()[common::CHANNEL].contains("-- open-workbench: sent to"),
                 "{}",
                 &host.output()[common::CHANNEL]
             );
