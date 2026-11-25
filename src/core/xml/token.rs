@@ -19,42 +19,36 @@ pub fn parse_tokens(
     let bytes = text.as_bytes();
     let mut result = String::with_capacity(text.len());
     let mut offset = 0usize;
-    loop {
-        let start = match text[offset..].find(open) {
-            Some(i) => offset + i,
-            None => break,
-        };
+    while let Some(relative) = text[offset..].find(open) {
+        let start = offset + relative;
         if start > 0 && bytes[start - 1] == b'\\' {
             result.push_str(&text[offset..start - 1]);
             result.push_str(open);
             offset = start + open.len();
-        } else {
-            result.push_str(&text[offset..start]);
-            offset = start + open.len();
-            let mut end = text[offset..].find(close).map(|i| offset + i);
-            while let Some(e) = end {
-                if e > offset && bytes[e - 1] == b'\\' {
-                    result.push_str(&text[offset..e - 1]);
-                    result.push_str(close);
-                    offset = e + close.len();
-                    end = text[offset..].find(close).map(|i| offset + i);
-                } else {
-                    break;
-                }
-            }
-            match end {
-                None => {
-                    result.push_str(&text[start..]);
-                    offset = text.len();
-                }
-                Some(e) => {
-                    result.push_str(&handler(&text[offset..e]));
-                    offset = e + close.len();
-                }
+            continue;
+        }
+        result.push_str(&text[offset..start]);
+        offset = start + open.len();
+        let mut end = text[offset..].find(close).map(|i| offset + i);
+        while let Some(e) = end {
+            if e > offset && bytes[e - 1] == b'\\' {
+                result.push_str(&text[offset..e - 1]);
+                result.push_str(close);
+                offset = e + close.len();
+                end = text[offset..].find(close).map(|i| offset + i);
+            } else {
+                break;
             }
         }
-        if offset >= text.len() {
-            break;
+        match end {
+            None => {
+                result.push_str(&text[start..]);
+                offset = text.len();
+            }
+            Some(e) => {
+                result.push_str(&handler(&text[offset..e]));
+                offset = e + close.len();
+            }
         }
     }
     result.push_str(&text[offset..]);
