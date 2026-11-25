@@ -1,10 +1,14 @@
 //! MyBatis SQL Visualizer for OpenIDEA.
 //!
-//! The port keeps the same split as the IntelliJ edition: this crate owns the
-//! platform-facing surfaces (commands first), while rendering itself lives in
-//! the engine jar exported by the IntelliJ repository (`engine/`). Until that
-//! jar is connected, `render-xml` prints a fixed statement so the
-//! command → Output chain can be verified end to end.
+//! The port keeps the same split as the IntelliJ edition: platform-facing
+//! surfaces (commands, views, providers, MCP tools) live in this crate, while
+//! the pure rendering logic lives in [`core`] and — for capabilities that need
+//! a JVM — in the engine jar exported by the IntelliJ repository (`engine/`).
+//!
+//! Every command is a thin shell: read a project file, call one [`core`] entry
+//! point, format the result into the shared Output channel. Nothing here
+//! guesses: rendered results carry `exact` / `partial` / `unresolved`, and
+//! `unresolved` never produces SQL.
 
 mod commands;
 
@@ -36,10 +40,15 @@ impl Plugin for Main {
         &mut self,
         id: &str,
         ctx: &Invocation,
-        _arg: Option<&str>,
+        arg: Option<&str>,
     ) -> Result<Option<String>, Error> {
         match id {
-            commands::render_xml::ID => commands::render_xml::run(ctx),
+            commands::render_xml::ID => commands::render_xml::run_with_arg(ctx, arg),
+            commands::check_sql::ID => commands::check_sql::run(ctx, arg),
+            commands::perf_advice::ID => commands::perf_advice::run(ctx, arg),
+            commands::generate_crud::ID => commands::generate_crud::run(ctx, arg),
+            commands::rollback_plan::ID => commands::rollback_plan::run(ctx, arg),
+            commands::render_log::ID => commands::render_log::run(ctx, arg),
             _ => Err(Error::NotFound(format!("command {id}"))),
         }
     }
@@ -64,16 +73,39 @@ mod tests {
     #[test]
     fn routes_render_xml_to_its_command() {
         let host = MockHost::install();
+        host.add_file(
+            "/project/UserMapper.xml",
+            r#"<mapper namespace="com.example.UserMapper">
+                <select id="findById">SELECT id, name FROM users WHERE id = #{id}</select>
+            </mapper>"#,
+        );
         let mut plugin = Main;
         let out = plugin
-            .run_command(commands::render_xml::ID, &host.invocation(), None)
+            .run_command(
+                commands::render_xml::ID,
+                &host.invocation(),
+                Some("/project/UserMapper.xml#com.example.UserMapper.findById"),
+            )
             .unwrap();
         assert_eq!(out, None);
-        let buffers = host.output();
-        let text = buffers
-            .get(commands::render_xml::CHANNEL)
-            .expect("the command writes to its own channel");
-        assert!(text.contains("SELECT id, name, created_at"));
+        let text = &host.output()[commands::CHANNEL];
+        assert!(text.contains("-- com.example.UserMapper.findById (exact)"));
+        assert!(text.contains("WHERE id = ?"));
+    }
+
+    #[test]
+    fn check_sql_is_routed_too() {
+        let host = MockHost::install();
+        let mut plugin = Main;
+        plugin
+            .run_command(
+                commands::check_sql::ID,
+                &host.invocation(),
+                Some("DELETE FROM users"),
+            )
+            .unwrap();
+        let text = &host.output()[commands::CHANNEL];
+        assert!(text.contains("DELETE"));
     }
 
     #[test]

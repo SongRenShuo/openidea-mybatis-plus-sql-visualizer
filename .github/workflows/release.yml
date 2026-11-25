@@ -1,0 +1,251 @@
+name: release
+
+# Tag-driven only: a `v*` tag is the single trigger, so a stray push to a branch
+# can never ship a package. workflow_dispatch re-publishes an existing tag
+# (assets are replaced, the tag itself is not moved).
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)publish, e.g. v0.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Exactly 0.1.51: it pins the SDK tag (v0.1.51 → plugin API 1.15) that `build`
+  # writes into Cargo.toml. A CLI built from `main` targets API 1.16, and no
+  # released IDE loads such a component.
+  CLI_TAG: v0.1.51
+
+jobs:
+  package:
+    name: build + sign + verify
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      package: ${{ steps.meta.outputs.package }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # workflow_dispatch can target a tag that is not the default branch.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install openidea-plugin ${{ env.CLI_TAG }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o /tmp/openidea-plugin.gz \
+            "https://github.com/l0ng-ai/openidea/releases/download/${CLI_TAG}/openidea-plugin-linux-x86_64.gz"
+          gunzip -c /tmp/openidea-plugin.gz > /usr/local/bin/openidea-plugin
+          chmod +x /usr/local/bin/openidea-plugin
+          openidea-plugin --version | tee /tmp/cli-version.txt
+          grep -F "0.1.51" /tmp/cli-version.txt
+
+      # The tag is the release version; a mismatch would publish 0.1.0 under the
+      # name v0.2.0 and make every later update decision wrong.
+      - name: Tag must match plugin.toml version
+        id: meta
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          top_level() {
+            awk -v key="$1" '
+              /^[[:space:]]*\[/ { exit }
+              $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+                line = $0
+                sub(/^[^=]*=[[:space:]]*"/, "", line)
+                sub(/".*$/, "", line)
+                print line
+                exit
+              }
+            ' plugin.toml
+          }
+          plugin_id="$(top_level id)"
+          version="$(top_level version)"
+          if [ "v$version" != "$tag" ]; then
+            echo "::error::tag $tag does not match plugin.toml version $version"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "package=$plugin_id-$version.oiplugin" >> "$GITHUB_OUTPUT"
+
+      # The key arrives base64-encoded so a trailing newline or CRLF in the
+      # secret cannot corrupt it. It lives in $RUNNER_TEMP and is removed in an
+      # `if: always()` step; it is never echoed, never in an artifact.
+      - name: Publisher key
+        run: |
+          set -euo pipefail
+          [ -n "${MPSV_KEY_B64:-}" ] || { echo "::error::MPSV_KEY_B64 is not set"; exit 1; }
+          printf '%s' "${MPSV_KEY_B64}" | base64 -d > "$RUNNER_TEMP/publisher.key"
+          [ -s "$RUNNER_TEMP/publisher.key" ] ||
+            { echo "::error::MPSV_KEY_B64 decoded to an empty key"; exit 1; }
+        env:
+          MPSV_KEY_B64: ${{ secrets.MPSV_KEY_B64 }}
+
+      # The engine jar is not shipped in the repository (only version + sha256
+      # are pinned), so scripts/verify-engine.sh cannot run here: it needs the
+      # jar. The pin format and the resolver order are covered by `cargo test`
+      # (sidecar module); the runtime checks the sha256 before starting the jar.
+      - name: Build, sign, verify
+        id: pack
+        env:
+          MPSV_KEY_FILE: ${{ runner.temp }}/publisher.key
+          MPSV_PUBLISHER: ${{ vars.MPSV_PUBLISHER }}
+          MPSV_OUT_DIR: dist
+        run: |
+          set -euo pipefail
+          bash scripts/release.sh
+          sha="$(awk '{print $1}' dist/*.sha256)"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${{ steps.meta.outputs.tag }}"
+            echo
+            echo '```'
+            cat dist/*.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Discard key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/publisher.key"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: |
+            dist/*.oiplugin
+            dist/*.sha256
+          if-no-files-found: error
+
+  github-release:
+    name: GitHub Release
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: package
+          path: dist
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.package.outputs.tag }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/notes.md"
+          # No regex for the bracket in "## [x.y.z]": awk's `\[` escape is not
+          # portable (gawk mangles it), so match by index() instead.
+          awk -v ver="${TAG#v}" '
+            BEGIN { want = "## [" ver "]"; p = 0 }
+            {
+              if (p && substr($0, 1, 4) == "## [") exit
+              if (index($0, want) == 1) { p = 1; next }
+              if (p) print
+            }
+          ' CHANGELOG.md > "$notes"
+          [ -s "$notes" ] || printf 'See CHANGELOG.md.\n' > "$notes"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.oiplugin dist/*.sha256 --clobber
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file "$notes" \
+              dist/*.oiplugin dist/*.sha256
+          fi
+
+      # Read it back from the release, not from the workspace: this is the only
+      # check that proves what a user actually downloads.
+      - name: Read back the published asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.package.outputs.tag }}
+          EXPECTED: ${{ needs.package.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          name="$(basename dist/*.oiplugin)"
+          mkdir -p "$RUNNER_TEMP/download"
+          gh release download "$TAG" --pattern "$name" --dir "$RUNNER_TEMP/download" --clobber
+          actual="$(sha256sum "$RUNNER_TEMP/download/$name" | awk '{print $1}')"
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::GitHub asset sha256 $actual != built $EXPECTED"
+            exit 1
+          fi
+          echo "github: $actual ok"
+
+  gitee-mirror:
+    name: Gitee mirror
+    needs: [package, github-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: package
+          path: dist
+
+      - name: Upload the same bytes to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          TAG: ${{ needs.package.outputs.tag }}
+          OWNER: ${{ vars.GITEE_OWNER }}
+          REPO: ${{ vars.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          api="https://gitee.com/api/v5/repos/${OWNER}/${REPO}"
+          release_id="$(curl -fsS --retry 3 "$api/releases?access_token=${GITEE_TOKEN}&per_page=100" \
+            | jq -r --arg t "$TAG" '[.[] | select(.tag_name == $t) | .id][0] // empty')"
+          if [ -z "$release_id" ]; then
+            release_id="$(curl -fsS --retry 3 -X POST "$api/releases" \
+              -d "access_token=${GITEE_TOKEN}" \
+              -d "tag_name=${TAG}" \
+              -d "name=${TAG}" \
+              -d "body=See the GitHub release for notes." | jq -r '.id')"
+          fi
+          [ -n "$release_id" ] || { echo "::error::no Gitee release id"; exit 1; }
+
+          for f in dist/*.oiplugin dist/*.sha256; do
+            name="$(basename "$f")"
+            # Re-runs must replace, not duplicate: drop same-named attachments.
+            curl -fsS --retry 3 "$api/releases/${release_id}/attach_files?access_token=${GITEE_TOKEN}&per_page=100" \
+              | jq -r --arg n "$name" '.[] | select(.name == $n) | .id' \
+              | while read -r aid; do
+                  [ -n "$aid" ] && curl -fsS -X DELETE "$api/releases/${release_id}/attach_files/${aid}?access_token=${GITEE_TOKEN}" > /dev/null
+                done
+            curl -fsS --retry 3 -X POST "$api/releases/${release_id}/attach_files" \
+              -F "access_token=${GITEE_TOKEN}" -F "file=@${f}"
+          done
+
+      # The two mirrors must carry identical bytes; a re-packed asset on one side
+      # is exactly the failure this step exists for.
+      - name: Both mirrors must match the built sha256
+        env:
+          TAG: ${{ needs.package.outputs.tag }}
+          OWNER: ${{ vars.GITEE_OWNER }}
+          REPO: ${{ vars.GITEE_REPO }}
+        run: |
+          set -euo pipefail
+          expected="$(awk '{print $1}' dist/*.sha256)"
+          name="$(basename dist/*.oiplugin)"
+          gh_url="https://github.com/${{ github.repository }}/releases/download/${TAG}/${name}"
+          gitee_url="https://gitee.com/${OWNER}/${REPO}/releases/download/${TAG}/${name}"
+          gh_sha="$(curl -fsSL --retry 3 --retry-delay 5 "$gh_url" | sha256sum | awk '{print $1}')"
+          gitee_sha="$(curl -fsSL --retry 3 --retry-delay 5 "$gitee_url" | sha256sum | awk '{print $1}')"
+          echo "built: $expected"
+          echo "github: $gh_sha"
+          echo "gitee:  $gitee_sha"
+          [ "$expected" = "$gh_sha" ] || { echo "::error::GitHub asset differs from the build"; exit 1; }
+          [ "$expected" = "$gitee_sha" ] || { echo "::error::Gitee asset differs from the build (re-upload, do not trust the first fetch)"; exit 1; }

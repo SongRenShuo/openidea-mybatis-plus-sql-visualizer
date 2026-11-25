@@ -756,11 +756,9 @@ fn resolve_column(raw: &str, ctx: &mut Ctx) -> Option<String> {
         }
         let field = field_from_getter(&getter);
         ctx.columns.column_for(&field).map(str::to_string)
-    } else if let Some(s) = string_literal(raw) {
-        // QueryWrapper passes the column name directly.
-        Some(s)
     } else {
-        None
+        // QueryWrapper passes the column name directly.
+        string_literal(raw)
     }
 }
 

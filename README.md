@@ -41,11 +41,12 @@ review.
 | Capability | Risk | Why this plugin needs it |
 | --- | --- | --- |
 | `project.read` | low | The plugin's job is to read the project's mapper XML, Java sources and SQL logs and render them. Without read access there is nothing to render. It cannot write, delete or change anything in the project. |
+| `clipboard` (optional) | medium | The log panel and the workbench copy or export the rendered SQL. Refusing it only disables those two buttons; rendering, navigation and checks keep working. |
+| `process:java` (optional) | high | Starts the pinned engine jar (`engine/ENGINE_VERSION`, sha256-checked) for MyBatis-Plus Wrapper rendering and EXPLAIN statement wrapping. Refusing it degrades to text mode; every other feature still works. |
 
-No other capability is requested in this release: no editor read/write, no
-network, no process, no database, no file system writes. When the engine is
-connected (see `docs/开发日志.md`), `process` will be requested for the bundled
-jar and documented here in the same table.
+The plugin never writes project files, never connects to a database, and never
+opens a network connection on its own. The engine jar is started only after its
+pinned sha256 matches.
 
 ## Docs
 

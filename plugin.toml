@@ -19,11 +19,39 @@ activation = ["on-command:*"]
 required = ["project.read"]
 # clipboard: the log panel and the workbench copy/export SQL. Refusing it only
 # disables those two buttons; rendering, navigation and checks keep working.
-optional = ["clipboard"]
+# process:java: starts the pinned engine jar (engine/ENGINE_VERSION) for Wrapper
+# rendering and EXPLAIN statement wrapping. Refusing it degrades to text mode;
+# every other feature still works.
+optional = ["clipboard", "process:java"]
 
 [[contributes.commands]]
 id = "render-xml"
-title = "MyBatis SQL: Render XML Snippet"
+title = "MyBatis SQL: Render Mapper XML"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "check-sql"
+title = "MyBatis SQL: Check SQL"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "perf-advice"
+title = "MyBatis SQL: Performance Advice"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "generate-crud"
+title = "MyBatis SQL: Generate CRUD"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "rollback-plan"
+title = "MyBatis SQL: Rollback Plan"
+category = "MyBatis SQL Visualizer"
+
+[[contributes.commands]]
+id = "render-log"
+title = "MyBatis SQL: Render SQL Log"
 category = "MyBatis SQL Visualizer"
 
 # Panels (L5). `sqlv-logs` is drawn by code; `sqlv-workbench` is the package page.

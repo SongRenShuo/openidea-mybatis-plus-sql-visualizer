@@ -32,8 +32,24 @@
 
 19. **F175 ACP 会话 MCP 传输修复**：那是 AI Assistant 专有面，新平台无对应实现；MCP 能力走平台标准的工具声明（P6 阶段交付）。
 
-## 还有一类：能看不能用（P0 阶段内）
+## 还有一类：本版实现边界
 
-P0 骨架只申请了 `project.read`，`render-xml` 命令输出一段固定 SQL，尚未读取你的选区文本——
-读取选区需要 `editor.read`，等引擎接入（T0-0 的 `engine-jar`）再一并申请并在 README 的能力表里说明。
-`engine/ENGINE_VERSION` 目前是占位值 `0.0.0-pending`。
+下面这些不是平台做不到，而是本版刻意缩小了口径；每条都写清替代做法，避免把「能做」误读成「全做」。
+1. **渲染不读选区**：`render-xml` 的输入是工程内 mapper 文件路径（可带 `#namespace.id`），
+   不申请 `editor.read`，所以不读光标位置或选区；需要预览某条语句时用路径 + 语句 id。
+2. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
+   `LambdaQueryWrapper` 文本→链由 `src/analyze` 解析（无 PSI 的类型推断），
+   `unresolved` 时只给原因，不出 Java 代码。
+3. **EXPLAIN 不连库**：引擎只做 `EXPLAIN <语句>` 包装与格式分类，不执行、不自省表结构；
+   `sqlv_explain` 只格式化调用方已经拿到的 EXPLAIN 结果，缺结果返回 `unresolved`。
+4. **schema 由调用方提供**：`sqlv_schema_context` 格式化入参里的表/列/索引，不做数据库自省；
+   诊断与 inlay 在没有列清单时一律不出结果（宁可不报，也不误报）。
+5. **MCP `sqlv_history_search` 只搜入参文本**：平台没有 IDE 历史记录 API，所以它不检索历史面板，
+   只对本次调用传入的日志文本做字面量搜索。
+6. **捕获只覆盖三类运行配置**：`[[contributes.javaAgents]]` 只注入 Application / Spring Boot /
+   JAR Application（Run 与 Debug）；JUnit、Maven/Gradle goal、应用服务器、远程目标不注入。
+   没有 agent 时用 `capture-open-log` 读工程内导出的日志文件；项目外路径需要额外文件授权。
+7. **捕获端口是固定的**：manifest 的 agent `args` 是静态串，装不下运行期协商的临时端口；
+   本版用 `port=<固定端口>`，`capture-start` 显式传端口。端口冲突时换端口并重启目标应用。
+8. **引擎 jar 不入库**：仓库只钉 `engine/ENGINE_VERSION` 与 sha256；安装态首次使用需要
+   `engine.downloadUrl`（默认空）。留空即不联网，直接用本地/仓库 jar，缺失时降级为纯文本模式。

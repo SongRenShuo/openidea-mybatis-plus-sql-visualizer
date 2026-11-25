@@ -49,11 +49,12 @@ impl CliError {
             detail: detail.into(),
         }
     }
+}
 
-    /// The error the command returns to the host.
-    pub fn into_error(self) -> Error {
-        Error::Failed(format!("{}: {}", self.key, self.detail))
-    }
+/// The error for a missing argument, carrying the command's usage line so the
+/// user sees what to type instead of only "this command needs an argument".
+pub fn missing_arg(usage: &str) -> CliError {
+    CliError::new(KEY_MISSING_ARG, format!("usage: {usage}"))
 }
 
 /// Write `text` to the command channel, replacing whatever was there.

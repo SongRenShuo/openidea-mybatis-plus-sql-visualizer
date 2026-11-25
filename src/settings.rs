@@ -71,8 +71,8 @@ pub struct SettingDef {
     pub needs_restart: bool,
 }
 
-/// The 40 settings of the first release, in page order.
-pub static DEFINITIONS: [SettingDef; 40] = [
+/// The 41 settings of the first release, in page order.
+pub static DEFINITIONS: [SettingDef; 41] = [
     // Dialect -------------------------------------------------------------
     SettingDef {
         key: "dialect.mode",
@@ -201,6 +201,14 @@ pub static DEFINITIONS: [SettingDef; 40] = [
         group: "Log",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "logs.pageSize",
+        title: "SQL log entries shown per render-log run",
+        group: "Log",
+        kind: Kind::Integer,
+        default: DefaultValue::Int(50),
         needs_restart: false,
     },
     // Rendering -----------------------------------------------------------
@@ -467,16 +475,16 @@ mod tests {
     }
 
     #[test]
-    fn definitions_cover_forty_fields_with_unique_keys() {
-        assert_eq!(definitions().len(), 40);
+    fn definitions_cover_forty_one_fields_with_unique_keys() {
+        assert_eq!(definitions().len(), 41);
         let mut keys = std::collections::BTreeSet::new();
         for def in definitions() {
             assert!(keys.insert(def.key), "duplicate key {}", def.key);
         }
         assert_eq!(
             keys.len(),
-            40,
-            "the first release ships exactly 40 settings"
+            41,
+            "the first release ships exactly 41 settings"
         );
     }
 
