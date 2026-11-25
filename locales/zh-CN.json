@@ -49,5 +49,12 @@
   "Java executable": "Java 可执行文件",
   "Engine restarts before degrading": "降级前允许重启次数",
   "diag.unknown_column": "未知列",
-  "diag.quote_style": "引号风格与方言不符"
+  "diag.quote_style": "引号风格与方言不符",
+  "mcp.error.invalid_arguments": "工具参数缺失、类型错误或超出大小限制",
+  "mcp.error.unknown_tool": "未知工具名",
+  "check.unbounded_write": "UPDATE 或 DELETE 没有 WHERE 条件",
+  "check.destructive_ddl": "DROP 或 TRUNCATE 会删除数据或对象",
+  "mapper.result_map.not_found": "语句引用的 resultMap 未声明",
+  "log.parse.no_entries": "日志文本没有解析出任何语句",
+  "engine.explain.unavailable": "未提供 EXPLAIN 结果；本版不执行 SQL"
 }

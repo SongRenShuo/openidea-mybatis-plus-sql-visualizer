@@ -89,3 +89,83 @@ languages = ["xml", "java"]
 [[contributes.providers]]
 kinds = ["diagnostics"]
 languages = ["xml", "java"]
+
+# MCP tools (L9). Every tool is pure text/JSON: none reads the project, starts a
+# process, opens a connection or writes a database, so all are readOnly and
+# none is destructive. Generated SQL is returned as text only.
+[[contributes.mcpTools]]
+name = "sqlv_render_sql"
+description = "Render one MyBatis mapper statement to SQL with ? placeholders and bound parameters."
+inputSchema = "src/mcp/schemas/sqlv_render_sql.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_render_logs"
+description = "Parse MyBatis, p6spy, Hibernate or JdbcTemplate log text into statements, duplicates and N+1 groups."
+inputSchema = "src/mcp/schemas/sqlv_render_logs.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_check_sql"
+description = "Classify a SQL statement, flag unbounded UPDATE/DELETE and destructive DDL, and list performance findings."
+inputSchema = "src/mcp/schemas/sqlv_check_sql.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_perf_advice"
+description = "Run performance rules, a 0-100 complexity score and index advice on one SQL statement."
+inputSchema = "src/mcp/schemas/sqlv_perf_advice.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_crud_sql"
+description = "Generate select/insert/update/delete/batch-insert SQL for a table description."
+inputSchema = "src/mcp/schemas/sqlv_crud_sql.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_rollback_plan"
+description = "Build a rollback plan (snapshot plus reverse statements) for an UPDATE or DELETE; refused without a primary key."
+inputSchema = "src/mcp/schemas/sqlv_rollback_plan.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_reverse_sql"
+description = "Translate a single-table SELECT into a MyBatis-Plus LambdaQueryWrapper chain; unsupported shapes are reported as unresolved, never guessed."
+inputSchema = "src/mcp/schemas/sqlv_reverse_sql.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_mapper_check"
+description = "Load mapper XML documents and report duplicate ids, dangling includes, missing resultMaps and unparseable files."
+inputSchema = "src/mcp/schemas/sqlv_mapper_check.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_history_search"
+description = "Search the log text supplied in this call for lines containing a query; there is no IDE history access."
+inputSchema = "src/mcp/schemas/sqlv_history_search.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_schema_context"
+description = "Format a caller-supplied schema (tables, columns, indexes) as compact DDL-like text for an agent prompt."
+inputSchema = "src/mcp/schemas/sqlv_schema_context.schema.json"
+readOnly = true
+destructive = false
+
+[[contributes.mcpTools]]
+name = "sqlv_explain"
+description = "Format an EXPLAIN result supplied by the caller as a tree or table; this tool never executes SQL."
+inputSchema = "src/mcp/schemas/sqlv_explain.schema.json"
+readOnly = true
+destructive = false
