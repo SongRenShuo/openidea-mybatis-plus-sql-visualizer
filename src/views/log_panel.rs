@@ -935,6 +935,7 @@ impl Views for crate::Main {
     ) -> Result<View, Error> {
         match view {
             VIEW_ID => Ok(render_panel(viewport)),
+            crate::views::workbench::VIEW_ID => Ok(crate::views::workbench::render_workbench()),
             other => Err(Error::NotFound(format!("view {other}"))),
         }
     }
@@ -942,6 +943,9 @@ impl Views for crate::Main {
     fn handle(&mut self, view: &str, event: ViewEvent, _ctx: &Invocation) -> Result<(), Error> {
         match view {
             VIEW_ID => handle_panel_event(event),
+            crate::views::workbench::VIEW_ID => {
+                crate::views::workbench::handle_workbench_event(event)
+            }
             other => Err(Error::NotFound(format!("view {other}"))),
         }
     }
