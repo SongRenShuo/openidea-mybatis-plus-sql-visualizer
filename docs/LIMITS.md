@@ -40,6 +40,10 @@
     `MCP arguments exceed 1 MiB`）。大日志请走面板（`capture-open-log` 读文件）或 `render-log` 命令；MCP 的
     `sqlv_render_logs` 适合中小片段（实测 7200 行 / 935 KB 可用，median 231 ms）。
 
+22. **没有插件可用的模态对话框 API**：原版「SQL 预览」从 gutter 图标/`Alt+Shift+Q` 弹出 `SqlPreviewDialog`（模态窗）；
+    本平台只能打开工具窗/页签，所以预览统一落在右侧 `SQL 日志` 工具窗的第 5 页签（`SQL 预览`），
+    gutter 图标与快捷键都打开同一个页签（状态行给出说明）。渲染链与原版一致，差别只在外壳。
+
 ## 还有一类：本版实现边界
 
 下面这些不是平台做不到，而是本版刻意缩小了口径；每条都写清替代做法，避免把「能做」误读成「全做」。
