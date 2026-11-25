@@ -86,6 +86,7 @@ register_plugin!(
     injections,
     inlay_hints,
     diagnostics,
+    language_features,
     mcp
 );
 

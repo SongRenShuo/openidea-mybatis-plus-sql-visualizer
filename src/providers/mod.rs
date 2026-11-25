@@ -13,12 +13,17 @@
 //! | `injections.enabled` | `false` | SQL `Injections` inside mapper XML |
 //! | `sql.dialect` | unset | dialect for quote checks in diagnostics |
 //!
+//! `gutter` (the preview button on every mapper statement) has no switch: it is
+//! the plugin's main entry point, and the IntelliJ edition shows the icon by
+//! default too.
+//!
 //! Inlay hints and column diagnostics additionally need table columns. They are
 //! never guessed: the columns come from [`set_column_lookup`], which the schema
 //! lane fills once it has real metadata. Until then no inlay hint is produced
 //! and no column is reported unknown.
 
 pub mod diag;
+pub mod gutter;
 pub mod inject;
 pub mod inlay;
 pub mod nav;
