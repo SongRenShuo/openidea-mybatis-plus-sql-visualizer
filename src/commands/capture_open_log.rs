@@ -49,8 +49,11 @@ fn open_log(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     log_panel::set_log_text(&text);
     host::reveal_view(log_panel::VIEW_ID)
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
-    // set_log_text only marks the buffer dirty; when the panel is already open
-    // the host does not re-render on reveal alone, so ask for one refresh.
+    // The body is a packaged page: the host never re-renders it, so push the new
+    // state explicitly (a freshly loaded page asks for it again with `ready`).
+    log_panel::push_state()
+        .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
+    // The panel chrome (status line) is host-drawn; ask for one refresh.
     host::refresh_view(log_panel::VIEW_ID);
 
     let page = bridge::panel_page_size();
@@ -111,6 +114,13 @@ Parameters: 2(Long)
                 .any(|view| view == log_panel::VIEW_ID),
             "an already-open panel must be refreshed, not only revealed"
         );
+        // The page only renders what it is sent: the new rows must be pushed.
+        let pushed = host.view_messages();
+        assert_eq!(pushed.len(), 1, "{pushed:?}");
+        assert_eq!(pushed[0].0, log_panel::VIEW_ID);
+        let state: serde_json::Value = serde_json::from_str(&pushed[0].1).expect("valid JSON");
+        assert_eq!(state["op"], "state");
+        assert_eq!(state["rows"].as_array().map(Vec::len), Some(2));
     }
 
     #[test]

@@ -10,6 +10,10 @@
 //! guesses: rendered results carry `exact` / `partial` / `unresolved`, and
 //! `unresolved` never produces SQL.
 
+// `serde_json::json!` expands recursively; the panels' label maps are past the
+// default 128 once a view carries ~45 strings.
+#![recursion_limit = "256"]
+
 mod commands;
 
 // Module tree is declared once here so implementation lanes never touch this

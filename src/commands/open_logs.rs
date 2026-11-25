@@ -28,6 +28,10 @@ pub fn run(_ctx: &Invocation, _arg: Option<&str>) -> Result<Option<String>, Erro
 fn open() -> Result<String, CliError> {
     host::reveal_view(log_panel::VIEW_ID)
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
+    // The panel body is a packaged page; a `refresh_view` alone does not reach
+    // it, so the state goes over the view message channel.
+    log_panel::push_state()
+        .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
     host::refresh_view(log_panel::VIEW_ID);
     let mut out = String::new();
     let _ = writeln!(
@@ -50,6 +54,11 @@ mod tests {
         run(&host.invocation(), None).unwrap();
         assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
         assert_eq!(host.refreshed_views(), [log_panel::VIEW_ID.to_string()]);
+        // The packaged page only renders what it is sent.
+        let pushed = host.view_messages();
+        assert_eq!(pushed.len(), 1, "{pushed:?}");
+        let state: serde_json::Value = serde_json::from_str(&pushed[0].1).expect("valid JSON");
+        assert_eq!(state["op"], "state");
         assert!(
             host.output()[common::CHANNEL].contains("-- open-logs: revealed sqlv-logs"),
             "{}",

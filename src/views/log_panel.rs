@@ -733,6 +733,11 @@ fn labels_json() -> Value {
         "selectNone": t("view.logs.filter.select_none"),
         "slowOnly": t("view.logs.filter.slow_only"),
         "search": t("view.logs.filter.search"),
+        // The page draws its own action row: a packaged view gets no host toolbar.
+        "pause": t("view.logs.button.pause"),
+        "resume": t("view.logs.button.resume"),
+        "clear": t("view.logs.button.clear"),
+        "copyAll": t("view.logs.button.copy"),
         "dedupe": t("view.logs.filter.dedupe"),
         "keywordPlaceholder": t("view.logs.filter.keyword"),
         "matchCase": t("view.logs.filter.match_case"),
@@ -850,6 +855,12 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
             clear();
             let _ = push_state();
             host::refresh_view(VIEW_ID);
+        }
+        "copy-all" => {
+            let sql = visible_sql();
+            if !sql.is_empty() {
+                host::copy_to_clipboard(&sql)?;
+            }
         }
         "copy-line" => {
             if let Some(line) = message_line(&message) {
@@ -1403,6 +1414,38 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             .line_no;
         handle_panel_message(&host, &format!("{{\"op\":\"copy-line\",\"line\":{line}}}")).unwrap();
         assert!(host.clipboard().is_some_and(|text| !text.is_empty()));
+    }
+
+    #[test]
+    fn the_packaged_page_draws_its_own_action_row() {
+        // A `web =` view gets no host toolbar, so the page must offer pause,
+        // clear and copy itself, with the labels the state carries.
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        for (id, op) in [
+            ("pauseBtn", "'toggle-pause'"),
+            ("clearBtn", "'clear'"),
+            ("copyAllBtn", "'copy-all'"),
+        ] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+            assert!(page.contains(op), "missing op {op}");
+        }
+        let labels = labels_json();
+        for key in ["pause", "resume", "clear", "copyAll"] {
+            assert!(labels.get(key).is_some(), "missing label {key}");
+        }
+    }
+
+    #[test]
+    fn copy_all_message_puts_the_visible_sql_on_the_clipboard() {
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(&host, "{\"op\":\"copy-all\"}").unwrap();
+        let copied = host.clipboard().expect("the clipboard was written");
+        assert!(
+            copied.contains("SELECT") || copied.contains("DELETE"),
+            "{copied}"
+        );
     }
 
     #[test]

@@ -16,6 +16,12 @@
       background: var(--openidea-bg);
     }
 
+    /* Action row (the host draws no toolbar for a packaged page) */
+    .actionbar {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 8px; border-bottom: 1px solid var(--openidea-border);
+    }
+
     /* Filter row */
     .filterbar {
       display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
@@ -125,6 +131,12 @@
   </style>
 </head>
 <body>
+  <div class="actionbar">
+    <button id="pauseBtn" class="btn" type="button"></button>
+    <button id="clearBtn" class="btn" type="button"></button>
+    <button id="copyAllBtn" class="btn" type="button"></button>
+  </div>
+
   <div class="filterbar">
     <div class="filterleft">
       <button id="typeBtn" class="btn" type="button" aria-haspopup="true" aria-expanded="false">
@@ -261,6 +273,11 @@
 
       function updateLabels() {
         setText($('searchBtn'), L.search);
+        var paused = !!(current && current.status && current.status.paused);
+        setText($('pauseBtn'), paused ? (L.resume || 'Resume') : (L.pause || 'Pause'));
+        $('pauseBtn').classList.toggle('on', paused);
+        setText($('clearBtn'), L.clear || 'Clear');
+        setText($('copyAllBtn'), L.copyAll || 'Copy SQL');
         setText($('dedupeLabel'), L.dedupe);
         setText($('slowOnlyLabel'), L.slowOnly);
         setText($('selectAll'), L.selectAll);
@@ -543,6 +560,9 @@
       });
       $('caseBtn').addEventListener('click', function () { ui.matchCase = !ui.matchCase; this.classList.toggle('on', ui.matchCase); postFilter(); });
       $('regexBtn').addEventListener('click', function () { ui.regex = !ui.regex; this.classList.toggle('on', ui.regex); postFilter(); });
+      $('pauseBtn').addEventListener('click', function () { post({ op: 'toggle-pause' }); });
+      $('clearBtn').addEventListener('click', function () { post({ op: 'clear' }); });
+      $('copyAllBtn').addEventListener('click', function () { post({ op: 'copy-all' }); });
       $('dedupe').addEventListener('change', function () { ui.dedupe = this.checked; postFilter(); });
 
       $('ctxMenu').addEventListener('click', function (event) {
