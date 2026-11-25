@@ -45,6 +45,19 @@ network, no process, no database, no file system writes. When the engine is
 connected (see `docs/开发日志.md`), `process` will be requested for the bundled
 jar and documented here in the same table.
 
+## Docs
+
+| File | What it is |
+| --- | --- |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 阶段 P0–P8、每阶段退出门禁、7 条待证伪前提（本仓排期与验收的唯一权威） |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | 201 条功能的四档范围（98 现成 / 83 变通 / 1 上游 / 19 不可行）与优先顺序 |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 平台硬约束、wasm 即时路径 + jar sidecar 双路径、引擎 JSON 契约、置信度模型 |
+| [`docs/LIMITS.md`](docs/LIMITS.md) | 用户可读的「本平台不支持」清单 |
+
+调研证据（12 份分册、逐条编号与行号）在 IntelliJ 仓：
+`docs/调研报告/20261125-1336-OpenIDEA全面支持-调研报告.md`（提交 `816e8c0a0`）。
+能力边界以那份报告为准，排期与验收以 `docs/ROADMAP.md` 为准。
+
 ## Licence
 
 Apache-2.0. Third-party notices, including the JSqlParser dual-licence choice
