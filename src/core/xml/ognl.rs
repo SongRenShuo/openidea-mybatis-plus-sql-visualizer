@@ -79,6 +79,9 @@ pub enum Op {
     Ge,
     And,
     Or,
+    /// Additive `+`: numeric sum, or string concatenation when either side is
+    /// a string. Needed by the canonical `<bind value="'%' + name + '%'"/>`.
+    Add,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -323,7 +326,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_cmp(&mut self) -> Result<Expr, OgnlError> {
-        let left = self.parse_operand()?;
+        let left = self.parse_add()?;
         let op = match &self.current {
             Tok::Sym("==") => Some(Op::Eq),
             Tok::Sym("!=") => Some(Op::Ne),
@@ -346,8 +349,20 @@ impl<'a> Parser<'a> {
             return Ok(left);
         };
         self.advance()?;
-        let right = self.parse_operand()?;
+        let right = self.parse_add()?;
         Ok(Expr::Binary(op, Box::new(left), Box::new(right)))
+    }
+
+    /// Additive `+`, binding tighter than any comparison (OGNL precedence):
+    /// `id + 1 > 6` is `(id + 1) > 6`.
+    fn parse_add(&mut self) -> Result<Expr, OgnlError> {
+        let mut left = self.parse_operand()?;
+        while self.is_sym("+") {
+            self.advance()?;
+            let right = self.parse_operand()?;
+            left = Expr::Binary(Op::Add, Box::new(left), Box::new(right));
+        }
+        Ok(left)
     }
 
     fn parse_operand(&mut self) -> Result<Expr, OgnlError> {
@@ -553,6 +568,7 @@ fn eval(
                 }
                 Ok(Value::Bool(truthy(&eval(right, bindings)?)))
             }
+            Op::Add => Ok(add(&eval(left, bindings)?, &eval(right, bindings)?)),
             Op::Eq => Ok(Value::Bool(equals(
                 &eval(left, bindings)?,
                 &eval(right, bindings)?,
@@ -648,6 +664,32 @@ fn as_f64(value: &Value) -> Option<f64> {
         Value::Number(n) => n.as_f64(),
         Value::String(s) => s.trim().parse::<f64>().ok(),
         _ => None,
+    }
+}
+
+/// OGNL `+`: a numeric sum when both sides are numbers (and neither is a
+/// string), otherwise `String.valueOf` concatenation. `null` renders as
+/// `"null"`, matching OGNL's default conversion for `<bind>` expressions.
+fn add(left: &Value, right: &Value) -> Value {
+    let stringish = matches!(left, Value::String(_)) || matches!(right, Value::String(_));
+    if !stringish {
+        if let (Some(a), Some(b)) = (left.as_i64(), right.as_i64()) {
+            return Value::Number(a.saturating_add(b).into());
+        }
+        if let (Some(a), Some(b)) = (as_f64(left), as_f64(right))
+            && let Some(sum) = serde_json::Number::from_f64(a + b)
+        {
+            return Value::Number(sum);
+        }
+    }
+    Value::String(format!("{}{}", add_text(left), add_text(right)))
+}
+
+fn add_text(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Null => "null".to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -804,6 +846,18 @@ mod tests {
     }
 
     #[test]
+    fn additive_concatenates_strings_and_sums_numbers() {
+        let b = bindings();
+        assert_eq!(evaluate("'%' + name + '%'", &b).unwrap(), json!("%Ada%"));
+        assert_eq!(evaluate("'a' + 'b'", &b).unwrap(), json!("ab"));
+        assert_eq!(evaluate("'n=' + id", &b).unwrap(), json!("n=7"));
+        assert_eq!(evaluate("id + 1", &b).unwrap(), json!(8));
+        assert_eq!(evaluate("id + 1.5", &b).unwrap(), json!(8.5));
+        assert!(truth("id + 1 > 6"));
+        assert!(!truth("id + 1 > 8"));
+    }
+
+    #[test]
     fn list_size_property() {
         assert!(truth("list.size == 3"));
         assert!(truth("list.size > 0"));
@@ -854,7 +908,6 @@ mod tests {
     #[test]
     fn other_unsupported_syntax_is_rejected() {
         for text in [
-            "id + 1 > 0",
             "id * 2 > 0",
             "id == 1 ? true : false",
             "new java.util.Date()",
