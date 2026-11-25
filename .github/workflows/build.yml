@@ -1,74 +1,99 @@
-name: build
+name: gate
 
+# The authoritative full gate runs here, not on developer machines: a public
+# repository gets standard runners for free, and ten parallel lanes each
+# compiling the wasm SDK locally is what exhausts memory and disk.
+#
+# Local work is deliberately narrower: `cargo fmt --check`, the tests of the
+# module a lane touched, and (at merge time) one `cargo test` + one
+# `openidea-plugin build && check`. Everything else is left to this workflow.
+#
+# `ci/**` exists so a merge candidate can be gated without pushing master:
+#   git push github HEAD:refs/heads/ci/gate-<n> && gh run watch
 on:
   push:
-    branches: [main]
+    branches: [master, 'ci/**']
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CLI_TAG: v0.1.51
+
 jobs:
-  build:
+  static:
+    name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # Same Rust as rust-toolchain.toml; keeping the number in both places is
-      # deliberate — the tool file drives local/rustup, this drives the runner
-      # before any cargo command runs.
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.1
           targets: wasm32-wasip2
           components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      # --all-targets is the superset gate: it also lints the unit tests.
+      - run: cargo clippy --all-targets -- -D warnings
 
-      - name: Install wasm32-wasip2 target
-        run: rustup target add wasm32-wasip2
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
 
-      - name: Format
-        run: cargo fmt --all --check
+  package:
+    name: build + check + artifact
+    needs: [static, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
 
-      # --all-targets is the superset of the plain gate: it also lints the unit
-      # tests this repository keeps next to each command.
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Test
-        run: cargo test
-
-      # The CLI must be exactly 0.1.51: it pins the SDK tag (v0.1.51 → plugin
-      # API 1.15) that `new` and `build` write into Cargo.toml. A CLI built from
-      # `main` targets API 1.16, and no released IDE loads such a component.
-      # TODO: the release only ships a linux-x86_64 asset; if it disappears or
-      # the mirror is unreachable, fall back to
-      # `cargo install --locked --git https://github.com/l0ng-ai/openidea ide-host
-      #  --bin openidea-plugin --tag v0.1.51` (slow, ~10 min) and drop the
-      # continue-on-error below. Until then a missing CLI is reported but does
-      # not fail the run, so fmt/clippy/test stay authoritative in CI.
-      - name: Install openidea-plugin 0.1.51
-        id: cli
-        continue-on-error: true
+      # Exactly 0.1.51: the CLI pins the SDK tag (v0.1.51 → plugin API 1.15)
+      # that `new` and `build` write into Cargo.toml. A CLI built from `main`
+      # targets API 1.16, and no released IDE loads such a component.
+      - name: Install openidea-plugin ${{ env.CLI_TAG }}
         run: |
           set -euo pipefail
-          tag=v0.1.51
           curl -fsSL --retry 3 -o /tmp/openidea-plugin.gz \
-            "https://github.com/l0ng-ai/openidea/releases/download/${tag}/openidea-plugin-linux-x86_64.gz"
+            "https://github.com/l0ng-ai/openidea/releases/download/${CLI_TAG}/openidea-plugin-linux-x86_64.gz"
           gunzip -c /tmp/openidea-plugin.gz > /usr/local/bin/openidea-plugin
           chmod +x /usr/local/bin/openidea-plugin
-          openidea-plugin --version
+          openidea-plugin --version | tee /tmp/cli-version.txt
+          grep -F "0.1.51" /tmp/cli-version.txt
 
       - name: Build component
-        if: steps.cli.outcome == 'success'
         run: openidea-plugin build
 
       - name: Check package
-        if: steps.cli.outcome == 'success'
         run: openidea-plugin check .
 
+      - name: Engine pin check
+        run: bash scripts/verify-engine.sh
+
       - uses: actions/upload-artifact@v4
-        if: steps.cli.outcome == 'success'
         with:
           name: plugin-wasm
-          path: dist/plugin.wasm
+          path: |
+            dist/plugin.wasm
+            Cargo.lock
           if-no-files-found: error
+
+      # A failing job must not look like a skipped one: the CLI step is no
+      # longer continue-on-error, so a missing asset fails the package gate
+      # instead of silently dropping build+check.

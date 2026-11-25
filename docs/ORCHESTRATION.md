@@ -17,6 +17,14 @@
   export PATH="/c/Users/USER/.cargo/bin:$PATH"（每条涉及它们的命令都要带）
 - 长命令（cargo build/clippy、openidea-plugin build、gradle）一律后台跑，靠通知继续；禁止 sleep 轮询。
 
+【非阻塞纪律（硬规则，沿用主仓）】
+- 子代理一律**后台派发**（Agent 默认异步）；派完主控立刻做下一件事（写注册汇总、合并、文档、派下一条），
+  **严禁**阻塞等待：不许 `TaskOutput(block=true)` 长等、不许 `sleep`、不许「派完就空转」。
+- 靠 task-notification 回来再处理；中途要看进度只 `tail` 一次日志，不反复轮询。
+- CI 结论用 `gh run watch <id>` 或 `gh run view` 后台/单次查询，不要前台盯着。
+- 主控自己的验证命令也按同一规则：超过约 20 秒就后台；前台只跑秒级命令。
+- 并行车道之间不互相等待；某车道撞锁/撞缓存时记录证据（错误原文+时间戳）交回收口，不睡等。
+
 【先读】
 1) AGENTS.md（仓级红线）2) docs/ROADMAP.md（门禁与 7 条前提）3) docs/TASKS.md（任务卡）
 4) docs/ARCHITECTURE.md（双路径/契约/置信度）5) docs/FEATURES.md（四档范围）
@@ -47,7 +55,8 @@ build/check）、提交哈希、工作树是否干净、遗留与风险。报告
 3) L8（sidecar，需要主仓 engine-jar 扩展；同一时间只允许一个 gradle 车道）
 4) L9（MCP，需要 L1/L3/L4 的函数）
 5) L10（发行，最后）
-每次合并：git merge --no-ff feat/<lane>；立刻跑四道门禁（fmt/clippy/test/openidea-plugin build+check）；
+每次合并：git merge --no-ff feat/<lane>；本地只跑「一次 cargo test + 一次 openidea-plugin build && check」；
+fmt/clippy/全量测试/build 交给 CI（推 ci/gate-<n> 分支触发，gh run watch 读结论）。
 红了先判断是「该车道缺陷」还是「与已合车道冲突」，修在该车道分支上再重合，不许在 master 上直接改业务码。
 
 【注册文件的合入】
@@ -83,13 +92,15 @@ README，提交一次（chore: 注册汇总）。此提交后全量门禁 + 一�
 3) 动 IntelliJ 仓（除本车道明确授权的路径）。
 4) push / tag / release。
 【环境】export PATH="/c/Users/USER/.cargo/bin:$PATH"；长命令后台跑；禁 sleep 轮询。
+   你是子代理，**不要等主控**：做完就返回报告，不要留长任务自旋。
    （L7/L8 若需跑主仓 gradle：先 python C:/Users/USER/.zcode/cli/parallel_tasks.py check，
      再 register --name <lane> --sandbox mpsv-<lane>，结束 done --name <lane>；禁裸 done。）
-【门禁（必须全绿，贴原始读数）】
-  cargo fmt --all --check
-  cargo clippy --all-targets -- -D warnings
-  cargo test
-  openidea-plugin build && openidea-plugin check .
+【门禁（本地定向，全量交 CI）】
+  本地必须：cargo fmt --all --check ；cargo test <本模块>（只跑自己改到的模块）
+  本地不要：cargo clippy --all-targets（重）、cargo test（全量）、反复 openidea-plugin build
+  需要组件校验时只跑一次：openidea-plugin build && openidea-plugin check .
+  clippy / 全量 test / build / check 的权威结论由 CI 出（主控推 ci/gate-<n> 或 master 触发，gh run watch）。
+  报告贴本地读数 + CI run 链接/结论；禁止出现没跑过的读数。
 【提交】每完成一个可提交节点立即提交（git commit -F 文件，禁 -m 反引号）；报告贴 git log --oneline 与 git status --short。
 【报告】≤700 字：改动文件、门禁读数、提交哈希、工作树干净与否、遗留/风险、需要主控合入的注册片段（指向 docs/registration/<lane>.md）。
 ```
@@ -143,7 +154,8 @@ name = "version"    # 许可：Apache-2.0；理由：一句
 
 1. `git status --short` 必须干净（含工作树）；有脏改动先让该车道提交。
 2. `git merge --no-ff feat/<lane>`；冲突优先按「车道新代码 + 主控已合注册」取并集，**禁止整侧 --ours/--theirs**。
-3. 合并后跑四道门禁；红了在车道分支修，重合。
+3. 合并后本地跑「一次 `cargo test` + 一次 `openidea-plugin build && check`」，同时推 `ci/gate-<n>` 取 CI 全量结论；
+   CI 红了在车道分支修，重合。CI 的 fmt/clippy 是权威，本地不必重复跑 clippy。
 4. `git merge-base --is-ancestor feat/<lane> master` 为真才 `git branch -d`；worktree 先 remove 再删分支。
 5. 全部合并后：应用 registration → 一次 `chore: 注册汇总` 提交 → 全量门禁 → 真机 link 走查 → 写 `docs/开发日志.md`。
 6. 只有用户明确授权后才 push / tag / release。

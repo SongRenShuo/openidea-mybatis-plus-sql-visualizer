@@ -18,17 +18,21 @@
 | Rust | 1.98.1（`rust-toolchain.toml`），target `wasm32-wasip2` |
 | Node | 22.22.3（`.nvmdrc`，NVM Desktop 目录级切换） |
 
-## 门禁（每次提交都要绿）
+## 门禁（本地定向，全量交 CI）
 
-```sh
-cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-openidea-plugin build && openidea-plugin check .
-```
+完整门禁**不在本机跑**：公开仓的标准 runner 免费，而十几条车道各自编译 wasm SDK 会把内存与磁盘打满。分三层：
 
+| 层 | 在哪跑 | 内容 |
+| --- | --- | --- |
+| 车道内 | 本地 | `cargo fmt --all --check` + 只跑本模块测试（`cargo test <module>`）；不跑 clippy、不跑全量 |
+| 合并点 | 本地 | 一次 `cargo test`（增量）+ 一次 `openidea-plugin build && openidea-plugin check .`（约 5 s，缓存后） |
+| 权威全量 | CI（`.github/workflows/build.yml`） | `fmt` + `clippy -D warnings` + `test` + `build` + `check` + `scripts/verify-engine.sh` + 上传 wasm |
+
+- 合并候选不想动 master 时：`git push github HEAD:refs/heads/ci/gate-<n>`，CI 的 `ci/**` 触发已接好，`gh run watch` 读结论。
+- 子代理与长命令一律**后台**：Agent 默认异步，派完立刻做下一件事；**禁止**阻塞等待（`TaskOutput(block=true)` 长等、`sleep`、空转）。靠 task-notification 继续；要看进度只 `tail` 一次。
 - 超过约 20 秒的命令一律后台跑，靠通知继续；**禁止** `sleep` 轮询。
 - `openidea-plugin pack` 不校验组件新鲜度：发布前必须「先 build 再 pack」。
+- CI 的 CLI 步骤不是 `continue-on-error`：拿不到 0.1.51 就红，不允许「跳过 build/check 假装绿」。
 
 ## 引擎（jar）边界
 

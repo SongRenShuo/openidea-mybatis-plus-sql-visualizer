@@ -40,6 +40,7 @@
 - jar 不带 `messages/*.properties`，`perf` 等返回的是 **messageKey**（如 `perf.leading_wildcard`）；本仓负责 key → 本地化文案。
 - 引擎 `EngineApi` 现有三个门面：`renderLogs` / `checkSql` / `perfAdvice`；后续按 P5 扩 `render`/`explain`/`schema`。
 - 版本不匹配或 sidecar 启动失败时：**降级为纯文本模式**并在 UI 明示，不产出可能错的 SQL。
+- **分发（2026-11-25 探针实测修正）**：安装态**读不到包内 jar**——安装只复制 manifest 引用的文件 + wasm，且没有安装目录路径，只有 `fs.plugin_dir()`。因此 jar 由插件**首次使用时通过 `net:` 下载到 `fs.plugin_dir()`**，用 `ENGINE_VERSION.sha256` 校验通过后才允许启动；`link` 开发态可直接用仓库根相对路径。下载地址与 sha256 由 P5 产出并写进 `engine/`。
 
 ## 4 置信度模型（核心产品纪律）
 

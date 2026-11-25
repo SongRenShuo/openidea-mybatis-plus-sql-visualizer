@@ -39,7 +39,7 @@
 | --- | --- | --- | --- |
 | P-1 | `symbols("User.")` 能列实体字段 | 真机插件打日志 / 读 `ide-index` 单测 | 实体→列映射退化为文件名启发 |
 | P-2 | 50 ms 预算内能增量解析单文档 | 2,000 行 XML + 800 行 Java 实测 p95 | gutter 触发面缩到仅 XML 或改命令式 |
-| P-3 | `process:java` 指向包内 jar 可被批准 | 实测一次安装→授权→运行 | sidecar 降级 native 或全 Rust |
+| P-3 | `process:java` 能跑引擎 jar | **部分成立（2026-11-25 探针实测）**：`process:java` 可跑；但安装态**读不到包内 jar**（安装只复制 manifest 引用文件 + wasm，无安装目录路径），只有 `fs.plugin_dir()` | sidecar 改为「首次 `net:` 下载 jar 到 `plugin_dir` + sha256 校验」，或要求用户指定外部 jar |
 | P-4 | `websocket-ready` 在 1.15 真机可用 | 最小插件连本地 ws 服务 | 捕获链退化 HTTP 轮询 |
 | P-5 | `injections` 与宿主 PR #3641 不打架 | mapper XML 上同时开两者 | 放弃 injections |
 | P-6 | 自建索引在中国网络可用 | Gitee Pages 托管 index.json 实测 | 只走官方注册表（要求开源） |
