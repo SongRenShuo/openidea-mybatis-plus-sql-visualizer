@@ -1,0 +1,18 @@
+{
+  "title": "sqlv_reverse_sql",
+  "type": "object",
+  "description": "Translate a single-table SELECT into a MyBatis-Plus LambdaQueryWrapper chain; unsupported shapes are reported as unresolved, never guessed.",
+  "additionalProperties": false,
+  "properties": {
+    "sql": {
+      "type": "string",
+      "description": "SELECT statement to translate.",
+      "minLength": 1
+    },
+    "entity": {
+      "type": "string",
+      "description": "Java entity class name used in Entity::getField references; an empty value yields an unresolved result."
+    }
+  },
+  "required": ["sql", "entity"]
+}

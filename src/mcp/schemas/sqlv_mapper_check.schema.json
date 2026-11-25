@@ -1,0 +1,30 @@
+{
+  "title": "sqlv_mapper_check",
+  "type": "object",
+  "description": "Load mapper XML documents and report duplicate ids, dangling includes, missing resultMaps and unparseable files.",
+  "additionalProperties": false,
+  "properties": {
+    "documents": {
+      "type": "array",
+      "description": "Mapper XML documents to check together.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Display path used in diagnostics.",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "description": "Mapper XML text."
+          }
+        },
+        "required": ["path", "text"]
+      }
+    }
+  },
+  "required": ["documents"]
+}

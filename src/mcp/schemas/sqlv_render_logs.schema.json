@@ -1,0 +1,53 @@
+{
+  "title": "sqlv_render_logs",
+  "type": "object",
+  "description": "Parse MyBatis, p6spy, Hibernate or JdbcTemplate log text into statements, duplicates and N+1 groups.",
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "Log text supplied by the caller. Nothing is read from the IDE console.",
+      "minLength": 1
+    },
+    "options": {
+      "type": "object",
+      "description": "Parser knobs; every field is optional.",
+      "additionalProperties": false,
+      "properties": {
+        "slow_threshold_ms": {
+          "type": "number",
+          "description": "Statements with duration at or above this go into slow.",
+          "minimum": 0
+        },
+        "n_plus_one_threshold": {
+          "type": "integer",
+          "description": "Minimum repeat count for an N+1 group (at least 2).",
+          "minimum": 2
+        },
+        "ignore_params_in_dedupe": {
+          "type": "boolean",
+          "description": "Group duplicates by the literal-parameterised template instead of exact SQL."
+        },
+        "dedupe_window_ms": {
+          "type": ["integer", "null"],
+          "description": "Duplicate window in milliseconds; null means the whole text.",
+          "minimum": 0
+        },
+        "max_sql_len": {
+          "type": "integer",
+          "description": "Cap for stored SQL text.",
+          "minimum": 100
+        },
+        "timestamp_offset_minutes": {
+          "type": "integer",
+          "description": "Minutes east of UTC for timestamps without an explicit zone."
+        },
+        "recognize_bare_sql": {
+          "type": "boolean",
+          "description": "Recognise Hibernate bare SQL rows without the Hibernate: prefix."
+        }
+      }
+    }
+  },
+  "required": ["text"]
+}

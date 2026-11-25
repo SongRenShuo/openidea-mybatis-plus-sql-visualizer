@@ -1,0 +1,77 @@
+{
+  "title": "sqlv_rollback_plan",
+  "type": "object",
+  "description": "Build a rollback plan (before-image snapshot plus reverse statements) for an UPDATE or DELETE. Refused without a primary key.",
+  "additionalProperties": false,
+  "properties": {
+    "sql": {
+      "type": "string",
+      "description": "The forward UPDATE or DELETE statement.",
+      "minLength": 1
+    },
+    "table": {
+      "type": "object",
+      "description": "Table description including primary key columns.",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Table name.",
+          "minLength": 1
+        },
+        "schema": {
+          "type": "string",
+          "description": "Optional schema/catalog qualifier."
+        },
+        "columns": {
+          "type": "array",
+          "description": "Columns in declaration order.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Column name.",
+                "minLength": 1
+              },
+              "primary_key": {
+                "type": "boolean",
+                "description": "True when the column belongs to the primary key."
+              },
+              "auto_increment": {
+                "type": "boolean",
+                "description": "True when the database fills the value."
+              }
+            },
+            "required": ["name"]
+          }
+        }
+      },
+      "required": ["name", "columns"]
+    },
+    "dialect": {
+      "type": "string",
+      "description": "Dialect name that decides identifier quoting.",
+      "enum": [
+        "mysql",
+        "postgresql",
+        "oracle",
+        "sqlserver",
+        "h2",
+        "sqlite",
+        "mariadb",
+        "dm",
+        "kingbase",
+        "oceanbase",
+        "opengauss",
+        "gaussdb",
+        "highgo",
+        "vastbase",
+        "goldendb"
+      ]
+    }
+  },
+  "required": ["sql", "table"]
+}

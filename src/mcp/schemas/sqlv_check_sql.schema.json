@@ -1,0 +1,35 @@
+{
+  "title": "sqlv_check_sql",
+  "type": "object",
+  "description": "Classify a SQL statement, flag unbounded UPDATE/DELETE and destructive DDL, and list performance findings.",
+  "additionalProperties": false,
+  "properties": {
+    "sql": {
+      "type": "string",
+      "description": "One SQL statement to classify and check.",
+      "minLength": 1
+    },
+    "dialect": {
+      "type": "string",
+      "description": "Dialect name used by the quote-mismatch rule.",
+      "enum": [
+        "mysql",
+        "postgresql",
+        "oracle",
+        "sqlserver",
+        "h2",
+        "sqlite",
+        "mariadb",
+        "dm",
+        "kingbase",
+        "oceanbase",
+        "opengauss",
+        "gaussdb",
+        "highgo",
+        "vastbase",
+        "goldendb"
+      ]
+    }
+  },
+  "required": ["sql"]
+}

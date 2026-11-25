@@ -1,0 +1,72 @@
+{
+  "title": "sqlv_crud_sql",
+  "type": "object",
+  "description": "Generate select-by-id, insert, update-by-id, delete-by-id and batch-insert SQL for a table description.",
+  "additionalProperties": false,
+  "properties": {
+    "table": {
+      "type": "object",
+      "description": "Table description; identifiers are quoted per dialect.",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Table name.",
+          "minLength": 1
+        },
+        "schema": {
+          "type": "string",
+          "description": "Optional schema/catalog qualifier."
+        },
+        "columns": {
+          "type": "array",
+          "description": "Columns in declaration order.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Column name.",
+                "minLength": 1
+              },
+              "primary_key": {
+                "type": "boolean",
+                "description": "True when the column belongs to the primary key."
+              },
+              "auto_increment": {
+                "type": "boolean",
+                "description": "True when the database fills the value (omitted from INSERT/UPDATE)."
+              }
+            },
+            "required": ["name"]
+          }
+        }
+      },
+      "required": ["name", "columns"]
+    },
+    "dialect": {
+      "type": "string",
+      "description": "Dialect name that decides identifier quoting.",
+      "enum": [
+        "mysql",
+        "postgresql",
+        "oracle",
+        "sqlserver",
+        "h2",
+        "sqlite",
+        "mariadb",
+        "dm",
+        "kingbase",
+        "oceanbase",
+        "opengauss",
+        "gaussdb",
+        "highgo",
+        "vastbase",
+        "goldendb"
+      ]
+    }
+  },
+  "required": ["table"]
+}
