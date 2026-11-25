@@ -1,11 +1,11 @@
 //! `check-sql`: classify a SQL statement and list its safety/perf findings.
 //!
 //! The argument is SQL text, `@<path>`, or a bare project file path (the form
-//! the project view context menu passes). Classification comes from
-//! [`crate::core::log::classify_sql`] (the only public statement classifier) and
-//! the findings from [`crate::core::perf::analyze`]; this module maps them to
-//! `QUERY` / `DML` / `DDL` / `UNKNOWN` and flags unbounded writes and
-//! destructive statements.
+//! the project view context menu passes). Classification and findings come from
+//! [`crate::core::perf::check`], which splits multi-statement text and analyses
+//! each statement on its own; this module only maps the report to the
+//! `QUERY` / `DML` / `DDL` / `UNKNOWN` labels, the write-safety verdicts and the
+//! output lines. Single-statement input keeps the historical output verbatim.
 //!
 //! The dialect comes from the `sql.dialect` setting (shared with the navigation
 //! lane). When it is unset, text rules still run and only the quote-mismatch
@@ -16,8 +16,8 @@ use std::fmt::Write as _;
 use openidea_plugin::{Error, Invocation};
 
 use crate::commands::common::{self, CliError};
-use crate::core::log::{EntryClass, classify_sql};
-use crate::core::perf::{Finding, Severity, analyze};
+use crate::core::log::EntryClass;
+use crate::core::perf::{Finding, FindingSummary, Severity, SqlCheck, check as analyze_text};
 
 /// Matches `[[contributes.commands]] id` in `plugin.toml`.
 pub const ID: &str = "check-sql";
@@ -47,15 +47,8 @@ fn check(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
         return Err(CliError::new(KEY_NO_SQL, "the SQL text is empty"));
     }
     let dialect = common::configured_dialect();
-    let entry_class = classify_sql(&sql);
-    let class = class_label(entry_class);
-    let finding_list = analyze(&sql, &dialect);
-    let keyword = first_keyword(&sql);
-    let destructive = matches!(keyword.as_str(), "DROP" | "TRUNCATE");
-    let unbounded = matches!(
-        entry_class,
-        EntryClass::Insert | EntryClass::Update | EntryClass::Delete
-    ) && finding_list.iter().any(|f| f.rule_id == "missing_where");
+    let report = analyze_text(&sql, &dialect);
+    let class = class_label(report.class);
 
     let mut text = String::new();
     let _ = writeln!(text, "-- check-sql");
@@ -72,29 +65,122 @@ fn check(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
             &dialect
         }
     );
-    let _ = writeln!(
-        text,
-        "destructive: {}",
-        if destructive {
-            format!("YES ({keyword})")
-        } else {
-            "no".to_string()
+    let _ = writeln!(text, "destructive: {}", destructive_label(&report));
+    let _ = writeln!(text, "unbounded-write: {}", unbounded_label(&report));
+    if report.is_multi_statement() {
+        let _ = writeln!(text, "statements: {}", statements_summary(&report));
+        let _ = writeln!(text, "findings: {}", report.findings.len());
+        for summary in &report.findings {
+            append_summary(&mut text, summary);
         }
-    );
-    let _ = writeln!(
-        text,
-        "unbounded-write: {}",
-        if unbounded {
-            format!("YES ({keyword} without WHERE)")
-        } else {
-            "no".to_string()
+    } else {
+        // Single statement: keep the one-line-per-hit output unchanged.
+        let hits = report
+            .statements
+            .first()
+            .map_or(&[][..], |statement| statement.findings.as_slice());
+        let _ = writeln!(text, "findings: {}", hits.len());
+        for finding in hits {
+            append_finding(&mut text, finding);
         }
-    );
-    let _ = writeln!(text, "findings: {}", finding_list.len());
-    for finding in &finding_list {
-        append_finding(&mut text, finding);
     }
     Ok(text)
+}
+
+/// `destructive:` verdict. Single-statement text keeps the historical wording;
+/// multi-statement text says which statement is destructive.
+fn destructive_label(report: &SqlCheck) -> String {
+    if !report.destructive {
+        return "no".to_string();
+    }
+    if !report.is_multi_statement() {
+        return format!("YES ({})", report.keyword);
+    }
+    match report.destructive_statements.as_slice() {
+        [index] => format!(
+            "YES ({}, statement #{index})",
+            statement_keyword(report, *index)
+        ),
+        indexes => format!(
+            "YES ({} statements: {})",
+            indexes.len(),
+            indexes
+                .iter()
+                .map(|index| format!("#{index} {}", statement_keyword(report, *index)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+/// `unbounded-write:` verdict, with the offending statement index when the
+/// input holds more than one statement.
+fn unbounded_label(report: &SqlCheck) -> String {
+    if !report.unbounded_write {
+        return "no".to_string();
+    }
+    if !report.is_multi_statement() {
+        return format!("YES ({} without WHERE)", report.keyword);
+    }
+    match report.unbounded_statements.as_slice() {
+        [index] => format!(
+            "YES ({} without WHERE, statement #{index})",
+            statement_keyword(report, *index)
+        ),
+        indexes => format!(
+            "YES ({} statements without WHERE: {})",
+            indexes.len(),
+            indexes
+                .iter()
+                .map(|index| format!("#{index} {}", statement_keyword(report, *index)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+fn statement_keyword(report: &SqlCheck, index: usize) -> &str {
+    report
+        .statements
+        .get(index.saturating_sub(1))
+        .map_or("", |statement| statement.keyword.as_str())
+}
+
+fn statements_summary(report: &SqlCheck) -> String {
+    let mut counts: Vec<(EntryClass, usize)> = Vec::new();
+    for statement in &report.statements {
+        match counts
+            .iter_mut()
+            .find(|(class, _)| *class == statement.class)
+        {
+            Some((_, count)) => *count += 1,
+            None => counts.push((statement.class, 1)),
+        }
+    }
+    let parts = counts
+        .iter()
+        .map(|(class, count)| format!("{} {count}", class_name(*class)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{} ({parts})", report.statements.len())
+}
+
+fn append_summary(text: &mut String, summary: &FindingSummary) {
+    let _ = writeln!(
+        text,
+        "- [{}] {} {} {} count={} statements={}",
+        severity_label(summary.severity),
+        summary.rule_id,
+        summary.message_key,
+        summary.detail,
+        summary.count,
+        summary
+            .statements
+            .iter()
+            .map(|index| format!("#{index}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
 }
 
 fn append_finding(text: &mut String, finding: &Finding) {
@@ -125,31 +211,18 @@ fn class_label(class: EntryClass) -> &'static str {
     }
 }
 
-/// Leading keyword of a statement, skipping whitespace and leading comments.
-///
-/// This is presentation only: the statement class still comes from
-/// `core::log::classify_sql` and `core::perf::analyze`.
-fn first_keyword(sql: &str) -> String {
-    let mut rest = sql.trim_start();
-    loop {
-        if let Some(after) = rest.strip_prefix("--") {
-            rest = after
-                .split_once('\n')
-                .map_or("", |(_, tail)| tail)
-                .trim_start();
-        } else if let Some(after) = rest.strip_prefix("/*") {
-            rest = after
-                .split_once("*/")
-                .map_or("", |(_, tail)| tail)
-                .trim_start();
-        } else {
-            break;
-        }
+/// Lower-case class name used by the per-statement summary
+/// (`statements: 2 (delete 1, select 1)`).
+fn class_name(class: EntryClass) -> &'static str {
+    match class {
+        EntryClass::Select => "select",
+        EntryClass::Insert => "insert",
+        EntryClass::Update => "update",
+        EntryClass::Delete => "delete",
+        EntryClass::Ddl => "ddl",
+        EntryClass::Other => "other",
+        EntryClass::Error => "error",
     }
-    rest.chars()
-        .take_while(|c| c.is_ascii_alphabetic())
-        .collect::<String>()
-        .to_ascii_uppercase()
 }
 
 #[cfg(test)]
@@ -179,6 +252,40 @@ mod tests {
         let text = text(&host);
         assert!(text.contains("class: DML"));
         assert!(text.contains("unbounded-write: no"));
+    }
+
+    #[test]
+    fn multi_statement_file_flags_the_delete_without_where() {
+        let host = MockHost::install();
+        host.add_file(
+            "/project/check.sql",
+            "DELETE FROM users;\nSELECT id, name FROM users WHERE name LIKE '%abc' ORDER BY created_at DESC;",
+        );
+        run(&host.invocation(), Some("@/project/check.sql")).unwrap();
+        let text = text(&host);
+        assert!(text.contains("class: DML"));
+        assert!(text.contains("unbounded-write: YES (DELETE without WHERE, statement #1)"));
+        assert!(text.contains("destructive: no"));
+        assert!(text.contains("statements: 2 (delete 1, select 1)"));
+        assert!(text.contains("missing_where perf.missing_where"));
+        assert!(text.contains("leading_wildcard_like"));
+        assert!(text.contains("statements=#1"));
+        assert!(text.contains("statements=#2"));
+    }
+
+    #[test]
+    fn multi_statement_file_flags_a_later_drop_as_destructive() {
+        let host = MockHost::install();
+        host.add_file(
+            "/project/check.sql",
+            "SELECT id FROM users WHERE id = 1;\nDROP TABLE x;",
+        );
+        run(&host.invocation(), Some("@/project/check.sql")).unwrap();
+        let text = text(&host);
+        assert!(text.contains("class: QUERY"));
+        assert!(text.contains("destructive: YES (DROP, statement #2)"));
+        assert!(text.contains("unbounded-write: no"));
+        assert!(text.contains("statements: 2 (select 1, ddl 1)"));
     }
 
     #[test]

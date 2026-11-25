@@ -4,6 +4,10 @@
 //! Rules return `messageKey`s, never prose: localization belongs to the plugin.
 //! Everything here is pure and dependency-free apart from `serde`.
 
+use serde_json::Value;
+
+use crate::core::log::{EntryClass, classify_sql};
+
 mod advice;
 pub(crate) mod dialect;
 mod features;
@@ -20,6 +24,11 @@ pub use scoring::{Complexity, ComplexityLevel, ScorePart, score};
 /// The dialect is a plain name (`mysql`, `postgresql`, `sqlserver`, …). An
 /// unknown dialect only disables the quote-mismatch rule; an empty statement
 /// yields no findings.
+///
+/// A **single** statement is expected. For a text holding several `;`-separated
+/// statements use [`check`], which analyses each one separately (this function
+/// tokenizes the whole text as one statement, so a `WHERE` from a later
+/// statement would hide an earlier unbounded `DELETE`).
 pub fn analyze(sql: &str, dialect: &str) -> Vec<Finding> {
     if sql.trim().is_empty() {
         return Vec::new();
@@ -29,6 +38,168 @@ pub fn analyze(sql: &str, dialect: &str) -> Vec<Finding> {
         return Vec::new();
     }
     rules::evaluate(&sa, dialect)
+}
+
+/// One statement inside a (possibly multi-statement) text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatementCheck {
+    /// 1-based position in the text.
+    pub index: usize,
+    /// Statement class, from the same classifier the log family uses.
+    pub class: EntryClass,
+    /// Leading keyword, upper-case, leading comments skipped.
+    pub keyword: String,
+    /// The statement text exactly as analysed.
+    pub sql: String,
+    /// Raw rule hits of this statement, in rule order.
+    pub findings: Vec<Finding>,
+}
+
+/// Rule hits of a whole text merged by `rule_id`.
+///
+/// Evidence is kept so a multi-statement text reports "this rule fired twice,
+/// in statements #1 and #3" instead of repeating the same line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FindingSummary {
+    pub rule_id: String,
+    pub message_key: String,
+    pub severity: Severity,
+    /// Number of raw hits across every statement.
+    pub count: usize,
+    /// 1-based statement indexes with a hit, ascending and distinct.
+    pub statements: Vec<usize>,
+    /// Structured detail of the first hit.
+    pub detail: Value,
+    /// Byte range of the first hit.
+    pub range: Option<(u32, u32)>,
+}
+
+/// Text-level `check-sql` report.
+///
+/// A single statement produces exactly what [`analyze`] produces (same class,
+/// keyword and findings); several statements are analysed one by one and their
+/// findings merged, so an unbounded write can no longer hide behind a later
+/// statement's `WHERE`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SqlCheck {
+    /// Class of the first statement (the surface label is the caller's job).
+    pub class: EntryClass,
+    /// Leading keyword of the first statement.
+    pub keyword: String,
+    pub statements: Vec<StatementCheck>,
+    /// Merged findings (one entry per `rule_id`).
+    pub findings: Vec<FindingSummary>,
+    /// True when any INSERT/UPDATE/DELETE has no top-level `WHERE`.
+    pub unbounded_write: bool,
+    /// 1-based indexes of those statements.
+    pub unbounded_statements: Vec<usize>,
+    /// True when any statement starts with `DROP` or `TRUNCATE`.
+    pub destructive: bool,
+    /// 1-based indexes of those statements.
+    pub destructive_statements: Vec<usize>,
+}
+
+impl SqlCheck {
+    /// True when the input held more than one statement.
+    pub fn is_multi_statement(&self) -> bool {
+        self.statements.len() > 1
+    }
+}
+
+/// Classify and check every statement of `sql` against `dialect`.
+pub fn check(sql: &str, dialect: &str) -> SqlCheck {
+    let parts = sql::split_statements(sql);
+    // A single statement is analysed from the original text so findings,
+    // ranges and classification stay byte-identical to [`analyze`].
+    let texts: Vec<&str> = if parts.len() <= 1 { vec![sql] } else { parts };
+
+    let mut statements = Vec::with_capacity(texts.len());
+    let mut findings: Vec<FindingSummary> = Vec::new();
+    let mut unbounded_statements = Vec::new();
+    let mut destructive_statements = Vec::new();
+
+    for (position, text) in texts.iter().enumerate() {
+        let index = position + 1;
+        let class = classify_sql(text);
+        let keyword = leading_keyword(text);
+        let hits = analyze(text, dialect);
+        if matches!(class, EntryClass::Update | EntryClass::Delete)
+            && hits.iter().any(|hit| hit.rule_id == "missing_where")
+        {
+            unbounded_statements.push(index);
+        }
+        if matches!(keyword.as_str(), "DROP" | "TRUNCATE") {
+            destructive_statements.push(index);
+        }
+        merge_findings(&mut findings, &hits, index);
+        statements.push(StatementCheck {
+            index,
+            class,
+            keyword,
+            sql: text.to_string(),
+            findings: hits,
+        });
+    }
+
+    let first = statements.first();
+    SqlCheck {
+        class: first.map_or(EntryClass::Other, |statement| statement.class),
+        keyword: first.map_or_else(String::new, |statement| statement.keyword.clone()),
+        unbounded_write: !unbounded_statements.is_empty(),
+        unbounded_statements,
+        destructive: !destructive_statements.is_empty(),
+        destructive_statements,
+        statements,
+        findings,
+    }
+}
+
+fn merge_findings(merged: &mut Vec<FindingSummary>, hits: &[Finding], index: usize) {
+    for hit in hits {
+        if let Some(summary) = merged
+            .iter_mut()
+            .find(|summary| summary.rule_id == hit.rule_id)
+        {
+            summary.count += 1;
+            if summary.statements.last() != Some(&index) {
+                summary.statements.push(index);
+            }
+            continue;
+        }
+        merged.push(FindingSummary {
+            rule_id: hit.rule_id.clone(),
+            message_key: hit.message_key.clone(),
+            severity: hit.severity,
+            count: 1,
+            statements: vec![index],
+            detail: hit.detail.clone(),
+            range: hit.range,
+        });
+    }
+}
+
+/// Leading keyword of a statement, skipping whitespace and leading comments.
+fn leading_keyword(sql: &str) -> String {
+    let mut rest = sql.trim_start();
+    loop {
+        if let Some(after) = rest.strip_prefix("--") {
+            rest = after
+                .split_once('\n')
+                .map_or("", |(_, tail)| tail)
+                .trim_start();
+        } else if let Some(after) = rest.strip_prefix("/*") {
+            rest = after
+                .split_once("*/")
+                .map_or("", |(_, tail)| tail)
+                .trim_start();
+        } else {
+            break;
+        }
+    }
+    rest.chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect::<String>()
+        .to_ascii_uppercase()
 }
 
 #[cfg(test)]
@@ -576,6 +747,86 @@ mod tests {
         assert_no_rule(
             "CREATE TABLE user_copy AS SELECT id FROM user",
             "temporary_table",
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Multi-statement check (D4)
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn multi_statement_check_analyses_every_statement() {
+        let report = check(
+            "DELETE FROM users;\nSELECT id, name FROM users WHERE name LIKE '%abc' ORDER BY created_at DESC;",
+            "mysql",
+        );
+        assert_eq!(report.statements.len(), 2);
+        assert_eq!(report.class, EntryClass::Delete);
+        assert_eq!(report.statements[0].keyword, "DELETE");
+        assert_eq!(report.statements[1].class, EntryClass::Select);
+        // The later statement's WHERE must not make the DELETE look bounded.
+        assert!(report.unbounded_write);
+        assert_eq!(report.unbounded_statements, vec![1]);
+        assert!(!report.destructive);
+        let missing = report
+            .findings
+            .iter()
+            .find(|summary| summary.rule_id == "missing_where")
+            .expect("missing_where must fire for the DELETE");
+        assert_eq!(missing.count, 1);
+        assert_eq!(missing.statements, vec![1]);
+        let like = report
+            .findings
+            .iter()
+            .find(|summary| summary.rule_id == "leading_wildcard_like")
+            .expect("the wildcard SELECT must still be reported");
+        assert_eq!(like.statements, vec![2]);
+    }
+
+    #[test]
+    fn multi_statement_check_flags_a_later_drop() {
+        let report = check("SELECT id FROM users WHERE id = 1;\nDROP TABLE x;", "mysql");
+        assert_eq!(report.statements.len(), 2);
+        assert!(report.destructive);
+        assert_eq!(report.destructive_statements, vec![2]);
+        assert_eq!(report.statements[1].class, EntryClass::Ddl);
+        assert!(!report.unbounded_write);
+    }
+
+    #[test]
+    fn merged_findings_keep_one_entry_per_rule_with_statement_evidence() {
+        let report = check("DELETE FROM a;\nDELETE FROM b;", "mysql");
+        assert_eq!(report.findings.len(), 1);
+        let summary = &report.findings[0];
+        assert_eq!(summary.rule_id, "missing_where");
+        assert_eq!(summary.count, 2);
+        assert_eq!(summary.statements, vec![1, 2]);
+        assert_eq!(report.unbounded_statements, vec![1, 2]);
+    }
+
+    #[test]
+    fn single_statement_check_matches_analyze_exactly() {
+        let sql = "UPDATE user SET name = 'x'";
+        let report = check(sql, "mysql");
+        assert_eq!(report.statements.len(), 1);
+        assert!(!report.is_multi_statement());
+        assert_eq!(report.class, EntryClass::Update);
+        assert_eq!(report.statements[0].findings, analyze(sql, "mysql"));
+        assert!(report.unbounded_write);
+        assert_eq!(report.unbounded_statements, vec![1]);
+    }
+
+    #[test]
+    fn split_statements_ignores_semicolons_in_literals_and_comments() {
+        let parts = sql::split_statements(
+            "SELECT ';' AS s FROM t WHERE id = 1; -- tail ;\nSELECT \"a;b\" FROM t",
+        );
+        assert_eq!(
+            parts,
+            vec![
+                "SELECT ';' AS s FROM t WHERE id = 1;",
+                "SELECT \"a;b\" FROM t"
+            ]
         );
     }
 
