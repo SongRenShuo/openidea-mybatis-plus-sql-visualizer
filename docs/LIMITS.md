@@ -31,6 +31,11 @@
 **AI 协作类**
 
 19. **F175 ACP 会话 MCP 传输修复**：那是 AI Assistant 专有面，新平台无对应实现；MCP 能力走平台标准的工具声明（P6 阶段交付）。
+20. **方法/请求来源（PSI 级）**：平台没有 PSI/类型解析；想借 IDE 的 jdtls 代劳也不行——插件能发的 LSP 只允许**服务器自有命名空间**，
+    `textDocument/*`、`workspace/*`、`callHierarchy/*` 等 14 个标准命名空间在宿主侧被直接拒绝
+    （`crates/ide-lsp/src/plugin_requests.rs:11-38` 的 `plugin_method_allowed`），所以 `documentSymbol` / `definition` 发不出去。
+    替代做法：日志行自带的 logger 名就是 `类.方法`（如 `c.e.m.mapper.UserMapper.selectById`），列表头用它显示 `[类#方法]`；
+    文件:行与「跳转 Java」用插件自建的 Java 方法索引（`src/indexer/`）反查；请求维度只在日志里出现 `traceId`/`requestId` 时显示，没有就不显示。
 
 ## 还有一类：本版实现边界
 
