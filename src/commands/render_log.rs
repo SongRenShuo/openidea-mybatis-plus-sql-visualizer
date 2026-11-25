@@ -28,6 +28,9 @@ pub const KEY_PAGE_LIMITED: &str = "render_log.page_limited";
 
 /// Dispatch entry.
 pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
+    if arg.map(str::trim).unwrap_or("").is_empty() {
+        return common::fail(common::missing_arg(USAGE));
+    }
     match render(ctx, arg) {
         Ok(text) => {
             common::emit(&text)?;

@@ -30,12 +30,6 @@ pub const USAGE: &str = "<mapper.xml>#<namespace>.<statement> | <mapper.xml>";
 
 pub const KEY_NO_STATEMENTS: &str = "render_xml.no_statements";
 
-/// The argument-less entry point kept for the existing dispatch; it reports the
-/// required argument instead of printing a sample.
-pub fn run(ctx: &Invocation) -> Result<Option<String>, Error> {
-    run_with_arg(ctx, None)
-}
-
 /// Dispatch entry: `arg` is the path (with an optional `#statement`).
 pub fn run_with_arg(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
     match render(ctx, arg) {

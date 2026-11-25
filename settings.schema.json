@@ -116,6 +116,14 @@
       "group": "Log",
       "default": true
     },
+    "logs.pageSize": {
+      "type": "integer",
+      "title": "SQL log entries shown per render-log run",
+      "group": "Log",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 5000
+    },
     "render.paramsSeparator": {
       "type": "string",
       "title": "Parameter separator",
