@@ -104,6 +104,11 @@ path = "agent/mps-sql-agent.jar"
 args = "port=17890,stackFrames=24"
 vmOptions = ["-Dmpsv.capture.transport=ws"]
 
+# Agent skill: how to accept this plugin inside a real IDE (readings, defect
+# ledger, package-page traps). Shows under Settings › Agents › Skills.
+[[contributes.skills]]
+path = "skills/openidea-ide-acceptance/SKILL.md"
+
 # Project view context menu: the first selected path becomes the command
 # argument, so a log file opens without typing a path.
 [[contributes.menus]]
