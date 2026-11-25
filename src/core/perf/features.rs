@@ -115,10 +115,10 @@ pub(crate) fn has_row_limit(sa: &Analysis) -> bool {
         return true;
     }
     // `SELECT TOP 10 ...` only counts when TOP follows SELECT.
-    if let Some(sel) = sa.main_select {
-        if sa.tokens.get(sel + 1).is_some_and(|t| t.is_word("TOP")) {
-            return true;
-        }
+    if let Some(sel) = sa.main_select
+        && sa.tokens.get(sel + 1).is_some_and(|t| t.is_word("TOP"))
+    {
+        return true;
     }
     false
 }
@@ -214,12 +214,11 @@ fn function_on_column(sa: &Analysis) -> bool {
         }
         // First argument must be a column reference (not a literal, not another
         // function call, not an empty list).
-        if let Some(col) = sa.read_column_ref(i + 2) {
-            if !sa.tokens.get(i + 2).is_some_and(|t| t.is_punct('('))
-                && col.alias.as_deref() != Some("*")
-            {
-                return true;
-            }
+        if let Some(col) = sa.read_column_ref(i + 2)
+            && !sa.tokens.get(i + 2).is_some_and(|t| t.is_punct('('))
+            && col.alias.as_deref() != Some("*")
+        {
+            return true;
         }
         i += 1;
     }
@@ -277,27 +276,28 @@ fn between_count(sa: &Analysis) -> usize {
 
 fn offset_value(sa: &Analysis) -> Option<u64> {
     // `OFFSET n`
-    if let Some(off) = sa.find_top("OFFSET") {
-        if let Some(n) = sa.tokens.get(off + 1).and_then(|t| t.number_value()) {
-            return n.parse().ok();
-        }
+    if let Some(off) = sa.find_top("OFFSET")
+        && let Some(n) = sa.tokens.get(off + 1).and_then(|t| t.number_value())
+    {
+        return n.parse().ok();
     }
     // MySQL `LIMIT offset, count`
     if let Some(lim) = sa.find_top("LIMIT") {
-        if let (Some(a), Some(b)) = (sa.tokens.get(lim + 1), sa.tokens.get(lim + 2)) {
-            if a.number_value().is_some() && b.is_punct(',') {
-                return a.number_value().and_then(|n| n.parse::<u64>().ok());
-            }
+        if let (Some(a), Some(b)) = (sa.tokens.get(lim + 1), sa.tokens.get(lim + 2))
+            && a.number_value().is_some()
+            && b.is_punct(',')
+        {
+            return a.number_value().and_then(|n| n.parse::<u64>().ok());
         }
         // `LIMIT count OFFSET offset`
         if let (Some(a), Some(o), Some(b)) = (
             sa.tokens.get(lim + 1),
             sa.tokens.get(lim + 2),
             sa.tokens.get(lim + 3),
-        ) {
-            if a.number_value().is_some() && o.is_word("OFFSET") {
-                return b.number_value().and_then(|n| n.parse::<u64>().ok());
-            }
+        ) && a.number_value().is_some()
+            && o.is_word("OFFSET")
+        {
+            return b.number_value().and_then(|n| n.parse::<u64>().ok());
         }
     }
     None
@@ -368,23 +368,23 @@ fn predicate_flags(sa: &Analysis) -> (bool, bool, Vec<String>) {
         // `col = NULL` / `col <> NULL` / `col != NULL`
         if let Some(op) = sa.tokens.get(i + 1) {
             let is_cmp = matches!(op.text.as_str(), "=" | "==" | "<>" | "!=");
-            if is_cmp && sa.tokens.get(i + 2).is_some_and(|t| t.is_word("NULL")) {
-                if tok.ident_name().is_some() {
-                    null_comparison = true;
-                }
+            if is_cmp
+                && sa.tokens.get(i + 2).is_some_and(|t| t.is_word("NULL"))
+                && tok.ident_name().is_some()
+            {
+                null_comparison = true;
             }
         }
         // `numeric_like_column = 'literal'`
         if let Some(col) = sa.read_column_ref(i) {
             let after = ref_end_at(sa, i);
-            if sa.tokens.get(after).is_some_and(|t| t.text == "=") {
-                if let Some(v) = sa.tokens.get(after + 1).and_then(|t| t.string_value()) {
-                    if is_numeric_like(&col.column) && !v.is_empty() {
-                        if !implicit.iter().any(|c| c == &col.column) {
-                            implicit.push(col.column);
-                        }
-                    }
-                }
+            if sa.tokens.get(after).is_some_and(|t| t.text == "=")
+                && let Some(v) = sa.tokens.get(after + 1).and_then(|t| t.string_value())
+                && is_numeric_like(&col.column)
+                && !v.is_empty()
+                && !implicit.iter().any(|c| c == &col.column)
+            {
+                implicit.push(col.column);
             }
         }
         i += 1;
@@ -423,10 +423,11 @@ fn select_has_aggregate(sa: &Analysis) -> bool {
             continue;
         };
         for i in start..end {
-            if let Some(word) = sa.word_at(i) {
-                if is_aggregate(word) && sa.tokens.get(i + 1).is_some_and(|t| t.is_punct('(')) {
-                    return true;
-                }
+            if let Some(word) = sa.word_at(i)
+                && is_aggregate(word)
+                && sa.tokens.get(i + 1).is_some_and(|t| t.is_punct('('))
+            {
+                return true;
             }
         }
     }
@@ -447,10 +448,11 @@ fn aggregate_without_group(sa: &Analysis) -> bool {
     let mut has_plain_column = false;
     let depth = sa.depth[sel];
     for i in start..end {
-        if let Some(word) = sa.word_at(i) {
-            if is_aggregate(word) && sa.tokens.get(i + 1).is_some_and(|t| t.is_punct('(')) {
-                has_aggregate = true;
-            }
+        if let Some(word) = sa.word_at(i)
+            && is_aggregate(word)
+            && sa.tokens.get(i + 1).is_some_and(|t| t.is_punct('('))
+        {
+            has_aggregate = true;
         }
         if sa.depth[i] == depth && sa.read_column_ref(i).is_some() {
             has_plain_column = true;
@@ -489,16 +491,14 @@ fn temporary_table(sa: &Analysis) -> bool {
         }
     }
     // `SELECT ... INTO TEMP|TEMPORARY t` (PostgreSQL/Oracle style).
-    if sa.stmt == StmtKind::Select {
-        if let Some(into) = sa.find_top("INTO") {
-            if sa
-                .tokens
-                .get(into + 1)
-                .is_some_and(|t| t.is_word("TEMP") || t.is_word("TEMPORARY"))
-            {
-                return true;
-            }
-        }
+    if sa.stmt == StmtKind::Select
+        && let Some(into) = sa.find_top("INTO")
+        && sa
+            .tokens
+            .get(into + 1)
+            .is_some_and(|t| t.is_word("TEMP") || t.is_word("TEMPORARY"))
+    {
+        return true;
     }
     // SQL Server `#temp` table names.
     sa.tokens
