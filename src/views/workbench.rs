@@ -573,6 +573,20 @@ fn labels(confidence: &str) -> Value {
         "dialectHint": t("view.workbench.dialect.hint"),
         "confidence": t("view.workbench.confidence"),
         "confidenceLabel": confidence_label(confidence),
+        // Lane L27: editable parameters, clipboard import and the rollback
+        // entry.
+        "rebind": t("view.workbench.action.rebind"),
+        "importClipboard": t("view.workbench.action.import_clipboard"),
+        "rollback": t("view.workbench.action.rollback"),
+        "rollbackNote": t("view.workbench.rollback.note"),
+        "paramsHint": t("view.workbench.params.hint"),
+        "clipboardMissing": t("view.workbench.status.clipboard_missing"),
+        "imported": t("view.workbench.status.imported"),
+        "importFailed": t("view.workbench.status.import_failed"),
+        "paramsEmpty": t("view.workbench.status.params_empty"),
+        "paramsNoPlaceholder": t("view.workbench.status.params_no_placeholder"),
+        "rebound": t("view.workbench.status.rebound"),
+        "rollbackRefused": t("view.workbench.status.rollback_refused"),
     })
 }
 
@@ -614,6 +628,14 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
         }
         "copy" => copy_sql()?,
         "export" => export_sql()?,
+        // Parameter rebinding (lane L27): the page sends the edited values; the
+        // host renders each as a SQL literal and substitutes them into the
+        // model's SQL through the core log placeholder scanner.
+        "params" => rebind_params(values_of(message)),
+        // Rollback (lane L27): the workbench has no table/primary-key
+        // metadata, so no plan can be built — the refusal is the designed
+        // outcome, never a guessed table.
+        "rollback" => set_status(t("view.workbench.status.rollback_refused"), false),
         // The dialect is read-only: it comes from the settings page. The op is
         // still answered so an older page does not wait for a reply.
         "dialect" => set_status(t("view.workbench.status.dialect_readonly"), false),
@@ -699,6 +721,106 @@ fn export_sql() -> Result<(), Error> {
     crate::commands::common::emit(&text)?;
     set_status(t("view.workbench.status.exported"), false);
     Ok(())
+}
+
+/// The `values` array of a `preview-params` message, as strings.
+fn values_of(message: &Value) -> Vec<String> {
+    message
+        .get("values")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Rebinds the user's edited parameter values into the model's SQL (lane L27).
+///
+/// `sql` keeps its `?` placeholders; each value becomes a SQL literal — a
+/// number / boolean / `null` stays bare, everything else is single-quoted with
+/// `'` doubled — and `core::log`'s placeholder scanner substitutes them in
+/// order (the same scanner the log panel's restoration uses, so quoting is
+/// never applied twice). The raw values stay in `params` for further edits.
+fn rebind_params(values: Vec<String>) {
+    let current = model();
+    if values.is_empty() || current.sql.trim().is_empty() {
+        set_status(t("view.workbench.status.params_empty"), false);
+        return;
+    }
+    let had_placeholders = current.sql.contains('?');
+    let literals: Vec<String> = values.iter().map(|value| param_literal(value)).collect();
+    let rebound = crate::core::log::restore_rendered(&current.sql, &literals);
+    let mut next = current;
+    next.sql = rebound;
+    next.params = values;
+    set_model(next);
+    let status = if had_placeholders {
+        t("view.workbench.status.rebound")
+    } else {
+        t("view.workbench.status.params_no_placeholder")
+    };
+    set_status(status, false);
+}
+
+/// One user-typed parameter value as a SQL literal.
+fn param_literal(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.eq_ignore_ascii_case("null") {
+        return "NULL".to_string();
+    }
+    if is_number(trimmed)
+        || trimmed.eq_ignore_ascii_case("true")
+        || trimmed.eq_ignore_ascii_case("false")
+    {
+        return trimmed.to_string();
+    }
+    let mut out = String::with_capacity(trimmed.len() + 2);
+    out.push('\'');
+    for ch in trimmed.chars() {
+        if ch == '\'' {
+            out.push_str("''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// `true` for a decimal number (optional sign, at most one dot, at least one
+/// digit); anything else is a string literal.
+fn is_number(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    if bytes
+        .first()
+        .is_some_and(|byte| *byte == b'+' || *byte == b'-')
+    {
+        index = 1;
+    }
+    let rest = &bytes[index..];
+    if rest.is_empty() {
+        return false;
+    }
+    let mut dots = 0;
+    let mut digits = 0;
+    for byte in rest {
+        match byte {
+            b'0'..=b'9' => digits += 1,
+            b'.' => {
+                dots += 1;
+                if dots > 1 {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    digits > 0
 }
 
 /// Lists the project's SQL and mapper XML files and lets the user pick one.
@@ -1280,5 +1402,123 @@ mod tests {
         // The bare `copy` op is the log panel's own and must not reach here.
         send(json!({ "op": "copy" }));
         assert_eq!(model(), sample());
+    }
+
+    // Parameters, clipboard import and rollback (lane L27) ----------------
+
+    #[test]
+    fn rebinding_params_quotes_strings_and_leaves_numbers_bare() {
+        let (_host, _guard) = test_host();
+        set_model(WorkbenchModel::new(
+            "select * from t where a = ? and b = ? and c = ? and d = ? and e = ?",
+            Vec::new(),
+            "MySQL",
+        ));
+        send(json!({
+            "op": "preview-params",
+            "values": ["1", "x'y", "true", "null", "-2.5"],
+        }));
+        let current = model();
+        assert_eq!(
+            current.sql,
+            "select * from t where a = 1 and b = 'x''y' and c = true and d = NULL and e = -2.5"
+        );
+        assert_eq!(current.params.len(), 5, "the raw values stay editable");
+        let tab = tab();
+        assert_eq!(
+            tab["replaceInput"], false,
+            "a rebind leaves the input alone"
+        );
+        assert_eq!(tab["status"]["text"], t("view.workbench.status.rebound"));
+    }
+
+    #[test]
+    fn parameter_literals_quote_only_strings() {
+        assert_eq!(param_literal("1"), "1");
+        assert_eq!(param_literal("-2.5"), "-2.5");
+        assert_eq!(param_literal("+7"), "+7");
+        assert_eq!(param_literal("true"), "true");
+        assert_eq!(param_literal("NULL"), "NULL");
+        assert_eq!(param_literal("abc"), "'abc'");
+        assert_eq!(param_literal("x'y"), "'x''y'");
+        assert_eq!(param_literal("  padded  "), "'padded'");
+        assert_eq!(param_literal("1.2.3"), "'1.2.3'");
+        assert_eq!(param_literal(""), "''");
+        assert!(!is_number("1.2.3"));
+        assert!(!is_number("12a"));
+        assert!(is_number("0"));
+    }
+
+    #[test]
+    fn rebinding_without_placeholders_reports_it() {
+        let (_host, _guard) = test_host();
+        set_model(WorkbenchModel::new("select 1", Vec::new(), "MySQL"));
+        send(json!({ "op": "preview-params", "values": ["1"] }));
+        assert_eq!(model().sql, "select 1");
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.params_no_placeholder")
+        );
+    }
+
+    #[test]
+    fn rebinding_with_no_values_reports_it() {
+        let (_host, _guard) = test_host();
+        set_model(WorkbenchModel::new(
+            "select * from t where id = ?",
+            Vec::new(),
+            "MySQL",
+        ));
+        send(json!({ "op": "preview-params", "values": [] }));
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.params_empty")
+        );
+    }
+
+    #[test]
+    fn exporting_after_a_rebind_carries_the_bound_values() {
+        let (host, _guard) = test_host();
+        set_model(WorkbenchModel::new(
+            "select * from t where id = ?",
+            Vec::new(),
+            "MySQL",
+        ));
+        send(json!({ "op": "preview-params", "values": ["42"] }));
+        send(json!({ "op": "preview-export" }));
+        let out = &host.output()[common::CHANNEL];
+        assert!(
+            compact(out).to_lowercase().contains("id = 42"),
+            "the export is the executable SQL: {out}"
+        );
+    }
+
+    #[test]
+    fn rollback_refuses_without_primary_key_metadata() {
+        let (_host, _guard) = test_host();
+        set_model(WorkbenchModel::new(
+            "DELETE FROM user WHERE id = 1",
+            Vec::new(),
+            "MySQL",
+        ));
+        send(json!({ "op": "preview-rollback" }));
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.rollback_refused")
+        );
+    }
+
+    #[test]
+    fn the_formatted_tab_carries_the_dialect_formatted_sql() {
+        let (_host, _guard) = test_host();
+        set_model(WorkbenchModel::new(
+            "select id from t where a=1",
+            Vec::new(),
+            "MySQL",
+        ));
+        let tab = tab();
+        let formatted = tab["model"]["tabs"]["formatted"].as_str().unwrap();
+        assert_ne!(formatted, "select id from t where a=1");
+        assert!(formatted.to_uppercase().contains("SELECT"), "{formatted}");
     }
 }

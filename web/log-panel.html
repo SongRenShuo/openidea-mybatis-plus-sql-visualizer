@@ -363,6 +363,21 @@
       min-width: 0; min-height: 0; border-right: 1px solid var(--openidea-border);
     }
     #panelPreview .pv-pane-title { padding: 4px 8px 2px; font-weight: 600; }
+    /* Editable parameter values (lane L27): one input per parameter, the
+       Rebind / Import actions under the list. */
+    #panelPreview .pv-params-actions { display: flex; align-items: center; gap: 6px; padding: 4px 0 6px; }
+    #panelPreview .pv-param-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+    #panelPreview .pv-param-row .idx {
+      flex: 0 0 auto; width: 16px; text-align: right;
+      color: var(--openidea-fg-muted); font-size: 10px;
+    }
+    #panelPreview .pv-param-input {
+      flex: 1 1 auto; min-width: 0;
+      background: var(--openidea-bg-input); color: var(--openidea-fg);
+      border: 1px solid var(--openidea-border); border-radius: 3px; padding: 2px 4px;
+      font-family: var(--openidea-font-mono, monospace); font-size: 12px;
+    }
+    #panelPreview .pv-params-empty { color: var(--openidea-fg-muted); font-size: 11px; }
     #panelPreview .pv-scroll { flex: 1 1 auto; overflow: auto; padding: 4px 8px 8px; }
     #panelPreview .pv-sqlside {
       flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0;
@@ -628,11 +643,21 @@
           <option value="formatted"></option>
         </select>
         <button id="pvExport" class="btn" type="button"></button>
+        <!-- Rollback (L27): the workbench has no table/primary-key metadata,
+             so the button stays disabled with the reason in its tooltip. -->
+        <button id="pvRollback" class="btn" type="button" disabled></button>
       </div>
       <div class="pv-cols">
         <div class="pv-params">
           <div class="pv-pane-title" id="pvParamsTitle"></div>
-          <div class="pv-scroll"><pre class="code muted" id="pvParams"></pre></div>
+          <div class="pv-scroll">
+            <div id="pvParamsList"></div>
+            <div class="pv-params-actions">
+              <button id="pvRebindBtn" class="btn" type="button"></button>
+              <button id="pvImportBtn" class="btn" type="button"></button>
+            </div>
+            <div class="hint" id="pvParamsHint"></div>
+          </div>
         </div>
         <div class="pv-sqlside">
           <div class="pv-tabs" role="tablist">
@@ -1198,15 +1223,18 @@
         list.hidden = false;
         $('empty').hidden = true;
         var frag = document.createDocumentFragment();
-        // A row belongs to an expanded group when its group key repeats the
-        // previous row's key (the host emits the occurrences contiguously);
-        // those rows render indented, each with its own time and duration.
+        // A row belongs to an expanded group when it is flagged expanded and
+        // its group key repeats the previous row's key (the host emits the
+        // occurrences contiguously); those rows render indented, each with its
+        // own time and duration. The `expanded` guard keeps consecutive rows of
+        // a *collapsed* N+1 group from being mistaken for members.
         var prevDedupe = '';
         var prevNPlusOne = '';
         for (var i = 0; i < rows.length; i++) {
           var row = rows[i];
-          var isMember = !!((row.dedupe_key && row.dedupe_key === prevDedupe) ||
-            (row.n_plus_one_key && row.n_plus_one_key === prevNPlusOne));
+          var isMember = !!(row.expanded &&
+            ((row.dedupe_key && row.dedupe_key === prevDedupe) ||
+              (row.n_plus_one_key && row.n_plus_one_key === prevNPlusOne)));
           frag.appendChild(buildRow(row, threshold, isMember));
           prevDedupe = row.dedupe_key || '';
           prevNPlusOne = row.n_plus_one_key || '';
@@ -1447,6 +1475,11 @@
       // Signature of what the tab body shows: a state push that changes none
       // of it must not re-render (the reader keeps their scroll position).
       var pvSig = null;
+      // Params (lane L27): signature of the parameter list (so an unrelated
+      // push does not clobber what the user typed) and whether a clipboard read
+      // was refused (the capability gates navigator.clipboard in a web view).
+      var pvParamsSig = null;
+      var clipboardMissing = false;
 
       function pvNode(id) { return document.getElementById(id); }
       function pvTabs() { return preview.model.tabs || {}; }
@@ -1552,6 +1585,75 @@
           var key = buttons[tabIndex].getAttribute('data-pvtab');
           buttons[tabIndex].textContent = labels[PV_TAB_KEYS[key]] || key;
         }
+        // Lane L27: the editable-parameter actions and the rollback entry.
+        var rebindBtn = pvNode('pvRebindBtn');
+        if (rebindBtn) { rebindBtn.textContent = labels.rebind || ''; }
+        var importBtn = pvNode('pvImportBtn');
+        if (importBtn) { importBtn.textContent = labels.importClipboard || ''; }
+        var rollbackBtn = pvNode('pvRollback');
+        if (rollbackBtn) {
+          rollbackBtn.textContent = labels.rollback || '';
+          // The workbench carries no table/primary-key metadata: a rollback
+          // plan can never be built here, so the entry stays disabled and
+          // explains itself instead of guessing a table.
+          rollbackBtn.disabled = true;
+          rollbackBtn.title = labels.rollbackNote || '';
+        }
+        pvUpdateParamsActions();
+      }
+
+      // Editable parameters (lane L27) --------------------------------------
+      function pvBuildParams() {
+        var host = pvNode('pvParamsList');
+        if (!host) { return; }
+        while (host.firstChild) { host.removeChild(host.firstChild); }
+        var params = (preview.model && preview.model.params) || [];
+        for (var i = 0; i < params.length; i++) {
+          var row = document.createElement('div');
+          row.className = 'pv-param-row';
+          var idx = document.createElement('span');
+          idx.className = 'idx';
+          idx.textContent = String(i + 1);
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'pv-param-input';
+          input.value = params[i];
+          input.autocomplete = 'off';
+          input.spellcheck = false;
+          row.appendChild(idx);
+          row.appendChild(input);
+          host.appendChild(row);
+        }
+        if (params.length === 0) {
+          var empty = document.createElement('div');
+          empty.className = 'pv-params-empty';
+          empty.textContent = (preview.labels || {}).paramsEmpty || '';
+          host.appendChild(empty);
+        }
+        pvParamsSig = params.join('\u0001');
+      }
+
+      // Rebind / Import availability: no values -> nothing to rebind; no
+      // clipboard API (the capability gates navigator.clipboard in a web
+      // view) -> the import button is greyed with the reason in its tooltip.
+      function pvUpdateParamsActions() {
+        var labels = preview.labels || {};
+        var count = ((preview.model && preview.model.params) || []).length;
+        var rebindBtn = pvNode('pvRebindBtn');
+        if (rebindBtn) {
+          rebindBtn.disabled = count === 0;
+          rebindBtn.title = count === 0 ? (labels.paramsEmpty || '') : (labels.paramsHint || '');
+        }
+        var importBtn = pvNode('pvImportBtn');
+        if (importBtn) {
+          var api = !!(navigator.clipboard && navigator.clipboard.readText);
+          var blocked = !api || clipboardMissing;
+          importBtn.disabled = blocked || count === 0;
+          importBtn.title = blocked
+            ? (labels.clipboardMissing || '')
+            : (count === 0 ? (labels.paramsEmpty || '') : '');
+        }
+        setText(pvNode('pvParamsHint'), labels.paramsHint);
       }
 
       function pvApplyModel() {
@@ -1576,7 +1678,10 @@
         }
 
         var params = m.params || [];
-        setText(pvNode('pvParams'), params.length ? params.join('\n') : '—');
+        // Rebuild the inputs only when the parameter list itself changed: a
+        // push that carries the same list must leave the user's edits alone.
+        if (params.join('\u0001') !== pvParamsSig) { pvBuildParams(); }
+        pvUpdateParamsActions();
 
         var columns = pvTabs().columns || '';
         var buttons = document.querySelectorAll('#panelPreview .pv-tab');
@@ -1793,6 +1898,47 @@
       pvOn('pvCopySql', function () { post({ op: 'preview-copy' }); });
       pvOn('pvExport', function () { post({ op: 'preview-export' }); });
       pvOn('pvFormatPreview', function () { pvSetMode('formatted'); });
+
+      // Lane L27: rebind the edited values into the SQL (no automatic rebind
+      // after an import), and import a comma/newline separated list from the
+      // clipboard into the parameter table.
+      pvOn('pvRebindBtn', function () {
+        var inputs = document.querySelectorAll('#panelPreview .pv-param-input');
+        var values = [];
+        for (var i = 0; i < inputs.length; i++) { values.push(inputs[i].value); }
+        post({ op: 'preview-params', values: values });
+      });
+      pvOn('pvImportBtn', function () {
+        if (!(navigator.clipboard && navigator.clipboard.readText)) {
+          clipboardMissing = true;
+          pvUpdateParamsActions();
+          return;
+        }
+        navigator.clipboard.readText().then(function (text) {
+          var parts = String(text || '').split(/[\r\n,]+/);
+          var values = [];
+          for (var i = 0; i < parts.length; i++) {
+            var value = parts[i].trim();
+            if (value !== '') { values.push(value); }
+          }
+          if (values.length === 0) {
+            setText(pvNode('pvStatus'), (preview.labels || {}).importFailed || '');
+            return;
+          }
+          var inputs = document.querySelectorAll('#panelPreview .pv-param-input');
+          for (var j = 0; j < inputs.length && j < values.length; j++) {
+            inputs[j].value = values[j];
+          }
+          var note = ((preview.labels || {}).imported || '').replace('{0}', String(values.length));
+          setText(pvNode('pvStatus'), note);
+        }).catch(function (error) {
+          var message = (error && error.message) ? error.message : '';
+          if (error && error.name === 'NotAllowedError') { clipboardMissing = true; }
+          pvUpdateParamsActions();
+          setText(pvNode('pvStatus'), ((preview.labels || {}).importFailed || '').replace('{0}', message));
+        });
+      });
+      pvOn('pvRollback', function () { post({ op: 'preview-rollback' }); });
 
       var pvModeSelect = pvNode('pvMode');
       if (pvModeSelect) {

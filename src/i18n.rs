@@ -438,6 +438,63 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "The dialect comes from the settings page and cannot be changed here.",
         "方言来自设置页，不能在此修改。",
     ),
+    // Workbench parameters, clipboard import and rollback (lane L27).
+    ("view.workbench.action.rebind", "Rebind", "重绑定"),
+    (
+        "view.workbench.action.import_clipboard",
+        "Import from Clipboard",
+        "从剪贴板导入",
+    ),
+    (
+        "view.workbench.action.rollback",
+        "Generate Rollback",
+        "生成回滚",
+    ),
+    (
+        "view.workbench.rollback.note",
+        "The workbench has no table / primary-key metadata, so a rollback plan cannot be generated here; the rollback-plan command takes a table description (columns + primary key).",
+        "工作台没有表/主键元数据，无法在此生成回滚；回滚计划需要表结构（列 + 主键），请用 rollback-plan 命令并给出表描述。",
+    ),
+    (
+        "view.workbench.params.hint",
+        "Edit a value, then Rebind to write it into the SQL; numbers and booleans stay bare, everything else is quoted.",
+        "修改参数后点「重绑定」写入 SQL；数字与布尔值裸写，其余按字符串加引号。",
+    ),
+    (
+        "view.workbench.status.clipboard_missing",
+        "The clipboard capability is not granted; importing from the clipboard is unavailable.",
+        "未授予剪贴板能力，无法从剪贴板导入。",
+    ),
+    (
+        "view.workbench.status.imported",
+        "Imported {0} value(s) from the clipboard (not rebound).",
+        "已从剪贴板导入 {0} 个值（未自动重绑定）。",
+    ),
+    (
+        "view.workbench.status.import_failed",
+        "Could not read the clipboard: {0}",
+        "读取剪贴板失败：{0}",
+    ),
+    (
+        "view.workbench.status.params_empty",
+        "There are no parameter values to bind.",
+        "没有可回填的参数值。",
+    ),
+    (
+        "view.workbench.status.params_no_placeholder",
+        "The SQL has no ? placeholder to rebind.",
+        "SQL 中没有可回填的 ? 占位符。",
+    ),
+    (
+        "view.workbench.status.rebound",
+        "Parameters rebound into the SQL.",
+        "参数已回填到 SQL。",
+    ),
+    (
+        "view.workbench.status.rollback_refused",
+        "A rollback plan needs the table's primary key; the workbench has no table metadata, so no plan is generated (use the rollback-plan command with a table description).",
+        "回滚计划需要表的主键；工作台没有表元数据，因此不生成回滚（请用 rollback-plan 命令并给出表描述）。",
+    ),
     // Parameter restoration keys (lane L2, docs/registration/L2.md).
     (
         "params.missing_positional",
