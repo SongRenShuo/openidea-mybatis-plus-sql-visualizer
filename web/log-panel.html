@@ -402,6 +402,22 @@
     #panelPreview .pv-toolbar {
       display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px;
     }
+    /* The reference's "更多" fold (L35b): the low-frequency actions the
+       toolbar would otherwise duplicate — Export, Rollback — behind one
+       button, the way `panel.more` folds them in the IntelliJ edition. */
+    #panelPreview .pv-more-wrap { position: relative; display: inline-flex; }
+    #panelPreview .pv-more-menu {
+      position: absolute; top: 100%; right: 0; z-index: 20; margin-top: 2px;
+      display: flex; flex-direction: column; min-width: 120px; padding: 2px;
+      border: 1px solid var(--openidea-border); border-radius: 3px;
+      background: var(--openidea-bg-elevated);
+    }
+    #panelPreview .pv-more-item {
+      padding: 3px 8px; background: transparent; border: none; border-radius: 2px;
+      cursor: pointer; text-align: left; color: var(--openidea-fg); font-size: 12px;
+    }
+    #panelPreview .pv-more-item:hover { background: var(--openidea-bg-selected); }
+    #panelPreview .pv-more-item:disabled { color: var(--openidea-fg-muted); cursor: default; }
     #panelPreview .hint { padding: 0 8px 4px; color: var(--openidea-fg-muted); }
     #panelPreview #pvInput {
       flex: 1 1 auto; min-height: 0; margin: 0 8px 8px; padding: 6px 8px; resize: none;
@@ -429,6 +445,23 @@
     #panelPreview .pv-badge.partial { color: var(--openidea-warning); }
     #panelPreview .pv-badge.unresolved { color: var(--openidea-danger); }
     #panelPreview .pv-advice { font-size: 11px; }
+    /* Degradation banner (L35b): the reference's non-modal honesty strip, worn
+       just under the toolbar while a render is `unresolved`. It sits outside
+       `.pv-cols` so it never steals width from the two columns. */
+    #panelPreview .pv-banner {
+      display: flex; align-items: flex-start; gap: 6px; margin: 0 8px 4px;
+      padding: 4px 6px; border-radius: 3px;
+      border: 1px solid var(--openidea-border); background: var(--openidea-bg-elevated);
+      color: var(--openidea-danger); font-size: 11px;
+    }
+    #panelPreview .pv-banner-text {
+      flex: 1 1 auto; min-width: 0; white-space: pre-wrap; word-break: break-word;
+    }
+    #panelPreview .pv-banner-close {
+      flex: 0 0 auto; padding: 0 4px; background: transparent; border: none;
+      cursor: pointer; color: var(--openidea-fg-muted); font-size: 12px;
+    }
+    #panelPreview .pv-banner-close:hover { color: var(--openidea-fg); }
     #panelPreview .pv-cols {
       display: flex; flex: 1 1 auto; min-height: 0;
       border-top: 1px solid var(--openidea-border);
@@ -438,13 +471,18 @@
       min-width: 0; min-height: 0; border-right: 1px solid var(--openidea-border);
     }
     #panelPreview .pv-pane-title { padding: 4px 8px 2px; font-weight: 600; }
-    /* Editable parameter values (lane L27): one input per parameter, the
-       Rebind / Import actions under the list. */
+    /* Editable parameter values (lane L27, laid out as two columns in L35b):
+       name on the left, value input on the right, top aligned like the
+       reference's parameter pane; Rebind / Import sit under the list. */
     #panelPreview .pv-params-actions { display: flex; align-items: center; gap: 6px; padding: 4px 0 6px; }
-    #panelPreview .pv-param-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
-    #panelPreview .pv-param-row .idx {
-      flex: 0 0 auto; width: 16px; text-align: right;
-      color: var(--openidea-fg-muted); font-size: 10px;
+    #panelPreview .pv-param-row {
+      display: grid; grid-template-columns: minmax(48px, 38%) minmax(0, 1fr);
+      align-items: start; gap: 6px; margin-bottom: 4px;
+    }
+    #panelPreview .pv-param-name {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--openidea-fg-muted); font-family: var(--openidea-font-mono, monospace);
+      font-size: 11px;
     }
     #panelPreview .pv-param-input {
       flex: 1 1 auto; min-width: 0;
@@ -742,8 +780,14 @@
   </div>
 
   <!-- SQL 预览：the preview workbench, moved out of its own view (L23).
-       Input pane on top, preview pane below, parameters beside the SQL. -->
+       L35b reorders the preview half the way the IntelliJ edition's
+       `SqlPreviewPanel` lays it out: meta row (dialect chip + capability
+       tooltip + performance advice), toolbar (Copy SQL / Format / Display
+       mode / Explain / Refresh, with Export and Rollback folded behind
+       "More"), then the splitter view — parameters on the left (30%),
+       result tabs on the right — and a status-only footer. -->
   <div class="panel" id="panelPreview" hidden>
+    <!-- Input half (lane L27): the reference's standalone page actions. -->
     <div class="pv-pane pv-top" id="pvPaneTop">
       <div class="pv-toolbar">
         <button id="pvResolve" class="btn" type="button"></button>
@@ -760,12 +804,16 @@
          tabindex="0"></div>
 
     <div class="pv-pane pv-preview">
+      <!-- Meta row: the dialect chip carries the capability matrix in its
+           tooltip (the reference's `dialectCapabilityTooltipSection`). -->
       <div class="pv-meta">
         <span class="pv-chip" id="pvDialectChip"></span>
         <span class="muted" id="pvDialectHint"></span>
         <span class="pv-badge" id="pvConfidence" hidden></span>
         <span class="pv-advice muted" id="pvAdvice"></span>
       </div>
+      <!-- Toolbar, in the reference order: copy / format / display mode /
+           explain (disabled — this plugin never executes SQL) / refresh. -->
       <div class="pv-toolbar">
         <button id="pvCopy" class="btn" type="button"></button>
         <button id="pvFormatPreview" class="btn" type="button"></button>
@@ -774,10 +822,30 @@
           <option value="normal"></option>
           <option value="formatted"></option>
         </select>
-        <button id="pvExport" class="btn" type="button"></button>
-        <!-- Rollback (L27): the workbench has no table/primary-key metadata,
-             so the button stays disabled with the reason in its tooltip. -->
-        <button id="pvRollback" class="btn" type="button" disabled></button>
+        <!-- Explain: the reference runs EXPLAIN through the data source; this
+             build has no sidecar execution path here, so the button stays
+             disabled and explains itself (same wording as Execute). -->
+        <button id="pvExplain" class="btn" type="button" disabled></button>
+        <button id="pvRefresh" class="btn" type="button"></button>
+        <span class="pv-more-wrap">
+          <button id="pvMore" class="btn" type="button" aria-haspopup="true"
+                  aria-expanded="false"></button>
+          <div class="pv-more-menu" id="pvMoreMenu" role="menu" hidden>
+            <button id="pvExport" class="pv-more-item" type="button" role="menuitem"></button>
+            <!-- Rollback (L27): the workbench has no table/primary-key
+                 metadata, so the item stays disabled with the reason in its
+                 tooltip. -->
+            <button id="pvRollback" class="pv-more-item" type="button" role="menuitem"
+                    disabled></button>
+          </div>
+        </span>
+      </div>
+      <!-- Degradation banner (L35b): the reference's honesty strip. Shown
+           while the render is `unresolved`; the reasons carry their message
+           keys, and the reader can dismiss it until the next render. -->
+      <div class="pv-banner" id="pvBanner" role="status" hidden>
+        <span class="pv-banner-text" id="pvBannerText"></span>
+        <button class="pv-banner-close" id="pvBannerClose" type="button"></button>
       </div>
       <div class="pv-cols">
         <div class="pv-params">
@@ -800,9 +868,8 @@
           <pre class="code pv-tabbody" id="pvTabBody" role="tabpanel"></pre>
         </div>
       </div>
+      <!-- Status line only: the reference's resultPanel SOUTH. -->
       <div class="pv-footer">
-        <button id="pvExecute" class="btn" type="button" disabled></button>
-        <button id="pvCopySql" class="btn" type="button"></button>
         <span id="pvStatus" class="muted"></span>
       </div>
     </div>
@@ -1734,8 +1801,8 @@
       var PV_LABEL_KEYS = {
         pvResolve: 'resolve', pvFormat: 'format', pvLoadFile: 'loadFile',
         pvClear: 'clear', pvOpenDialog: 'openDialog', pvCopy: 'copySql',
-        pvFormatPreview: 'format', pvExport: 'export', pvExecute: 'execute',
-        pvCopySql: 'copySql'
+        pvFormatPreview: 'format', pvExport: 'export', pvExplain: 'explain',
+        pvRefresh: 'refresh', pvMore: 'more'
       };
       var PV_TAB_KEYS = { sql: 'tabSql', raw: 'tabRaw', columns: 'tabColumns' };
       var PV_TAB_ORDER = ['sql', 'raw', 'columns'];
@@ -1748,6 +1815,9 @@
       // was refused (the capability gates navigator.clipboard in a web view).
       var pvParamsSig = null;
       var clipboardMissing = false;
+      // Degradation banner (L35b): the reasons the reader dismissed. A later
+      // render with different reasons shows the strip again.
+      var pvBannerDismissed = null;
 
       function pvNode(id) { return document.getElementById(id); }
       function pvTabs() { return preview.model.tabs || {}; }
@@ -1838,8 +1908,22 @@
         }
         var openDialog = pvNode('pvOpenDialog');
         if (openDialog) { openDialog.title = labels.openDialogNote || ''; }
-        var executeButton = pvNode('pvExecute');
-        if (executeButton) { executeButton.title = labels.executeNote || ''; }
+        // Explain stays disabled: this plugin never executes user SQL (the
+        // reference runs EXPLAIN through the data source); the tooltip says so
+        // and points at the engine side.
+        var explainButton = pvNode('pvExplain');
+        if (explainButton) {
+          explainButton.disabled = true;
+          explainButton.title = labels.explainNote || '';
+        }
+        var moreButton = pvNode('pvMore');
+        if (moreButton) { moreButton.title = labels.moreNote || ''; }
+        var bannerClose = pvNode('pvBannerClose');
+        if (bannerClose) {
+          bannerClose.textContent = '\u00d7';
+          bannerClose.title = labels.bannerDismiss || '';
+          bannerClose.setAttribute('aria-label', labels.bannerDismiss || '');
+        }
         setText(pvNode('pvInputHint'), labels.hintInput);
         setText(pvNode('pvParamsTitle'), labels.params);
         setText(pvNode('pvModeLabel'), labels.mode);
@@ -1876,26 +1960,32 @@
         if (!host) { return; }
         while (host.firstChild) { host.removeChild(host.firstChild); }
         var params = (preview.model && preview.model.params) || [];
+        var labels = preview.labels || {};
         for (var i = 0; i < params.length; i++) {
           var row = document.createElement('div');
           row.className = 'pv-param-row';
-          var idx = document.createElement('span');
-          idx.className = 'idx';
-          idx.textContent = String(i + 1);
+          // Two columns (L35b), the reference's name-beside-value layout. The
+          // model carries positions only — the mapper's parameter names are
+          // gone by the time the SQL is restored — so the name column shows the
+          // parameter's ordinal.
+          var name = document.createElement('span');
+          name.className = 'pv-param-name';
+          name.textContent = (labels.paramsName || '').replace('{0}', String(i + 1));
+          name.title = labels.paramsHint || '';
           var input = document.createElement('input');
           input.type = 'text';
           input.className = 'pv-param-input';
           input.value = params[i];
           input.autocomplete = 'off';
           input.spellcheck = false;
-          row.appendChild(idx);
+          row.appendChild(name);
           row.appendChild(input);
           host.appendChild(row);
         }
         if (params.length === 0) {
           var empty = document.createElement('div');
           empty.className = 'pv-params-empty';
-          empty.textContent = (preview.labels || {}).paramsEmpty || '';
+          empty.textContent = labels.paramsEmpty || '';
           host.appendChild(empty);
         }
         pvParamsSig = params.join('\u0001');
@@ -1923,6 +2013,31 @@
         }
         setText(pvNode('pvParamsHint'), labels.paramsHint);
       }
+
+      // Degradation banner (L35b): the reference's honesty strip. It appears while
+        // the render is `unresolved` (the host sets `degraded`), carries the
+        // reasons verbatim — every line starts with its message key — and the
+        // reader can dismiss it until the next render replaces the model.
+        function pvApplyBanner() {
+          var banner = pvNode('pvBanner');
+          if (!banner) { return; }
+          var m = preview.model || {};
+          var labels = preview.labels || {};
+          if (!m.degraded) {
+            banner.hidden = true;
+            pvBannerDismissed = null;
+            return;
+          }
+          var reason = m.reason || '';
+          if (pvBannerDismissed === reason) { banner.hidden = true; return; }
+          var text = pvNode('pvBannerText');
+          if (text) {
+            text.textContent = reason
+              ? (labels.reasonTitle || '') + '\n' + reason
+              : (labels.reasonTitle || '');
+          }
+          banner.hidden = false;
+        }
 
       function pvApplyModel() {
         var m = preview.model || {};
@@ -1958,6 +2073,7 @@
           buttons[tabIndex].title = key === 'columns' && !columns
             ? (labels.columnsEmpty || '') : '';
         }
+        pvApplyBanner();
       }
 
       function applyPreview(tab) {
@@ -1966,6 +2082,9 @@
         preview.labels = tab.labels || {};
         preview.dialect = tab.dialect || {};
         pvApplyLabels();
+        // A render that rewrote the input also re-arms the degradation strip:
+        // a dismissed banner must come back when the render changed.
+        if (tab.replaceInput) { pvBannerDismissed = null; }
         pvApplyModel();
         // Only an op that rewrote the model asks for the input box to be
         // overwritten; every other state push leaves what the user typed.
@@ -2296,9 +2415,52 @@
       pvOn('pvLoadFile', function () { post({ op: 'preview-load-file' }); });
       pvOn('pvClear', function () { post({ op: 'preview-clear' }); });
       pvOn('pvCopy', function () { post({ op: 'preview-copy' }); });
-      pvOn('pvCopySql', function () { post({ op: 'preview-copy' }); });
-      pvOn('pvExport', function () { post({ op: 'preview-export' }); });
-      pvOn('pvFormatPreview', function () { pvSetMode('formatted'); });
+      pvOn('pvExport', function () { closePvMore(); post({ op: 'preview-export' }); });
+      // Format (L35b): the reference formats the SQL the result pane shows
+      // (`formatSql`), not the input box on the other half of the splitter;
+      // the display-mode select below stays the separate view switch.
+      pvOn('pvFormatPreview', function () {
+        var shown = (pvTabs() || {}).sql || '';
+        post({ op: 'preview-format', text: shown || pvInputText() });
+      });
+      // Refresh (L35b): the reference re-runs the render on the pane's current
+      // input; the host re-parses it (and falls back to the model's own text
+      // when the box is empty), so a stale render is one click away from fresh.
+      pvOn('pvRefresh', function () {
+        post({ op: 'preview-refresh', text: pvInputText(), kind: '' });
+      });
+      // "更多" fold (L35b): Export and Rollback live behind one button, the way
+      // the reference folds its low-frequency actions into `panel.more`.
+      function closePvMore() {
+        var menu = pvNode('pvMoreMenu');
+        var more = pvNode('pvMore');
+        if (menu) { menu.hidden = true; }
+        if (more) { more.setAttribute('aria-expanded', 'false'); }
+      }
+      pvOn('pvMore', function (event) {
+        if (event) { event.stopPropagation(); }
+        var menu = pvNode('pvMoreMenu');
+        var more = pvNode('pvMore');
+        if (!menu) { return; }
+        menu.hidden = !menu.hidden;
+        if (more) { more.setAttribute('aria-expanded', menu.hidden ? 'false' : 'true'); }
+      });
+      pvOn('pvBannerClose', function () {
+        pvBannerDismissed = (preview.model || {}).reason || '';
+        var banner = pvNode('pvBanner');
+        if (banner) { banner.hidden = true; }
+      });
+      document.addEventListener('click', function (event) {
+        var wrap = pvNode('pvMoreMenu');
+        if (!wrap || wrap.hidden) { return; }
+        var more = pvNode('pvMore');
+        if (event.target !== wrap && !wrap.contains(event.target) && event.target !== more) {
+          closePvMore();
+        }
+      });
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { closePvMore(); }
+      });
 
       // Lane L27: rebind the edited values into the SQL (no automatic rebind
       // after an import), and import a comma/newline separated list from the

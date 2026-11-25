@@ -4225,21 +4225,28 @@ Preparing: DELETE FROM users WHERE id = ?
         ] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
-        // The preview pane: read-only dialect label, copy / format / mode /
-        // export, parameters beside the SQL tab, and the disabled Execute.
+        // The preview pane (lane L35b follows the reference order): meta row,
+        // then Copy SQL / Format / Display mode / Explain / Refresh with Export
+        // and Rollback behind "More", then the degradation strip, the two
+        // columns and the status-only footer.
         for id in [
             "pvDialectChip",
             "pvCopy",
             "pvFormatPreview",
             "pvMode",
+            "pvExplain",
+            "pvRefresh",
+            "pvMore",
+            "pvMoreMenu",
             "pvExport",
+            "pvRollback",
+            "pvBanner",
+            "pvBannerText",
+            "pvBannerClose",
             "pvParamsList",
             "pvRebindBtn",
             "pvImportBtn",
-            "pvRollback",
             "pvTabBody",
-            "pvExecute",
-            "pvCopySql",
             "pvStatus",
         ] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
@@ -4267,10 +4274,18 @@ Preparing: DELETE FROM users WHERE id = ?
         );
         assert!(page.contains("op: 'preview-rollback'"), "the rollback op");
         assert!(page.contains("labels.rollbackNote"), "the rollback note");
-        // Execute stays disabled with the reason in its tooltip; the page has
+        // Explain stays disabled with the reason in its tooltip; the page has
         // no external link, no storage and builds no markup from data.
         assert!(page.contains("pvSig"), "the tab body is signature guarded");
-        assert!(page.contains("id=\"pvExecute\" class=\"btn\" type=\"button\" disabled"));
+        assert!(page.contains("id=\"pvExplain\" class=\"btn\" type=\"button\" disabled"));
+        assert!(
+            page.contains("id=\"pvBanner\" role=\"status\" hidden"),
+            "the degradation strip starts hidden"
+        );
+        assert!(
+            page.contains("buttons[i].getAttribute('data-pvtab')"),
+            "the three result tabs stay page-side"
+        );
         assert!(
             page.contains("openidea.postMessage"),
             "the page talks to the plugin only"
