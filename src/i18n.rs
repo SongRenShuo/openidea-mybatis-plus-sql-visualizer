@@ -298,6 +298,16 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "本版没有独立弹框，工具窗就是工作台。",
     ),
     ("view.workbench.action.copy_sql", "Copy SQL", "复制 SQL"),
+    ("view.workbench.action.explain", "Explain", "执行计划"),
+    ("view.workbench.action.refresh", "Refresh", "刷新"),
+    ("view.workbench.action.more", "More", "更多"),
+    (
+        "view.workbench.more.note",
+        "Export and rollback",
+        "导出与回滚",
+    ),
+    ("view.workbench.banner.dismiss", "Dismiss", "关闭"),
+    ("view.workbench.params.name", "Param {0}", "参数 {0}"),
     ("view.workbench.action.execute", "Execute SQL", "执行 SQL"),
     (
         "view.workbench.execute.note",

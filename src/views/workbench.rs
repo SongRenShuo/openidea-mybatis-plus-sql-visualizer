@@ -518,6 +518,9 @@ pub fn preview_tab() -> Value {
             "source": &current.source,
             "kind": &current.kind,
             "reason": &current.reason,
+            // The page wears a degradation strip whenever this is true: an
+            // `unresolved` render carries no SQL, only reasons (lane L35b).
+            "degraded": current.confidence == "unresolved",
             "advice": &current.advice,
             "tabs": {
                 "sql": &current.sql,
@@ -556,6 +559,16 @@ fn labels(confidence: &str) -> Value {
         "copy": t("view.workbench.copy"),
         "copySql": t("view.workbench.action.copy_sql"),
         "export": t("view.workbench.export"),
+        // Lane L35b: the preview toolbar follows the Reference order — Copy
+        // SQL / Format / Display mode / Explain / Refresh, with Export and
+        // Rollback folded into "More".
+        "explain": t("view.workbench.action.explain"),
+        "explainNote": t("view.workbench.execute.note"),
+        "refresh": t("view.workbench.action.refresh"),
+        "more": t("view.workbench.action.more"),
+        "moreNote": t("view.workbench.more.note"),
+        "bannerDismiss": t("view.workbench.banner.dismiss"),
+        "paramsName": t("view.workbench.params.name"),
         "execute": t("view.workbench.action.execute"),
         "executeNote": t("view.workbench.execute.note"),
         "mode": t("view.workbench.mode"),
@@ -620,6 +633,19 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
         "format" => {
             let input = message.get("text").and_then(Value::as_str).unwrap_or("");
             format_input_state(input);
+        }
+        // Refresh (lane L35b): re-run the render on what the input box holds.
+        // The box is not always the source of truth (a hand-off from a command
+        // leaves it untouched), so an empty box falls back to the model's own
+        // text instead of blanking the preview.
+        "refresh" => {
+            let input = message.get("text").and_then(Value::as_str).unwrap_or("");
+            let text = if input.trim().is_empty() {
+                model().raw
+            } else {
+                input.to_string()
+            };
+            render_input_state(&text, "");
         }
         "load-file" => load_file_state()?,
         "clear" => {
@@ -1169,6 +1195,183 @@ mod tests {
             current
                 .reason
                 .contains(crate::core::xml::KEY_STATEMENT_NOT_FOUND)
+        );
+    }
+
+    #[test]
+    fn the_state_marks_an_unresolved_render_degraded() {
+        // Lane L35b: the page wears a degradation strip while the render is
+        // `unresolved`. The state carries the flag and the reasons (every line
+        // starts with its message key), so the strip needs no extra lookup.
+        let (_host, _guard) = test_host();
+        send(json!({
+            "op": "preview-render",
+            "text": "<mapper namespace=\"a\"/>",
+            "kind": "xml",
+        }));
+        let state = tab();
+        assert_eq!(state["model"]["degraded"], true);
+        assert_eq!(state["model"]["confidence"], "unresolved");
+        let reason = state["model"]["reason"].as_str().expect("the reasons");
+        assert!(
+            reason.contains(crate::core::xml::KEY_STATEMENT_NOT_FOUND),
+            "{reason}"
+        );
+        assert!(
+            reason.lines().all(|line| line.starts_with('[')),
+            "each reason line carries its key: {reason}"
+        );
+        // A clean render clears the flag, so the strip hides itself again.
+        send(json!({ "op": "preview-render", "text": "select 1" }));
+        let state = tab();
+        assert_eq!(state["model"]["degraded"], false);
+        assert_eq!(state["model"]["confidence"], "exact");
+    }
+
+    #[test]
+    fn a_refresh_message_re_renders_the_input() {
+        // Lane L35b: the toolbar's Refresh re-runs the render. What the box
+        // holds wins; an empty box falls back to the model's own text (a
+        // hand-off from a command leaves the box untouched).
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-refresh", "text": "select 2" }));
+        let state = tab();
+        assert_eq!(state["model"]["sql"], "select 2");
+        assert_eq!(state["replaceInput"], true);
+
+        set_model(sample());
+        send(json!({ "op": "preview-refresh", "text": "" }));
+        let state = tab();
+        assert_eq!(
+            state["model"]["tabs"]["raw"],
+            sample().raw,
+            "the model text stands in for an empty box"
+        );
+        assert_eq!(state["replaceInput"], true);
+    }
+
+    #[test]
+    fn the_preview_page_wears_the_reference_layout() {
+        // Lane L35b: the preview half follows `SqlPreviewPanel` — meta row
+        // (dialect chip + advice), toolbar (Copy SQL / Format / Display mode /
+        // Explain / Refresh), the splitter columns (parameters left, result
+        // tabs right), then a status-only footer. The duplicate bottom Copy
+        // SQL and the disabled Execute are gone: Explain replaces the latter
+        // in the toolbar and Export / Rollback fold behind "More".
+        let page = include_str!("../../web/log-panel.html");
+        let pane_start = page.find("id=\"panelPreview\"").expect("the preview panel");
+        let pane_end = page.find("id=\"ctxMenu\"").expect("the row menu follows");
+        let pane = &page[pane_start..pane_end];
+
+        // Vertical order: meta row, toolbar, degradation strip, columns. The
+        // input half above has a toolbar of its own, so the preview toolbar is
+        // the first one *after* the meta row.
+        let meta = pane.find("class=\"pv-meta\"").expect("meta row");
+        let toolbar = meta
+            + pane[meta..]
+                .find("class=\"pv-toolbar\"")
+                .expect("preview toolbar");
+        let banner = pane.find("id=\"pvBanner\"").expect("degradation strip");
+        let cols = pane.find("class=\"pv-cols\"").expect("split columns");
+        assert!(meta < toolbar, "the meta row sits above the toolbar");
+        assert!(toolbar < banner, "the strip sits under the toolbar");
+        assert!(banner < cols, "the strip keeps clear of the columns");
+
+        // Toolbar order, exactly the reference's five entries plus "More".
+        let order = [
+            "id=\"pvCopy\"",
+            "id=\"pvFormatPreview\"",
+            "id=\"pvMode\"",
+            "id=\"pvExplain\"",
+            "id=\"pvRefresh\"",
+            "id=\"pvMore\"",
+        ];
+        let mut previous = 0;
+        for id in order {
+            let at = pane
+                .find(id)
+                .unwrap_or_else(|| panic!("missing toolbar entry {id}"));
+            assert!(at >= previous, "{id} is out of the reference order");
+            previous = at;
+        }
+        // Explain is disabled and explains itself; the fold holds Export and
+        // the (disabled) Rollback.
+        assert!(
+            pane.contains("id=\"pvExplain\" class=\"btn\" type=\"button\" disabled"),
+            "Explain stays disabled"
+        );
+        assert!(
+            page.contains("explainButton.title = labels.explainNote"),
+            "the reason"
+        );
+        assert!(pane.contains("id=\"pvExport\""), "Export lives in More");
+        assert!(pane.contains("id=\"pvRollback\""), "Rollback lives in More");
+        assert!(pane.contains("role=\"menu\""), "the fold is a menu");
+
+        // Two columns: parameters at 30%, result tabs beside them, in the
+        // reference tab order SQL / Original / Columns.
+        let params = pane.find("class=\"pv-params\"").expect("parameter column");
+        let sqlside = pane.find("class=\"pv-sqlside\"").expect("result column");
+        assert!(params < sqlside, "parameters sit left of the result tabs");
+        assert!(
+            page.contains("#panelPreview .pv-params {"),
+            "the parameter column has its own rule"
+        );
+        let mut previous = 0;
+        for tab in ["sql", "raw", "columns"] {
+            let at = pane
+                .find(&format!("data-pvtab=\"{tab}\""))
+                .unwrap_or_else(|| panic!("missing result tab {tab}"));
+            assert!(at >= previous, "result tab {tab} is out of order");
+            previous = at;
+        }
+
+        // Editable parameters in two columns (name, value) — the reference's
+        // name-beside-input layout — and the empty state.
+        assert!(
+            pane.contains("class=\"pv-params-actions\""),
+            "Rebind / Import stay"
+        );
+        assert!(
+            pane.contains("id=\"pvParamsList\""),
+            "the parameter list host"
+        );
+        assert!(page.contains(".pv-param-name"), "the name column");
+        assert!(page.contains("pv-param-input"), "the value input");
+        assert!(
+            page.contains("grid-template-columns: minmax(48px, 38%) minmax(0, 1fr)"),
+            "name and value share the row"
+        );
+        assert!(page.contains("pv-params-empty"), "the no-parameter state");
+        assert!(
+            page.contains("labels.columnsEmpty"),
+            "the columns tab keeps its empty state text"
+        );
+
+        // Status-only footer: the duplicate Copy SQL and the old Execute are
+        // gone, and nothing else lives down there.
+        let footer_start = pane.find("<div class=\"pv-footer\">").expect("footer");
+        let footer_end = footer_start + pane[footer_start..].find("</div>").expect("footer end");
+        let footer = &pane[footer_start..footer_end];
+        assert!(footer.contains("id=\"pvStatus\""), "the status line");
+        assert!(
+            !footer.contains("class=\"btn\""),
+            "the footer holds no controls: {footer}"
+        );
+        for gone in ["id=\"pvCopySql\"", "id=\"pvExecute\""] {
+            assert!(!page.contains(gone), "the duplicate control {gone} is gone");
+        }
+
+        // The degradation strip is closable and driven by the state's flag.
+        assert!(pane.contains("class=\"pv-banner\""), "the strip");
+        assert!(pane.contains("id=\"pvBannerClose\""), "the strip closes");
+        assert!(
+            page.contains("if (!m.degraded) {"),
+            "the strip follows the model's flag"
+        );
+        assert!(
+            page.contains("pvBannerDismissed"),
+            "a dismissed strip stays hidden until the next render"
         );
     }
 
