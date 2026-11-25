@@ -89,14 +89,12 @@ T5 sidecar（依赖 T1 的接口与主仓 engine-jar 扩展）
 | T7-3 | 自建索引（`index` + `merge --keep`） | `market/index.json` | IDE 填 URL 可见并可更新 | 2d |
 | T7-4 | 官方注册表 PR（开源前提下） | PR | 审核通过并上架 | 外部依赖 |
 
-> **T7-4 状态（2026-11-25）：外部依赖，未执行（等待用户授权）。**
+> **T7-4 状态（2026-11-26 用户决定）：PR 暂缓——先由用户自行验收，验收通过后再提。**
 > 上游是 `github.com/l0ng-ai/openidea-plugins`；PR 需要 `publishers/<publisher>.toml` 与
 > `plugins/<publisher>.<name>.toml`，条目必须指向**已签名、已发布**的包 URL + sha256。
-> 本会话红线不建 tag、不发 Release、不擅自对外推送；用户尚未给出
-> 发版/对外提交的授权，因此只交付材料（`market/official-pr/`，含两份 upstream TOML 模板）。
-> **本地已就绪**：发布者密钥在仓库外 `C:\Users\USER\.mpsv\songrenshuo.key`，签名包
-> `dist/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin`（sha256 `6bcbc845…`）已通过 check。
-> 取得授权前不执行任何对外动作。
+> 在此之前不建 tag、不发 Release、不对外开 PR。本地已就绪：发布者密钥（仓库外）、签名包
+> `dist/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin`（sha256 `6bcbc845…`，check 通过）、
+> 两份 upstream TOML 模板（公钥与 sha256 已填，仅缺 package URL）。
 
 ## P8 上游提案（并行，不阻塞主线）
 

@@ -17,7 +17,7 @@
 | P4 捕获链 | 完成（固定端口） | agent ws 旁路（默认 TCP）、`websocket-ready` 消费、事件唤醒、日志文件路径 |
 | P5 sidecar 与执行 | 完成 | 引擎钉值 + sha256、stdio 真往返（204 ms）、Wrapper 文本解析、EXPLAIN 包装与结果模型、schema 缓存；**T5-5 已达成**：引擎自带 PostgreSQL（BSD-2）/ mssql-jdbc（MIT），在 PG16、PG17、SQL Server 2022 三库真跑只读 EXPLAIN（JSON/XML 计划），写语句结构化拒绝 |
 | P6 MCP | 完成 | 11 个 `sqlv_*` 工具 + 11 份 schema，全部 readOnly，`partial` 不冒充 `exact` |
-| P7 发行 | 完成（T7-4 外部依赖，未执行，等待授权） | `scripts/release.sh`（真签真 pack 实测）、`release.yml`、Gitee 镜像、自建索引脚本与文档；官方注册表 PR 需已签名已发布的包 URL+sha256，未获授权，材料在 `market/official-pr/` |
+| P7 发行 | 完成（T7-4 PR 暂缓：用户先自验） | `scripts/release.sh`（真签真 pack 实测）、`release.yml`、Gitee 镜像、自建索引脚本与文档；官方注册表 PR 按用户 2026-11-26 决定**暂缓**，待其自行验收通过后再提交；本地签名包与上游 TOML 已就绪 |
 | P8 上游提案 | 完成（待提交上游） | `docs/upstream/T8-1~T8-3` 三份草案 + 索引；是否另有 CLA 待上游确认 |
 
 ## 阶段验收（摘要）

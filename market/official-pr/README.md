@@ -1,20 +1,13 @@
-# T7-4 官方注册表上架（外部依赖，未执行，等待用户授权）
+# T7-4 官方注册表上架（PR 暂缓：先由用户自行验收）
 
 上游已确认：**`github.com/l0ng-ai/openidea-plugins`**。PR 需要
 `publishers/<publisher>.toml` 与 `plugins/<publisher>.<name>.toml`，条目里的 `package`
 必须指向**已签名、已发布**的包 URL，并附该包的 sha256；注册表 CI 会下载包、校验 hash、
 跑 `openidea-plugin check` 并验签。
 
-本次会话按红线（不建 tag、不发 Release、不擅自对外推送）**没有提交 PR**；用户尚未给出
-对外发版授权，因此状态记为「外部依赖，未执行，等待用户授权」。
-
-**本地已就绪（不属于对外动作）**：发布者密钥已生成并保存在仓库外
-`C:\Users\USER\.mpsv\songrenshuo.key`（私钥，勿入库/勿外传；公钥在同目录
-`songrenshuo.pub`，并已填入 `upstream/publishers/songrenshuo.toml`）；签名包已产出
-`dist/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin`，sha256
-`6bcbc8450fe1eec0754a4cafd588d534c20130e4e5fd2233f4106ceb2be660ad`，`openidea-plugin check`
-通过。还差的只有「发布」与「PR」：`tag v0.1.0 → GitHub Release + Gitee 镜像 → 上传签名包 →
-填写 package URL → 向 l0ng-ai/openidea-plugins 提 PR`。
+**2026-11-26 用户决定：先自行验收，验收通过后再提 PR。** 在此之前不建 tag、不发 Release、
+不提 PR。本地已就绪：发布者密钥（仓库外）、签名包（sha256 `6bcbc845…`，check 通过）、
+`upstream/` 两份 TOML（公钥与 sha256 已填，仅缺 package URL）。
 
 可直接使用的模板在 [`upstream/`](upstream/README.md)（两份 TOML 的精确形状）。
 
