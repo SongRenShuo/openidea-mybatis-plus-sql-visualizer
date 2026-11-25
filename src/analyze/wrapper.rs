@@ -189,7 +189,6 @@ pub struct WrapperOutput {
 pub fn render(text: &str, columns: &EntityColumns, dialect: &Dialect) -> WrapperOutput {
     let mut ctx = Ctx {
         columns,
-        dialect,
         notes: Vec::new(),
         message_keys: Vec::new(),
         partial: false,
@@ -271,7 +270,6 @@ pub fn render(text: &str, columns: &EntityColumns, dialect: &Dialect) -> Wrapper
 
 struct Ctx<'a> {
     columns: &'a EntityColumns,
-    dialect: &'a Dialect,
     notes: Vec<String>,
     message_keys: Vec<String>,
     partial: bool,

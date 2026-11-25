@@ -5,5 +5,8 @@
 pub mod explain;
 pub mod schema;
 
+#[cfg(test)]
+mod parity;
+
 pub use explain::{ExplainError, ExplainErrorKind, ExplainNode, ExplainPlan, ExplainRow};
 pub use schema::{ColumnSchema, IndexSchema, SchemaCache, SchemaMiss, TableSchema};
