@@ -34,14 +34,96 @@ mod java;
 mod java_methods;
 pub(crate) mod scan;
 mod xml;
+mod xml_statements;
 
 pub use graph::MapperGraph;
 pub use java::{JavaFacts, JavaMethod, JavaProvider, JavaSql, TypeKind, index_java};
 pub use java_methods::{JavaIndexBudget, JavaMethodIndex, JavaMethodLocation};
 pub use xml::{XmlFacts, XmlResultMap, XmlStatement, index_xml};
+pub use xml_statements::{XmlStatementIndex, XmlStatementLocation};
+
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use openidea_plugin::Range;
 use openidea_plugin::indexing::{Anchor, Document, DocumentIndexer, Edges};
+
+/// The process-wide method index the log panel queries while it builds a push.
+///
+/// One per process, like the panel's own store: the host hands documents in
+/// through [`DocumentIndexer`] (project open, then every change), and the panel
+/// only ever reads it, so a push never waits on a file read.
+static JAVA_INDEX: OnceLock<Mutex<JavaMethodIndex>> = OnceLock::new();
+/// The process-wide mapper XML statement locations, filled the same way.
+static XML_INDEX: OnceLock<Mutex<XmlStatementIndex>> = OnceLock::new();
+
+/// The shared Java method index.
+///
+/// Take this guard once per push and query it there: every lookup is a hash
+/// lookup over the in-memory index, never a file read.
+pub fn java_methods() -> MutexGuard<'static, JavaMethodIndex> {
+    JAVA_INDEX
+        .get_or_init(|| Mutex::new(JavaMethodIndex::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The shared mapper XML statement index.
+pub fn xml_statements() -> MutexGuard<'static, XmlStatementIndex> {
+    XML_INDEX
+        .get_or_init(|| Mutex::new(XmlStatementIndex::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Feeds one document's text into the index its extension belongs to.
+///
+/// Returns how many methods or statements it contributed (0 for anything
+/// else). Re-indexing a path replaces what it contributed before, so a save
+/// never doubles a file's entries.
+pub fn index_source(path: &str, text: &str) -> usize {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".java") {
+        java_methods().add_file(path, text)
+    } else if lower.ends_with(".xml") {
+        xml_statements().add_file(path, text)
+    } else {
+        0
+    }
+}
+
+/// Empties both indexes (the test harness; the host refills them on open).
+pub fn clear_indexes() {
+    *java_methods() = JavaMethodIndex::new();
+    *xml_statements() = XmlStatementIndex::new();
+}
+
+/// What the two process indexes hold.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IndexStats {
+    pub java_files: usize,
+    pub java_methods: usize,
+    pub java_skipped: usize,
+    pub xml_files: usize,
+    pub xml_statements: usize,
+    pub xml_skipped: usize,
+}
+
+/// A snapshot of both indexes.
+pub fn index_stats() -> IndexStats {
+    let java = java_methods();
+    let mut stats = IndexStats {
+        java_files: java.file_count(),
+        java_methods: java.len(),
+        java_skipped: java.skipped_files(),
+        ..IndexStats::default()
+    };
+    drop(java);
+    let xml = xml_statements();
+    stats.xml_files = xml.file_count();
+    stats.xml_statements = xml.len();
+    stats.xml_skipped = xml.skipped_files();
+    stats
+}
 
 /// A name the graph refers to, with the UTF-16 range of the name itself.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -311,6 +393,13 @@ impl DocumentIndexer for crate::Main {
         // The index is background work with its own budget (2 MiB, 16 files a
         // batch): it stays on so Go to Declaration keeps working when the
         // interactive providers are switched off.
+        //
+        // The same document feed maintains the log panel's two location indexes
+        // (lane L28). It is the host's only bulk path — project open, then every
+        // changed file — so the panel never needs a workspace scan of its own,
+        // and both indexes cap themselves (files, bytes) and count what they
+        // refused instead of growing without bound.
+        index_source(&doc.path, &doc.text);
         facts_for(&doc.path, &doc.text)
             .map(|facts| build_edges(&facts))
             .unwrap_or_default()
@@ -417,5 +506,75 @@ public interface UserMapper {
             graph.resolve("java:com.acme.UserMapper#ping")[0].0,
             "UserMapper.java"
         );
+    }
+
+    // Process-level indexes (lane L28) ------------------------------------
+    //
+    // These mutate process-wide state, so they serialise on the same lock the
+    // panel's tests take: two tests of different modules must never refill the
+    // index while the other one reads it.
+
+    #[test]
+    fn index_source_routes_by_extension_and_replaces_a_reloaded_path() {
+        let _guard = crate::views::test_state_lock();
+        clear_indexes();
+        assert_eq!(
+            index_source("/project/src/main/java/com/acme/UserMapper.java", JAVA),
+            2,
+            "ping and findById"
+        );
+        assert_eq!(
+            index_source("/project/UserMapper.xml", XML),
+            1,
+            "one statement"
+        );
+        assert_eq!(index_source("/project/README.md", "# hi"), 0);
+        let stats = index_stats();
+        assert_eq!(stats.java_files, 1);
+        assert_eq!(stats.java_methods, 2);
+        assert_eq!(stats.xml_files, 1);
+        assert_eq!(stats.xml_statements, 1);
+
+        // The same path reloaded with one method fewer: replace, not append.
+        let shorter =
+            "package com.acme;\n@Mapper\npublic interface UserMapper {\n  int ping();\n}\n";
+        index_source("/project/src/main/java/com/acme/UserMapper.java", shorter);
+        let stats = index_stats();
+        assert_eq!(stats.java_files, 1);
+        assert_eq!(stats.java_methods, 1, "the dropped method is gone");
+        assert!(
+            java_methods()
+                .lookup_unique("com.acme.UserMapper#findById")
+                .is_none()
+        );
+        clear_indexes();
+    }
+
+    #[test]
+    fn the_shared_index_answers_the_panel_and_counts_refused_files() {
+        let _guard = crate::views::test_state_lock();
+        clear_indexes();
+        index_source("/project/src/main/java/com/acme/UserMapper.java", JAVA);
+        index_source("/project/UserMapper.xml", XML);
+        {
+            let java = java_methods();
+            let hit = java
+                .lookup_unique("c.acme.UserMapper#findById")
+                .expect("a shortened class name resolves");
+            assert!(hit.file.ends_with("UserMapper.java"));
+            assert_eq!(hit.display_line(), 5, "0-based line 4 is findById");
+        }
+        {
+            let xml = xml_statements();
+            let hit = xml
+                .lookup_unique("com.acme.UserMapper", "findById")
+                .expect("the XML statement resolves");
+            assert_eq!(hit.display_line(), 4, "0-based line 3 is the select tag");
+        }
+        // A build-output path is refused and counted, never indexed.
+        index_source("/project/target/generated/Schema.java", "class S {}");
+        assert_eq!(index_stats().java_skipped, 1);
+        clear_indexes();
+        assert_eq!(index_stats(), IndexStats::default());
     }
 }

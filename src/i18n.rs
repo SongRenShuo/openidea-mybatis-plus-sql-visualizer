@@ -100,6 +100,43 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "Export visible rows",
         "导出可见行集",
     ),
+    // Row actions (lane L28): jump, focus, delete, mute.
+    ("view.logs.menu.jump_java", "Jump to Java", "跳转到 Java"),
+    (
+        "view.logs.menu.jump_xml",
+        "Jump to Mapper XML",
+        "跳转到 Mapper XML",
+    ),
+    (
+        "view.logs.menu.focus_method",
+        "Focus by method",
+        "按方法聚焦",
+    ),
+    (
+        "view.logs.menu.focus_request",
+        "Focus by request",
+        "按请求聚焦",
+    ),
+    ("view.logs.menu.delete", "Delete this row", "删除此行"),
+    (
+        "view.logs.menu.block_method",
+        "Mute this method",
+        "屏蔽此方法",
+    ),
+    ("view.logs.focus.method_prefix", "Method", "方法"),
+    ("view.logs.focus.request_prefix", "Request", "请求"),
+    ("view.logs.focus.clear", "Clear focus", "清除聚焦"),
+    ("view.logs.blocked.prefix", "Muted", "已屏蔽"),
+    (
+        "view.logs.blocked.clear",
+        "Show muted methods again",
+        "恢复被屏蔽的方法",
+    ),
+    (
+        "view.logs.jump.unavailable",
+        "The file cannot be opened from here; the position is on the clipboard and in the Output channel.",
+        "此处无法打开文件；位置已复制到剪贴板并输出到 Output 通道。",
+    ),
     ("view.logs.type.select", "SELECT", "SELECT"),
     ("view.logs.type.insert", "INSERT", "INSERT"),
     ("view.logs.type.update", "UPDATE", "UPDATE"),
