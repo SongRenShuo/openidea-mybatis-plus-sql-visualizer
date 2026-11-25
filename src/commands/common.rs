@@ -122,13 +122,18 @@ pub fn required_arg(arg: Option<&str>) -> Result<&str, CliError> {
     Ok(arg)
 }
 
-/// SQL argument: literal SQL, or `@<path>` to read a file inside the project.
-/// Returns the SQL and the file path when it came from a file.
-pub fn sql_arg(ctx: &Invocation, arg: Option<&str>) -> Result<(String, Option<String>), CliError> {
-    let arg = required_arg(arg)?;
-    let Some(raw_path) = arg.strip_prefix('@') else {
-        return Ok((arg.to_string(), None));
-    };
+/// True when `arg` can only be a path candidate: non-empty and free of
+/// whitespace.
+///
+/// Inline SQL and inline JSON almost always contain a space, so a whitespace
+/// argument is never probed as a file. That keeps `UPDATE user SET …` from
+/// being mistaken for a (unreadable) path.
+fn path_candidate(arg: &str) -> bool {
+    !arg.is_empty() && !arg.chars().any(char::is_whitespace)
+}
+
+/// The path behind `@<path>`, or the error for a bare `@`.
+fn at_path(raw_path: &str) -> Result<&str, CliError> {
     let path = raw_path.trim();
     if path.is_empty() {
         return Err(CliError::new(
@@ -136,14 +141,48 @@ pub fn sql_arg(ctx: &Invocation, arg: Option<&str>) -> Result<(String, Option<St
             "`@` needs a file path after it",
         ));
     }
-    let text = read_file(ctx, path)?;
-    Ok((text, Some(path.to_string())))
+    Ok(path)
 }
 
-/// Decode a JSON command argument.
-pub fn json_arg<T: DeserializeOwned>(arg: Option<&str>) -> Result<T, CliError> {
+/// SQL argument: literal SQL, `@<path>`, or a bare project file path.
+///
+/// The bare-path form exists for the project-view context menu, which hands the
+/// command a path and nothing else. Only an argument free of whitespace is
+/// probed as a file; when the read fails the argument is taken as literal SQL.
+/// Returns the SQL and the file path when it came from a file.
+pub fn sql_arg(ctx: &Invocation, arg: Option<&str>) -> Result<(String, Option<String>), CliError> {
     let arg = required_arg(arg)?;
-    serde_json::from_str(arg).map_err(|e| CliError::new(KEY_JSON_INVALID, e.to_string()))
+    if let Some(raw_path) = arg.strip_prefix('@') {
+        let path = at_path(raw_path)?;
+        let text = read_file(ctx, path)?;
+        return Ok((text, Some(path.to_string())));
+    }
+    if path_candidate(arg)
+        && let Ok(text) = read_file(ctx, arg)
+    {
+        return Ok((text, Some(arg.to_string())));
+    }
+    Ok((arg.to_string(), None))
+}
+
+/// Decode a JSON command argument: inline JSON, `@<path>`, or a bare project
+/// file path holding JSON.
+///
+/// Only an argument that neither looks like inline JSON (`{` / `[`) nor
+/// contains whitespace is probed as a file; every other form is parsed as
+/// literal JSON so the existing `cmd.json.invalid` report still applies.
+pub fn json_arg<T: DeserializeOwned>(ctx: &Invocation, arg: Option<&str>) -> Result<T, CliError> {
+    let arg = required_arg(arg)?;
+    let text = if let Some(raw_path) = arg.strip_prefix('@') {
+        read_file(ctx, at_path(raw_path)?)?
+    } else if !arg.starts_with('{') && !arg.starts_with('[') && path_candidate(arg) {
+        // A bare path that is not readable is not an error here: fall back to
+        // parsing the argument itself, which reports `cmd.json.invalid`.
+        read_file(ctx, arg).unwrap_or_else(|_| arg.to_string())
+    } else {
+        arg.to_string()
+    };
+    serde_json::from_str(&text).map_err(|e| CliError::new(KEY_JSON_INVALID, e.to_string()))
 }
 
 /// The configured dialect name (`sql.dialect`), or an empty string when unset.
@@ -232,6 +271,75 @@ pub fn build_table_spec(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openidea_plugin::mock::MockHost;
+
+    #[test]
+    fn sql_arg_at_path_reads_the_file() {
+        let host = MockHost::install();
+        host.add_file("/project/a.sql", "SELECT 1");
+        let (sql, source) = sql_arg(&host.invocation(), Some("@/project/a.sql")).unwrap();
+        assert_eq!(sql, "SELECT 1");
+        assert_eq!(source.as_deref(), Some("/project/a.sql"));
+    }
+
+    #[test]
+    fn sql_arg_bare_path_reads_the_file() {
+        let host = MockHost::install();
+        host.add_file("/project/b.sql", "DELETE FROM user WHERE id = 1");
+        let (sql, source) = sql_arg(&host.invocation(), Some("/project/b.sql")).unwrap();
+        assert_eq!(sql, "DELETE FROM user WHERE id = 1");
+        assert_eq!(source.as_deref(), Some("/project/b.sql"));
+    }
+
+    #[test]
+    fn sql_arg_text_with_spaces_is_never_probed_as_a_path() {
+        let host = MockHost::install();
+        // A file exists under the literal text, yet the space keeps it inline.
+        host.add_file("SELECT 1", "should not be read");
+        let (sql, source) = sql_arg(&host.invocation(), Some("SELECT 1")).unwrap();
+        assert_eq!(sql, "SELECT 1");
+        assert_eq!(source, None);
+    }
+
+    #[test]
+    fn sql_arg_missing_bare_path_stays_a_literal() {
+        let host = MockHost::install();
+        let (sql, source) = sql_arg(&host.invocation(), Some("/project/missing.sql")).unwrap();
+        assert_eq!(sql, "/project/missing.sql");
+        assert_eq!(source, None);
+    }
+
+    #[test]
+    fn json_arg_inline_literal_is_parsed() {
+        let host = MockHost::install();
+        let value: serde_json::Value = json_arg(&host.invocation(), Some(r#"{"a":1}"#)).unwrap();
+        assert_eq!(value["a"], 1);
+    }
+
+    #[test]
+    fn json_arg_at_path_reads_json_from_the_project() {
+        let host = MockHost::install();
+        host.add_file("/project/c.json", r#"{"a":2}"#);
+        let value: serde_json::Value =
+            json_arg(&host.invocation(), Some("@/project/c.json")).unwrap();
+        assert_eq!(value["a"], 2);
+    }
+
+    #[test]
+    fn json_arg_bare_path_reads_json_from_the_project() {
+        let host = MockHost::install();
+        host.add_file("/project/d.json", r#"{"a":3}"#);
+        let value: serde_json::Value =
+            json_arg(&host.invocation(), Some("/project/d.json")).unwrap();
+        assert_eq!(value["a"], 3);
+    }
+
+    #[test]
+    fn json_arg_invalid_json_keeps_the_key() {
+        let host = MockHost::install();
+        let err = json_arg::<serde_json::Value>(&host.invocation(), Some("{not json")).unwrap_err();
+        assert_eq!(err.key, KEY_JSON_INVALID);
+    }
 
     #[test]
     fn capped_keeps_short_text_untouched() {
