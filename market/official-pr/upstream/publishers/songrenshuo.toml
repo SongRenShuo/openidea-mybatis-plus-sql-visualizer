@@ -1,0 +1,4 @@
+name = "songrenshuo"
+owners = ["<github-owner-account>"]   # e.g. the account that owns the plugin repository
+keys = ["<public key printed by: openidea-plugin keygen songrenshuo.key>"]
+revoked-keys = []

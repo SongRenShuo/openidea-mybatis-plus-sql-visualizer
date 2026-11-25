@@ -1,7 +1,15 @@
-# T7-4 官方注册表上架（外部依赖，交付的是提交材料）
+# T7-4 官方注册表上架（外部依赖，本次未执行）
 
-官方注册表的审核与合并发生在上游仓库，本仓无法代替上游动作。这里交付的是**可直接提交的材料**
-与**必须满足的前置条件**，因此 T7-4 在任务卡上标为「外部依赖」。
+上游已确认：**`github.com/l0ng-ai/openidea-plugins`**。PR 需要
+`publishers/<publisher>.toml` 与 `plugins/<publisher>.<name>.toml`，条目里的 `package`
+必须指向**已签名、已发布**的包 URL，并附该包的 sha256；注册表 CI 会下载包、校验 hash、
+跑 `openidea-plugin check` 并验签。
+
+本次会话按红线（不建 tag、不发 Release、不擅自对外推送）**没有提交 PR**，状态记为
+「外部依赖，未执行」。提交前需要用户单独授权一条完整链路：
+`keygen → tag v0.1.0 → GitHub Release + Gitee 镜像 → 签名打包 → PR`。
+
+可直接使用的模板在 [`upstream/`](upstream/README.md)（两份 TOML 的精确形状）。
 
 ## 前置条件（缺一不可）
 

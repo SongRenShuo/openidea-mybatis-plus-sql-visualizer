@@ -89,6 +89,12 @@ T5 sidecar（依赖 T1 的接口与主仓 engine-jar 扩展）
 | T7-3 | 自建索引（`index` + `merge --keep`） | `market/index.json` | IDE 填 URL 可见并可更新 | 2d |
 | T7-4 | 官方注册表 PR（开源前提下） | PR | 审核通过并上架 | 外部依赖 |
 
+> **T7-4 状态（2026-11-25）：外部依赖，未执行（本次豁免）。**
+> 上游是 `github.com/l0ng-ai/openidea-plugins`；PR 需要 `publishers/<publisher>.toml` 与
+> `plugins/<publisher>.<name>.toml`，条目必须指向**已签名、已发布**的包 URL + sha256。
+> 本会话红线不建 tag、不发 Release、不擅自对外推送，也没有发布者密钥，因此只交付材料
+> （`market/official-pr/`，含两份 upstream TOML 模板）；提交与审核需用户单独授权。
+
 ## P8 上游提案（并行，不阻塞主线）
 
 | ID | 提案 | 交付 |
