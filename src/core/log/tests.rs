@@ -6,6 +6,8 @@
 //! LogDurationParserTest, SqlErrorLineRecognizerTest). The Rust expectations
 //! assert the same SQL/params/duration values, not the Kotlin API shape.
 
+use std::time::{Duration, Instant};
+
 use super::*;
 
 fn parse_lines(lines: &[&str]) -> LogAnalysis {
@@ -691,4 +693,92 @@ fn serde_round_trip_and_message_key_defaults() {
     assert!(entry_json.contains("\"family\":\"mybatis\""));
     assert!(entry_json.contains("\"class\":\"select\""));
     assert!(entry_json.contains("\"confidence\":\"exact\""));
+}
+
+// ---------------------------------------------------------------------------
+// Performance and boundaries (node 3)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ten_thousand_lines_parse_quickly() {
+    let mut text = String::with_capacity(600_000);
+    for i in 0..5000u64 {
+        text.push_str("==>  Preparing: SELECT id, name FROM user WHERE id = ?\n");
+        text.push_str(&format!("==> Parameters: {i}(Long)\n"));
+    }
+    let started = Instant::now();
+    let analysis = parse(&text, &ParseOptions::default());
+    let elapsed = started.elapsed();
+    assert_eq!(analysis.entries.len(), 5000);
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "10k lines took {elapsed:?}"
+    );
+    // One template repeated 5000 times (default threshold 5).
+    assert_eq!(analysis.n_plus_one.len(), 1);
+    assert_eq!(analysis.n_plus_one[0].count, 5000);
+}
+
+#[test]
+fn crlf_line_endings_are_normalised_by_the_splitter() {
+    let text = "==>  Preparing: SELECT * FROM t WHERE id = ?\r\n==> Parameters: 9(Long)\r\n";
+    let analysis = parse(text, &ParseOptions::default());
+    assert_eq!(analysis.entries.len(), 1);
+    assert_eq!(analysis.entries[0].sql, "SELECT * FROM t WHERE id = 9");
+}
+
+#[test]
+fn unicode_literals_and_comment_question_marks() {
+    let analysis = parse_lines(&[
+        "==>  Preparing: SELECT * FROM t WHERE name = ? -- 名称 ?",
+        "==> Parameters: 张三(String)",
+    ]);
+    assert_eq!(analysis.entries.len(), 1);
+    assert_eq!(
+        analysis.entries[0].sql,
+        "SELECT * FROM t WHERE name = '张三' -- 名称 ?"
+    );
+    assert_eq!(analysis.entries[0].confidence, Confidence::Exact);
+}
+
+#[test]
+fn max_sql_len_truncation_is_partial_and_preserves_the_line() {
+    let opts = ParseOptions {
+        max_sql_len: 20,
+        ..ParseOptions::default()
+    };
+    let analysis = parse_with(
+        &[
+            "==>  Preparing: SELECT * FROM a_very_long_table WHERE id = ?",
+            "==> Parameters: 1(Long)",
+        ],
+        &opts,
+    );
+    assert_eq!(analysis.entries.len(), 1);
+    let entry = &analysis.entries[0];
+    assert_eq!(entry.raw_sql, "SELECT * FROM a_very");
+    assert_eq!(entry.confidence, Confidence::Partial);
+    assert!(
+        entry
+            .message_keys
+            .iter()
+            .any(|key| key == message_keys::ENTRY_SQL_TRUNCATED)
+    );
+    assert!(entry.raw_line.is_some());
+}
+
+#[test]
+fn unfinished_jdbc_bracket_is_kept_as_partial() {
+    let analysis = parse_lines(&["Executing prepared SQL statement [SELECT * FROM t WHERE id = ?"]);
+    assert_eq!(analysis.entries.len(), 1);
+    let entry = &analysis.entries[0];
+    assert_eq!(entry.sql, "SELECT * FROM t WHERE id = ?");
+    assert_eq!(entry.confidence, Confidence::Partial);
+    assert!(
+        entry
+            .message_keys
+            .iter()
+            .any(|key| key == message_keys::ENTRY_MULTILINE_UNCLOSED)
+    );
+    assert!(entry.raw_line.is_some());
 }

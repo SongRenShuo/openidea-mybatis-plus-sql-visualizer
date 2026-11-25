@@ -220,6 +220,16 @@ impl JdbcState {
 
     pub(crate) fn close(&mut self, emitter: &mut Emitter<'_>) {
         let truncated = self.truncated;
+        let unclosed = self.collecting;
+        if unclosed && self.pending_sql.is_none() && !self.buffer.trim().is_empty() {
+            // Keep an unfinished `[...]` body: preserving the fragment beats
+            // silently dropping the statement.
+            self.pending_sql = Some(self.buffer.trim().to_string());
+            self.pending_line_no = self.first_line_no;
+            self.pending_raw_line = self.first_raw_line.clone();
+            self.pending_timestamp = self.first_timestamp;
+            self.pending_duration = self.first_duration;
+        }
         self.truncated = false;
         self.collecting = false;
         self.buffer.clear();
@@ -241,6 +251,10 @@ impl JdbcState {
         if cut || truncated {
             confidence = Confidence::Partial;
             message_keys.push(message_keys::ENTRY_SQL_TRUNCATED.to_string());
+        }
+        if unclosed {
+            confidence = Confidence::Partial;
+            message_keys.push(message_keys::ENTRY_MULTILINE_UNCLOSED.to_string());
         }
         if restored.used < restored.placeholders {
             confidence = Confidence::Partial;
