@@ -62,6 +62,22 @@ pub enum EntryClass {
     Error,
 }
 
+impl EntryClass {
+    /// Stable lower-case name used by the command-line summaries
+    /// (`statements: 2 (delete 1, select 1)`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Select => "select",
+            Self::Insert => "insert",
+            Self::Update => "update",
+            Self::Delete => "delete",
+            Self::Ddl => "ddl",
+            Self::Other => "other",
+            Self::Error => "error",
+        }
+    }
+}
+
 /// Confidence in the produced SQL, per `docs/ARCHITECTURE.md` §4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Confidence {

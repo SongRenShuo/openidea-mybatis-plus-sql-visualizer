@@ -1,17 +1,18 @@
 //! `perf-advice`: performance findings and the complexity score for a SQL text.
 //!
 //! The argument is SQL text, a project file path (as handed over by the project
-//! view context menu) or `@<path>`. Findings come from
-//! [`crate::core::perf::analyze`] and are printed with their stable `rule_id`,
-//! `message_key` and severity; the score is [`crate::core::perf::score`], which
-//! depends on the SQL text only.
+//! view context menu) or `@<path>`. Findings and the score come from
+//! [`crate::core::perf::advise`], which analyses every `;`-separated statement
+//! on its own; this module only formats. A single statement prints exactly the
+//! historical lines; several statements add a `statements:` summary and merge
+//! the findings by `rule_id`.
 
 use std::fmt::Write as _;
 
 use openidea_plugin::{Error, Invocation};
 
 use crate::commands::common::{self, CliError};
-use crate::core::perf::{ComplexityLevel, Severity, analyze, score};
+use crate::core::perf::{ComplexityLevel, advise as build_advice};
 
 /// Matches `[[contributes.commands]] id` in `plugin.toml`.
 pub const ID: &str = "perf-advice";
@@ -42,8 +43,7 @@ fn advise(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
         ));
     }
     let dialect = common::configured_dialect();
-    let findings = analyze(&sql, &dialect);
-    let complexity = score(&sql);
+    let report = build_advice(&sql, &dialect);
 
     let mut text = String::new();
     let _ = writeln!(text, "-- perf-advice");
@@ -62,12 +62,20 @@ fn advise(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     let _ = writeln!(
         text,
         "score: {} ({})",
-        complexity.score,
-        level_label(complexity.level)
+        report.complexity.score,
+        level_label(report.complexity.level)
     );
-    let _ = writeln!(text, "recognized: {}", complexity.recognized);
-    if !complexity.breakdown.is_empty() {
-        let parts = complexity
+    let _ = writeln!(text, "recognized: {}", report.complexity.recognized);
+    if report.is_multi_statement() {
+        let _ = writeln!(
+            text,
+            "statements: {}",
+            common::class_mix(report.statements.iter().map(|statement| statement.class))
+        );
+    }
+    if !report.complexity.breakdown.is_empty() {
+        let parts = report
+            .complexity
             .breakdown
             .iter()
             .map(|part| format!("{}={}", part.factor, part.points))
@@ -75,26 +83,22 @@ fn advise(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
             .join(", ");
         let _ = writeln!(text, "breakdown: {parts}");
     }
-    let _ = writeln!(text, "findings: {}", findings.len());
-    for finding in &findings {
-        let _ = writeln!(
-            text,
-            "- [{}] {} {} {}",
-            severity_label(finding.severity),
-            finding.rule_id,
-            finding.message_key,
-            finding.detail
-        );
+    if report.is_multi_statement() {
+        let _ = writeln!(text, "findings: {}", report.findings.len());
+        for summary in &report.findings {
+            common::finding_summary_line(&mut text, summary);
+        }
+    } else {
+        let hits = report
+            .statements
+            .first()
+            .map_or(&[][..], |statement| statement.findings.as_slice());
+        let _ = writeln!(text, "findings: {}", hits.len());
+        for finding in hits {
+            common::finding_line(&mut text, finding);
+        }
     }
     Ok(text)
-}
-
-fn severity_label(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Error => "error",
-        Severity::Warn => "warn",
-        Severity::Info => "info",
-    }
 }
 
 fn level_label(level: ComplexityLevel) -> &'static str {
@@ -171,5 +175,50 @@ mod tests {
         // No such file: even a path-shaped tail must not break literal SQL.
         run(&host.invocation(), Some("UPDATE user SET name = 'x'")).unwrap();
         assert!(text(&host).contains("missing_where perf.missing_where"));
+    }
+
+    #[test]
+    fn single_statement_output_keeps_its_historical_lines() {
+        let host = MockHost::install();
+        run(&host.invocation(), Some("UPDATE user SET name = 'x'")).unwrap();
+        let text = text(&host);
+        assert!(text.contains("score: 50 (medium)"));
+        assert!(text.contains("recognized: true"));
+        assert!(text.contains("breakdown: missingWhere=50"));
+        assert!(text.contains("findings: 1"));
+        assert!(text.contains("- [error] missing_where perf.missing_where"));
+        assert!(!text.contains("statements:"));
+    }
+
+    #[test]
+    fn multi_statement_file_sums_the_score_and_merges_findings() {
+        let host = MockHost::install();
+        host.add_file(
+            "/project/perf.sql",
+            "DELETE FROM users;\nSELECT id FROM user WHERE name LIKE '%abc'",
+        );
+        run(&host.invocation(), Some("/project/perf.sql")).unwrap();
+        let text = text(&host);
+        assert!(text.contains("statements: 2 (delete 1, select 1)"));
+        // 53 (DELETE: 3 tables + 50 missing WHERE) + 16 (SELECT: 3 tables +
+        // 8 leading wildcard + 5 no limit) — summed, not one mixed analysis.
+        assert!(text.contains("score: 69 (medium)"));
+        assert!(text.contains("tableCount=6"));
+        assert!(text.contains("missingWhere=50"));
+        assert!(text.contains("missing_where perf.missing_where"));
+        assert!(text.contains("statements=#1"));
+        assert!(text.contains("leading_wildcard_like"));
+        assert!(text.contains("statements=#2"));
+        assert!(text.contains("findings: 2"));
+    }
+
+    #[test]
+    fn the_same_rule_in_several_statements_is_printed_once() {
+        let host = MockHost::install();
+        host.add_file("/project/perf.sql", "DELETE FROM a;\nDELETE FROM b;");
+        run(&host.invocation(), Some("/project/perf.sql")).unwrap();
+        let text = text(&host);
+        assert_eq!(text.matches("missing_where perf.missing_where").count(), 1);
+        assert!(text.contains("count=2 statements=#1,#2"));
     }
 }

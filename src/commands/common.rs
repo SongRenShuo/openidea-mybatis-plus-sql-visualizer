@@ -15,6 +15,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use crate::core::r#gen::{ColumnSpec, GenError, TableSpec};
+use crate::core::log::EntryClass;
+use crate::core::perf::{Finding, FindingSummary, Severity};
 
 /// The Output tab's channel name; 1–128 bytes, no control characters.
 pub const CHANNEL: &str = "MyBatis SQL Visualizer";
@@ -83,6 +85,68 @@ pub fn capped(text: &str) -> String {
         text.len()
     );
     out
+}
+
+/// `N (delete 1, select 1)` — statement count plus per-class counts, in
+/// first-appearance order. Shared by `check-sql` and `perf-advice` so both
+/// surfaces describe a multi-statement text the same way.
+pub fn class_mix(classes: impl Iterator<Item = EntryClass>) -> String {
+    let mut counts: Vec<(EntryClass, usize)> = Vec::new();
+    let mut total = 0usize;
+    for class in classes {
+        total += 1;
+        match counts.iter_mut().find(|(held, _)| *held == class) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((class, 1)),
+        }
+    }
+    let parts = counts
+        .iter()
+        .map(|(class, count)| format!("{} {count}", class.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{total} ({parts})")
+}
+
+/// Severity label used by every finding line.
+pub fn severity_label(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "error",
+        Severity::Warn => "warn",
+        Severity::Info => "info",
+    }
+}
+
+/// One line per rule hit (`- [warn] rule_id message_key detail`).
+pub fn finding_line(text: &mut String, finding: &Finding) {
+    let _ = writeln!(
+        text,
+        "- [{}] {} {} {}",
+        severity_label(finding.severity),
+        finding.rule_id,
+        finding.message_key,
+        finding.detail
+    );
+}
+
+/// One line per rule, with `count` and statement evidence (multi-statement
+/// output; the same rule firing in several statements is not repeated).
+pub fn finding_summary_line(text: &mut String, summary: &FindingSummary) {
+    let _ = writeln!(
+        text,
+        "- [{}] {} {} {} count={} statements={}",
+        severity_label(summary.severity),
+        summary.rule_id,
+        summary.message_key,
+        summary.detail,
+        summary.count,
+        summary
+            .statements
+            .iter()
+            .map(|index| format!("#{index}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
 }
 
 /// Emit a readable error block and return it as the command's error.

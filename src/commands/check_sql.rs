@@ -17,7 +17,7 @@ use openidea_plugin::{Error, Invocation};
 
 use crate::commands::common::{self, CliError};
 use crate::core::log::EntryClass;
-use crate::core::perf::{Finding, FindingSummary, Severity, SqlCheck, check as analyze_text};
+use crate::core::perf::{SqlCheck, check as analyze_text};
 
 /// Matches `[[contributes.commands]] id` in `plugin.toml`.
 pub const ID: &str = "check-sql";
@@ -68,10 +68,14 @@ fn check(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     let _ = writeln!(text, "destructive: {}", destructive_label(&report));
     let _ = writeln!(text, "unbounded-write: {}", unbounded_label(&report));
     if report.is_multi_statement() {
-        let _ = writeln!(text, "statements: {}", statements_summary(&report));
+        let _ = writeln!(
+            text,
+            "statements: {}",
+            common::class_mix(report.statements.iter().map(|statement| statement.class))
+        );
         let _ = writeln!(text, "findings: {}", report.findings.len());
         for summary in &report.findings {
-            append_summary(&mut text, summary);
+            common::finding_summary_line(&mut text, summary);
         }
     } else {
         // Single statement: keep the one-line-per-hit output unchanged.
@@ -81,7 +85,7 @@ fn check(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
             .map_or(&[][..], |statement| statement.findings.as_slice());
         let _ = writeln!(text, "findings: {}", hits.len());
         for finding in hits {
-            append_finding(&mut text, finding);
+            common::finding_line(&mut text, finding);
         }
     }
     Ok(text)
@@ -146,82 +150,12 @@ fn statement_keyword(report: &SqlCheck, index: usize) -> &str {
         .map_or("", |statement| statement.keyword.as_str())
 }
 
-fn statements_summary(report: &SqlCheck) -> String {
-    let mut counts: Vec<(EntryClass, usize)> = Vec::new();
-    for statement in &report.statements {
-        match counts
-            .iter_mut()
-            .find(|(class, _)| *class == statement.class)
-        {
-            Some((_, count)) => *count += 1,
-            None => counts.push((statement.class, 1)),
-        }
-    }
-    let parts = counts
-        .iter()
-        .map(|(class, count)| format!("{} {count}", class_name(*class)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("{} ({parts})", report.statements.len())
-}
-
-fn append_summary(text: &mut String, summary: &FindingSummary) {
-    let _ = writeln!(
-        text,
-        "- [{}] {} {} {} count={} statements={}",
-        severity_label(summary.severity),
-        summary.rule_id,
-        summary.message_key,
-        summary.detail,
-        summary.count,
-        summary
-            .statements
-            .iter()
-            .map(|index| format!("#{index}"))
-            .collect::<Vec<_>>()
-            .join(",")
-    );
-}
-
-fn append_finding(text: &mut String, finding: &Finding) {
-    let _ = writeln!(
-        text,
-        "- [{}] {} {} {}",
-        severity_label(finding.severity),
-        finding.rule_id,
-        finding.message_key,
-        finding.detail
-    );
-}
-
-fn severity_label(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Error => "error",
-        Severity::Warn => "warn",
-        Severity::Info => "info",
-    }
-}
-
 fn class_label(class: EntryClass) -> &'static str {
     match class {
         EntryClass::Select => "QUERY",
         EntryClass::Insert | EntryClass::Update | EntryClass::Delete => "DML",
         EntryClass::Ddl => "DDL",
         EntryClass::Other | EntryClass::Error => "UNKNOWN",
-    }
-}
-
-/// Lower-case class name used by the per-statement summary
-/// (`statements: 2 (delete 1, select 1)`).
-fn class_name(class: EntryClass) -> &'static str {
-    match class {
-        EntryClass::Select => "select",
-        EntryClass::Insert => "insert",
-        EntryClass::Update => "update",
-        EntryClass::Delete => "delete",
-        EntryClass::Ddl => "ddl",
-        EntryClass::Other => "other",
-        EntryClass::Error => "error",
     }
 }
 

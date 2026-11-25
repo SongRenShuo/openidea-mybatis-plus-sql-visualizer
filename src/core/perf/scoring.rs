@@ -152,6 +152,39 @@ fn level_of(score: u32) -> ComplexityLevel {
     }
 }
 
+/// Combine per-statement scores into the score of the whole text.
+///
+/// The combined score is the **sum** of the statements: each statement runs as
+/// its own round trip, so a file of two heavy statements is twice the work and
+/// must not read the same as a single heavy one (which is what a max would
+/// report). The 0–100 cap still bounds the result. Every breakdown factor is
+/// summed by name, so no factor is ever computed over a token stream that mixes
+/// statements. `combine(&[score(sql)])` reproduces `score(sql)` exactly.
+pub fn combine(scored: &[Complexity]) -> Complexity {
+    let mut parts: Vec<ScorePart> = Vec::new();
+    let mut recognized = false;
+    for item in scored {
+        recognized |= item.recognized;
+        for part in &item.breakdown {
+            match parts.iter_mut().find(|held| held.factor == part.factor) {
+                Some(held) => held.points = held.points.saturating_add(part.points),
+                None => parts.push(part.clone()),
+            }
+        }
+    }
+    let total = parts
+        .iter()
+        .map(|part| part.points)
+        .sum::<u32>()
+        .min(MAX_SCORE);
+    Complexity {
+        score: total,
+        level: level_of(total),
+        recognized,
+        breakdown: parts,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +247,33 @@ mod tests {
         let with_cte = score("WITH x AS (SELECT id FROM t) SELECT id FROM x WHERE id = ?");
         assert!(with_cte.score > plain.score);
         assert!(with_cte.breakdown.iter().any(|p| p.factor == "cte"));
+    }
+
+    #[test]
+    fn combine_of_one_statement_reproduces_score() {
+        let single = score("UPDATE user SET name = 'x'");
+        assert_eq!(combine(std::slice::from_ref(&single)), single);
+    }
+
+    #[test]
+    fn combine_sums_factors_across_statements() {
+        let delete = score("DELETE FROM users");
+        let select = score("SELECT id FROM users WHERE name LIKE '%abc'");
+        let combined = combine(&[delete.clone(), select.clone()]);
+        assert_eq!(combined.score, (delete.score + select.score).min(100));
+        let table = combined
+            .breakdown
+            .iter()
+            .find(|part| part.factor == "tableCount")
+            .expect("tableCount");
+        let expected = delete
+            .breakdown
+            .iter()
+            .chain(select.breakdown.iter())
+            .filter(|part| part.factor == "tableCount")
+            .map(|part| part.points)
+            .sum::<u32>();
+        assert_eq!(table.points, expected);
+        assert!(combined.recognized);
     }
 }

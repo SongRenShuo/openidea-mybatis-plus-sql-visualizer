@@ -123,9 +123,10 @@ pub fn check(sql: &str, dialect: &str) -> SqlCheck {
         let class = classify_sql(text);
         let keyword = leading_keyword(text);
         let hits = analyze(text, dialect);
-        if matches!(class, EntryClass::Update | EntryClass::Delete)
-            && hits.iter().any(|hit| hit.rule_id == "missing_where")
-        {
+        // `missing_where` only fires for UPDATE/DELETE, so deriving the verdict
+        // from the finding itself keeps `unbounded-write` and the findings from
+        // ever disagreeing (also for `WITH … DELETE`, whose class is SELECT).
+        if hits.iter().any(|hit| hit.rule_id == "missing_where") {
             unbounded_statements.push(index);
         }
         if matches!(keyword.as_str(), "DROP" | "TRUNCATE") {
@@ -200,6 +201,74 @@ fn leading_keyword(sql: &str) -> String {
         .take_while(|c| c.is_ascii_alphabetic())
         .collect::<String>()
         .to_ascii_uppercase()
+}
+
+/// One statement of a perf-advice request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatementAdvice {
+    /// 1-based position in the text.
+    pub index: usize,
+    pub class: EntryClass,
+    pub keyword: String,
+    pub sql: String,
+    pub findings: Vec<Finding>,
+    pub complexity: Complexity,
+}
+
+/// Text-level perf-advice report.
+///
+/// A single statement reproduces [`analyze`] and [`score`] exactly; several
+/// statements are analysed one by one and their scores summed, so no factor in
+/// the breakdown (`tableCount`, `joinCount`, …) is ever computed over a token
+/// stream that mixes statements.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PerfAdvice {
+    pub statements: Vec<StatementAdvice>,
+    /// Findings merged by `rule_id`.
+    pub findings: Vec<FindingSummary>,
+    /// Sum of the per-statement scores, capped at 100 (see [`scoring::combine`]).
+    pub complexity: Complexity,
+}
+
+impl PerfAdvice {
+    /// True when the input held more than one statement.
+    pub fn is_multi_statement(&self) -> bool {
+        self.statements.len() > 1
+    }
+}
+
+/// Run the rules and the complexity score on every statement of `sql`.
+pub fn advise(sql: &str, dialect: &str) -> PerfAdvice {
+    let parts = sql::split_statements(sql);
+    // A single statement is analysed from the original text so findings,
+    // ranges and the score stay byte-identical to [`analyze`] + [`score`].
+    let texts: Vec<&str> = if parts.len() <= 1 { vec![sql] } else { parts };
+
+    let mut statements = Vec::with_capacity(texts.len());
+    let mut findings: Vec<FindingSummary> = Vec::new();
+    for (position, text) in texts.iter().enumerate() {
+        let index = position + 1;
+        let hits = analyze(text, dialect);
+        merge_findings(&mut findings, &hits, index);
+        statements.push(StatementAdvice {
+            index,
+            class: classify_sql(text),
+            keyword: leading_keyword(text),
+            sql: text.to_string(),
+            findings: hits,
+            complexity: scoring::score(text),
+        });
+    }
+
+    let per_statement: Vec<Complexity> = statements
+        .iter()
+        .map(|statement| statement.complexity.clone())
+        .collect();
+    PerfAdvice {
+        complexity: scoring::combine(&per_statement),
+        statements,
+        findings,
+    }
 }
 
 #[cfg(test)]
@@ -828,6 +897,57 @@ mod tests {
                 "SELECT \"a;b\" FROM t"
             ]
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Per-statement advice (multi-statement score and merged findings)
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn multi_statement_advice_sums_scores_without_mixing_breakdown() {
+        let report = advise(
+            "DELETE FROM users;\nSELECT id FROM users WHERE name LIKE '%abc'",
+            "mysql",
+        );
+        assert_eq!(report.statements.len(), 2);
+        assert!(report.is_multi_statement());
+        // `tableCount` is 1 table per statement (1 + 1), never a token stream
+        // that treats the SELECT as part of the DELETE.
+        let table = report
+            .complexity
+            .breakdown
+            .iter()
+            .find(|part| part.factor == "tableCount")
+            .expect("tableCount");
+        assert_eq!(table.points, 6);
+        let summed = report
+            .statements
+            .iter()
+            .map(|statement| statement.complexity.score)
+            .sum::<u32>();
+        assert_eq!(report.complexity.score, summed.min(100));
+        let missing = report
+            .findings
+            .iter()
+            .find(|summary| summary.rule_id == "missing_where")
+            .expect("missing_where");
+        assert_eq!(missing.statements, vec![1]);
+        let wildcard = report
+            .findings
+            .iter()
+            .find(|summary| summary.rule_id == "leading_wildcard_like")
+            .expect("leading_wildcard_like");
+        assert_eq!(wildcard.statements, vec![2]);
+    }
+
+    #[test]
+    fn single_statement_advice_matches_analyze_and_score() {
+        let sql = "UPDATE user SET name = 'x'";
+        let report = advise(sql, "mysql");
+        assert!(!report.is_multi_statement());
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.complexity, score(sql));
+        assert_eq!(report.statements[0].findings, analyze(sql, "mysql"));
     }
 
     // ---------------------------------------------------------------------
