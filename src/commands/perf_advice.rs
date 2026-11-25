@@ -1,8 +1,10 @@
 //! `perf-advice`: performance findings and the complexity score for a SQL text.
 //!
-//! The argument is SQL text. Findings come from [`crate::core::perf::analyze`]
-//! and are printed with their stable `rule_id`, `message_key` and severity; the
-//! score is [`crate::core::perf::score`], which depends on the SQL text only.
+//! The argument is SQL text, a project file path (as handed over by the project
+//! view context menu) or `@<path>`. Findings come from
+//! [`crate::core::perf::analyze`] and are printed with their stable `rule_id`,
+//! `message_key` and severity; the score is [`crate::core::perf::score`], which
+//! depends on the SQL text only.
 
 use std::fmt::Write as _;
 
@@ -15,7 +17,7 @@ use crate::core::perf::{ComplexityLevel, Severity, analyze, score};
 pub const ID: &str = "perf-advice";
 
 /// What the command accepts as `arg`.
-pub const USAGE: &str = "<sql text>";
+pub const USAGE: &str = "<sql text> | <path> | @<path>";
 
 /// Dispatch entry.
 pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
@@ -31,8 +33,8 @@ pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error>
     }
 }
 
-fn advise(_ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
-    let sql = common::required_arg(arg)?;
+fn advise(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
+    let (sql, source) = common::sql_arg(ctx, arg)?;
     if sql.trim().is_empty() {
         return Err(CliError::new(
             common::KEY_EMPTY_ARG,
@@ -40,11 +42,14 @@ fn advise(_ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
         ));
     }
     let dialect = common::configured_dialect();
-    let findings = analyze(sql, &dialect);
-    let complexity = score(sql);
+    let findings = analyze(&sql, &dialect);
+    let complexity = score(&sql);
 
     let mut text = String::new();
     let _ = writeln!(text, "-- perf-advice");
+    if let Some(source) = &source {
+        let _ = writeln!(text, "source: {source}");
+    }
     let _ = writeln!(
         text,
         "dialect: {}",
@@ -148,5 +153,23 @@ mod tests {
         let err = run(&host.invocation(), None).unwrap_err();
         assert!(matches!(err, Error::Failed(ref text) if text.contains(common::KEY_MISSING_ARG)));
         assert!(text(&host).contains(common::KEY_MISSING_ARG));
+    }
+
+    #[test]
+    fn a_bare_path_reads_sql_from_the_project() {
+        let host = MockHost::install();
+        host.add_file("/project/perf.sql", "SELECT id FROM user ORDER BY RAND()");
+        run(&host.invocation(), Some("/project/perf.sql")).unwrap();
+        let text = text(&host);
+        assert!(text.contains("source: /project/perf.sql"));
+        assert!(text.contains("order_by_rand perf.order_by_rand"));
+    }
+
+    #[test]
+    fn sql_text_with_spaces_is_analysed_as_text() {
+        let host = MockHost::install();
+        // No such file: even a path-shaped tail must not break literal SQL.
+        run(&host.invocation(), Some("UPDATE user SET name = 'x'")).unwrap();
+        assert!(text(&host).contains("missing_where perf.missing_where"));
     }
 }

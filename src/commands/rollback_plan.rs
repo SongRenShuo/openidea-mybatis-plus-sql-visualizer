@@ -1,7 +1,8 @@
 //! `rollback-plan`: the reverse statements that undo an UPDATE/DELETE.
 //!
 //! The argument is JSON: `sql`, the table description (`table`, `schema`,
-//! `columns`, `pk`) and `dialect`. The plan comes from
+//! `columns`, `pk`) and `dialect`; it may also be `@<path>` or a bare project
+//! file path holding that JSON. The plan comes from
 //! [`crate::core::r#gen::rollback_plan`]; a statement without a primary key, or
 //! whose WHERE does not constrain every primary-key column, is **refused**
 //! (`-- refused: <message_key>`) and no reverse SQL is printed.
@@ -33,11 +34,11 @@ struct RollbackInput {
 }
 
 /// Dispatch entry.
-pub fn run(_ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
+pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
     if arg.map(str::trim).unwrap_or("").is_empty() {
         return common::fail(common::missing_arg(USAGE));
     }
-    let input: RollbackInput = match common::json_arg(arg) {
+    let input: RollbackInput = match common::json_arg(ctx, arg) {
         Ok(input) => input,
         Err(err) => return common::fail(err),
     };

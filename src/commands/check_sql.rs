@@ -1,10 +1,11 @@
 //! `check-sql`: classify a SQL statement and list its safety/perf findings.
 //!
-//! The argument is SQL text, or `@<path>` to read a file inside the project.
-//! Classification comes from [`crate::core::log::classify_sql`] (the only
-//! public statement classifier) and the findings from
-//! [`crate::core::perf::analyze`]; this module maps them to `QUERY` / `DML` /
-//! `DDL` / `UNKNOWN` and flags unbounded writes and destructive statements.
+//! The argument is SQL text, `@<path>`, or a bare project file path (the form
+//! the project view context menu passes). Classification comes from
+//! [`crate::core::log::classify_sql`] (the only public statement classifier) and
+//! the findings from [`crate::core::perf::analyze`]; this module maps them to
+//! `QUERY` / `DML` / `DDL` / `UNKNOWN` and flags unbounded writes and
+//! destructive statements.
 //!
 //! The dialect comes from the `sql.dialect` setting (shared with the navigation
 //! lane). When it is unset, text rules still run and only the quote-mismatch
@@ -22,7 +23,7 @@ use crate::core::perf::{Finding, Severity, analyze};
 pub const ID: &str = "check-sql";
 
 /// What the command accepts as `arg`.
-pub const USAGE: &str = "<sql text> | @<path>";
+pub const USAGE: &str = "<sql text> | <path> | @<path>";
 
 pub const KEY_NO_SQL: &str = "check_sql.no_sql";
 
@@ -206,6 +207,17 @@ mod tests {
         let text = text(&host);
         assert!(text.contains("source: /project/check.sql"));
         assert!(text.contains("class: QUERY"));
+    }
+
+    #[test]
+    fn a_bare_path_reads_sql_from_the_project() {
+        let host = MockHost::install();
+        host.add_file("/project/check.sql", "DROP TABLE user");
+        run(&host.invocation(), Some("/project/check.sql")).unwrap();
+        let text = text(&host);
+        assert!(text.contains("source: /project/check.sql"));
+        assert!(text.contains("class: DDL"));
+        assert!(text.contains("destructive: YES (DROP)"));
     }
 
     #[test]

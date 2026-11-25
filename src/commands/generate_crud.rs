@@ -1,8 +1,9 @@
 //! `generate-crud`: standard CRUD statements from a table description.
 //!
 //! The argument is JSON: `table`, `schema` (optional), `columns`, `pk`
-//! (optional list of primary-key names) and `dialect`. A column is either a
-//! name or `{ "name", "primary_key", "auto_increment" }`. All generation is
+//! (optional list of primary-key names) and `dialect`. It may also be `@<path>`
+//! or a bare project file path holding that JSON. A column is either a name or
+//! `{ "name", "primary_key", "auto_increment" }`. All generation is
 //! [`crate::core::r#gen::crud`]; this module formats its statements.
 
 use std::fmt::Write as _;
@@ -31,11 +32,11 @@ struct GenerateCrudInput {
 }
 
 /// Dispatch entry.
-pub fn run(_ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
+pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
     if arg.map(str::trim).unwrap_or("").is_empty() {
         return common::fail(common::missing_arg(USAGE));
     }
-    match generate(arg) {
+    match generate(ctx, arg) {
         Ok(text) => {
             common::emit(&text)?;
             Ok(None)
@@ -44,8 +45,8 @@ pub fn run(_ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error
     }
 }
 
-fn generate(arg: Option<&str>) -> Result<String, CliError> {
-    let input: GenerateCrudInput = common::json_arg(arg)?;
+fn generate(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
+    let input: GenerateCrudInput = common::json_arg(ctx, arg)?;
     let spec = common::build_table_spec(
         &input.table,
         input.schema.as_deref(),

@@ -1,7 +1,8 @@
 //! `open-workbench`: send a statement to the preview workbench and reveal it.
 //!
-//! The argument is optional SQL text (or `@<path>` to read a file inside the
-//! project). The page receives the `{op:"load", model, labels}` message through
+//! The argument is optional SQL text, `@<path>`, or a bare project file path
+//! (the form the project view context menu passes). The page receives the
+//! `{op:"load", model, labels}` message through
 //! [`host::post_view_message`](openidea_plugin::host::post_view_message); the
 //! plugin-side model is set too, because the page asks for it again with
 //! `{op:"ready"}` when it finishes loading (that handshake would otherwise
