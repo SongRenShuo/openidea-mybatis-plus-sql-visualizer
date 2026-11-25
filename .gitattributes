@@ -1,0 +1,16 @@
+# Normalise text so CI (Linux) and Windows agree.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary artefacts must never be converted or diffed.
+*.wasm binary
+*.oiplugin binary
+*.jar binary
+*.zip binary
+*.png binary
+*.webp binary
+*.gif binary
