@@ -710,6 +710,18 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "The community group and the author's contact are listed on the project page.",
         "交流群与作者联系方式见项目主页。",
     ),
+    // SQL preview entry (L35a): the gutter button and the command's editor path.
+    ("preview.gutter.tooltip", "Preview SQL", "预览 SQL"),
+    (
+        "preview.error.no_input",
+        "Nothing to preview: pass a mapper path, `path#statement` or SQL text, or open a file in the editor.",
+        "没有可预览的内容：请传入 Mapper 路径、`路径#语句` 或 SQL 文本，或在编辑器中打开文件。",
+    ),
+    (
+        "preview.error.editor_unreadable",
+        "The current editor cannot be read (editor.read is missing or the document is stale); pass the SQL or a mapper path as the command argument instead.",
+        "无法读取当前编辑器（缺少 editor.read 或文档已过期）；请改用命令参数传入 SQL 或 Mapper 路径。",
+    ),
 ];
 
 /// Localised text for `key` in the IDE's current UI language.
