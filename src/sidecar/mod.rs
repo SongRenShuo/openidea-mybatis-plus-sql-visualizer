@@ -20,8 +20,15 @@
 //! Every candidate must pass [`verify_sha256`] against
 //! [`pinned_sha256_hex`] before [`start`] will spawn it.
 
+pub mod lifecycle;
 mod sha256;
 
+pub use lifecycle::{
+    Action, DEFAULT_TIMEOUTS, DegradeReason, EngineHandle, EnginePathSource, EngineProbe,
+    EngineStatus, HealthMonitor, ResolvedEngine, Timeouts, dev_repo_candidates, jar_file_name,
+    parse_health_version, resolve_engine_path, resolve_engine_path_with, retry_delays_ms, start,
+    stop,
+};
 pub use sha256::sha256_hex;
 
 use std::sync::OnceLock;
