@@ -10,9 +10,26 @@
 
 // The shells are reachable from the crate root through the dispatch in
 // `lib.rs`; the lane that wrote them is merged.
+//
+// The capture/workbench shells (lane L12) are dispatched by the controller's
+// registration merge; until that lands they would trip `dead_code` here.
+#[allow(dead_code)]
+pub mod capture_open_log;
+#[allow(dead_code)]
+pub mod capture_poll;
+#[allow(dead_code)]
+pub mod capture_start;
+#[allow(dead_code)]
+pub mod capture_status;
+#[allow(dead_code)]
+pub mod capture_stop;
 pub mod check_sql;
 pub mod common;
 pub mod generate_crud;
+#[allow(dead_code)]
+pub mod open_logs;
+#[allow(dead_code)]
+pub mod open_workbench;
 pub mod perf_advice;
 pub mod render_log;
 pub mod render_xml;
