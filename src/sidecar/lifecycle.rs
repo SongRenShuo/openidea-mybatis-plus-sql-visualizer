@@ -450,13 +450,13 @@ impl EngineHandle {
         let chunk = child
             .wait(DEFAULT_TIMEOUTS.request_ms)
             .map_err(|e| DegradeReason::HandshakeFailed(e.to_string()))?;
-        if chunk.stdout.trim().is_empty() {
-            if let Some(code) = chunk.status {
-                return Err(DegradeReason::HandshakeFailed(format!(
-                    "engine exited {code}: {}",
-                    chunk.stderr.trim()
-                )));
-            }
+        if chunk.stdout.trim().is_empty()
+            && let Some(code) = chunk.status
+        {
+            return Err(DegradeReason::HandshakeFailed(format!(
+                "engine exited {code}: {}",
+                chunk.stderr.trim()
+            )));
         }
         Ok(chunk.stdout)
     }
@@ -483,10 +483,23 @@ impl EngineHandle {
     }
 }
 
+/// The argv used to launch the engine's stdio dispatcher.
+///
+/// Pure and shared by [`start`] and the real-process test, so the plugin and the
+/// test can never drift on the launch contract. The jar carries
+/// `Main-Class: mpsv.engine.StdioMain` (see `sub-projects/engine-jar/build.gradle.kts`),
+/// so `java -jar` is enough — no separate stdio jar, no classpath assembly.
+pub fn engine_command(jar: &str) -> (String, Vec<String>) {
+    (
+        "java".to_string(),
+        vec!["-jar".to_string(), jar.to_string(), "--stdio".to_string()],
+    )
+}
+
 /// Start the pinned engine over stdin/stdout JSON lines.
 ///
 /// Steps: resolve → verify sha256 → spawn `java -jar <jar> --stdio` →
-/// handshake (health line, version check) within [`DEFAULT_TIMEOUTS`].
+/// handshake (a `ping` line, version check) within [`DEFAULT_TIMEOUTS`].
 pub fn start(version: &str) -> Result<EngineHandle, DegradeReason> {
     let resolved = resolve_engine_path(version)?;
 
@@ -495,10 +508,11 @@ pub fn start(version: &str) -> Result<EngineHandle, DegradeReason> {
         .map_err(|e| DegradeReason::SpawnFailed(format!("read {}: {e}", resolved.path)))?;
     verify_sha256(&bytes, pinned_sha256_hex()).map_err(DegradeReason::from_sha)?;
 
-    let command = Command::new("java")
-        .arg("-jar")
-        .arg(&resolved.path)
-        .arg("--stdio");
+    let (program, args) = engine_command(&resolved.path);
+    let mut command = Command::new(&program);
+    for arg in &args {
+        command = command.arg(arg);
+    }
     let options = ProcessOptions {
         max_output_bytes: Some(4 * 1024 * 1024),
         buffer_bytes: None,
@@ -534,7 +548,7 @@ impl EngineHandle {
             .as_ref()
             .ok_or_else(|| DegradeReason::HandshakeFailed("no child process".into()))?;
         child
-            .write("{\"protocol\":1,\"kind\":\"health\"}\n")
+            .write("{\"protocol\":1,\"kind\":\"ping\"}\n")
             .map_err(|e| DegradeReason::HandshakeFailed(e.to_string()))?;
         let chunk = child
             .wait(DEFAULT_TIMEOUTS.cold_start_ms)
@@ -662,6 +676,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)] // the target is intentionally pinned
     fn default_cold_start_budget_meets_the_two_second_target() {
         assert_eq!(DEFAULT_TIMEOUTS.cold_start_ms, 2_000);
         assert!(DEFAULT_TIMEOUTS.request_ms >= DEFAULT_TIMEOUTS.cold_start_ms);
@@ -686,6 +701,20 @@ mod tests {
     #[test]
     fn jar_file_name_is_exact() {
         assert_eq!(jar_file_name("0.1.0"), "mpsv-engine-0.1.0.jar");
+    }
+
+    #[test]
+    fn engine_command_is_java_jar_stdio() {
+        let (program, args) = engine_command("/x/mpsv-engine-0.1.0.jar");
+        assert_eq!(program, "java");
+        assert_eq!(
+            args,
+            vec![
+                "-jar".to_string(),
+                "/x/mpsv-engine-0.1.0.jar".to_string(),
+                "--stdio".to_string()
+            ]
+        );
     }
 
     // ---- handshake parsing ----
@@ -828,5 +857,91 @@ mod tests {
             )),
             Ok(_) => panic!("a bare mock has no engine jar; start must degrade"),
         }
+    }
+
+    // ---- real-process end-to-end (ignored; needs the built engine jar) ----
+
+    /// Drives the **real** engine jar's `--stdio` dispatcher over std::process:
+    /// ping handshake (measuring cold start), a `check` round-trip with `id`
+    /// echo, an `explain`, and a bad-JSON request that must not kill the process.
+    ///
+    /// Run:
+    /// `MPSV_ENGINE_JAR=<path/to/mpsv-engine-0.1.0.jar> cargo test sidecar -- --ignored`
+    #[test]
+    #[ignore = "spawns the real engine jar; needs MPSV_ENGINE_JAR"]
+    fn real_jar_stdio_round_trip() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::process::{Command, Stdio};
+        use std::time::Instant;
+
+        let jar =
+            std::env::var("MPSV_ENGINE_JAR").expect("set MPSV_ENGINE_JAR to the engine jar path");
+        let (program, args) = engine_command(&jar);
+        let java = std::env::var("JAVA_HOME")
+            .map(|home| format!("{home}/bin/java"))
+            .unwrap_or(program);
+
+        let started = Instant::now();
+        let mut child = Command::new(java)
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn engine");
+        // A free helper (not a closure) keeps the child borrows simple: it takes
+        // `&mut` only for the write, then stdout/kill are used afterwards.
+        fn send(child: &mut std::process::Child, line: &str) {
+            let stdin = child.stdin.as_mut().expect("stdin");
+            writeln!(stdin, "{line}").expect("write request");
+        }
+
+        // 1) ping handshake + cold start
+        send(&mut child, r#"{"protocol":1,"kind":"ping"}"#);
+        let mut lines = BufReader::new(child.stdout.take().expect("stdout")).lines();
+        let ping: serde_json::Value =
+            serde_json::from_str(&lines.next().expect("ping line").expect("ping io")).unwrap();
+        let cold_start_ms = started.elapsed().as_millis();
+        assert_eq!(ping["ok"], true, "ping: {ping}");
+        assert_eq!(ping["version"], "0.1.0");
+
+        // 2) check with an id echo
+        send(
+            &mut child,
+            r#"{"protocol":1,"kind":"check","id":7,"source":{"path":"x","text":"SELECT 1"}}"#,
+        );
+        let check: serde_json::Value =
+            serde_json::from_str(&lines.next().expect("check line").expect("check io")).unwrap();
+        assert_eq!(check["ok"], true, "check: {check}");
+        assert_eq!(check["statementCount"], 1);
+        assert_eq!(check["id"], 7, "id is echoed");
+
+        // 3) explain shaping
+        send(
+            &mut child,
+            r#"{"protocol":1,"kind":"explain","sql":"SELECT * FROM t WHERE id = 1","dialect":"MySQL"}"#,
+        );
+        let explain: serde_json::Value =
+            serde_json::from_str(&lines.next().expect("explain line").expect("explain io"))
+                .unwrap();
+        assert_eq!(explain["ok"], true, "explain: {explain}");
+        assert!(
+            explain["explainSql"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("EXPLAIN")
+        );
+
+        // 4) bad JSON: structured error, process stays alive
+        send(&mut child, "not json");
+        let bad: serde_json::Value =
+            serde_json::from_str(&lines.next().expect("bad line").expect("bad io")).unwrap();
+        assert_eq!(bad["ok"], false, "bad: {bad}");
+        assert_eq!(bad["kind"], "invalid");
+
+        let _ = child.kill();
+        let _ = child.wait(); // reap the child so the test leaves no zombie
+        eprintln!("L8 real jar: cold_start_ms={cold_start_ms} (target <= 2000)");
+        assert!(cold_start_ms < 10_000, "engine hung: {cold_start_ms} ms");
     }
 }

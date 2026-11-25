@@ -43,8 +43,8 @@ pub fn sha256_hex(data: &[u8]) -> String {
     let mut compress = |chunk: &[u8]| {
         block.copy_from_slice(chunk);
         let mut w = [0u32; 64];
-        for (i, word) in block.chunks_exact(4).enumerate() {
-            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+        for (i, word) in block.as_chunks::<4>().0.iter().enumerate() {
+            w[i] = u32::from_be_bytes(*word);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -89,14 +89,14 @@ pub fn sha256_hex(data: &[u8]) -> String {
     // body (data.len() % 64 bytes) followed by the pad + length. The remainder
     // must be compressed — it is the common off-by-one that drops the last bytes.
     let whole = data.len() - data.len() % 64;
-    for chunk in data[..whole].chunks_exact(64) {
+    for chunk in data[..whole].as_chunks::<64>().0 {
         compress(chunk);
     }
     let mut finish = Vec::with_capacity(data.len() - whole + tail.len());
     finish.extend_from_slice(&data[whole..]);
     finish.extend_from_slice(&tail);
     debug_assert_eq!(finish.len() % 64, 0, "padding must produce whole blocks");
-    for chunk in finish.chunks_exact(64) {
+    for chunk in finish.as_chunks::<64>().0 {
         compress(chunk);
     }
 

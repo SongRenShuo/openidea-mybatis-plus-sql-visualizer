@@ -66,4 +66,5 @@ fn jar_stdio_round_trip() {
     assert_eq!(check["statementCount"], 1);
 
     let _ = child.kill();
+    let _ = child.wait(); // reap, so the process is not left as a zombie
 }

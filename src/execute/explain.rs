@@ -181,10 +181,10 @@ fn detail(row: &ExplainRow) -> String {
     if let Some(rows) = row.rows {
         parts.push(format!("rows={rows}"));
     }
-    if let Some(extra) = &row.extra {
-        if !extra.is_empty() {
-            parts.push(extra.clone());
-        }
+    if let Some(extra) = &row.extra
+        && !extra.is_empty()
+    {
+        parts.push(extra.clone());
     }
     parts.join(", ")
 }

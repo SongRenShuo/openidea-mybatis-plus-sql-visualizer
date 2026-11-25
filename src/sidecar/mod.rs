@@ -26,9 +26,9 @@ mod sha256;
 
 pub use lifecycle::{
     Action, DEFAULT_TIMEOUTS, DegradeReason, EngineHandle, EnginePathSource, EngineProbe,
-    EngineStatus, HealthMonitor, ResolvedEngine, Timeouts, dev_repo_candidates, jar_file_name,
-    parse_health_version, resolve_engine_path, resolve_engine_path_with, retry_delays_ms, start,
-    stop,
+    EngineStatus, HealthMonitor, ResolvedEngine, Timeouts, dev_repo_candidates, engine_command,
+    jar_file_name, parse_health_version, resolve_engine_path, resolve_engine_path_with,
+    retry_delays_ms, start, stop,
 };
 pub use proto::{
     EngineError, ErrorValue, ExplainRequest, Kind, PROTOCOL_VERSION, RenderKind, RenderRequest,
@@ -183,7 +183,7 @@ mod tests {
     fn the_pin_matches_the_recorded_engine_jar_digest() {
         assert_eq!(
             pinned_sha256_hex(),
-            "00af8534603994d6cf870f59cd9dfe48d8bbc16e983ff2c3e9966e4bfd58bc33"
+            "7b04dfc26a985273c45a80076e7b938fd31062676891d5ae27ea06eb732a2d69"
         );
     }
 }

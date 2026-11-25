@@ -614,22 +614,17 @@ fn parse_leaf(op: Op, raw_args: &[String], connector: Connector, ctx: &mut Ctx) 
     }
 
     match op {
-        Op::IsNull | Op::IsNotNull => {}
-        Op::Between => {
-            if values.len() != 2 {
-                ctx.partial = true;
-                push_key(ctx, "wrapper.between_arity");
-                ctx.notes
-                    .push("between needs exactly two values".to_string());
-            }
+        Op::Between if values.len() != 2 => {
+            ctx.partial = true;
+            push_key(ctx, "wrapper.between_arity");
+            ctx.notes
+                .push("between needs exactly two values".to_string());
         }
-        Op::In | Op::NotIn => {
-            if values.is_empty() {
-                ctx.partial = true;
-                push_key(ctx, "wrapper.empty_in");
-                ctx.notes
-                    .push("in/notIn with no values renders `IN (NULL)`".to_string());
-            }
+        Op::In | Op::NotIn if values.is_empty() => {
+            ctx.partial = true;
+            push_key(ctx, "wrapper.empty_in");
+            ctx.notes
+                .push("in/notIn with no values renders `IN (NULL)`".to_string());
         }
         _ => {}
     }
