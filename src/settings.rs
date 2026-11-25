@@ -73,8 +73,8 @@ pub struct SettingDef {
     pub needs_restart: bool,
 }
 
-/// The 42 settings of the first release, in page order.
-pub static DEFINITIONS: [SettingDef; 42] = [
+/// The 45 settings of the first release plus the L34 parity keys, in page order.
+pub static DEFINITIONS: [SettingDef; 45] = [
     // Dialect -------------------------------------------------------------
     SettingDef {
         key: "dialect.mode",
@@ -206,6 +206,22 @@ pub static DEFINITIONS: [SettingDef; 42] = [
         needs_restart: false,
     },
     SettingDef {
+        key: "log.showDuration",
+        title: "Show execution duration",
+        group: "Log",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "logs.displayMode",
+        title: "SQL display mode",
+        group: "Log",
+        kind: Kind::Enum(&["single", "multi", "keyword_wrap"]),
+        default: DefaultValue::Str("keyword_wrap"),
+        needs_restart: false,
+    },
+    SettingDef {
         key: "logs.pageSize",
         title: "Maximum SQL log entries",
         group: "Log",
@@ -257,6 +273,14 @@ pub static DEFINITIONS: [SettingDef; 42] = [
     SettingDef {
         key: "render.formatSql",
         title: "Format SQL",
+        group: "Rendering",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "render.formatOnPreview",
+        title: "Format restored SQL on preview",
         group: "Rendering",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -507,16 +531,16 @@ mod tests {
     }
 
     #[test]
-    fn definitions_cover_forty_two_fields_with_unique_keys() {
-        assert_eq!(definitions().len(), 42);
+    fn definitions_cover_forty_five_fields_with_unique_keys() {
+        assert_eq!(definitions().len(), 45);
         let mut keys = std::collections::BTreeSet::new();
         for def in definitions() {
             assert!(keys.insert(def.key), "duplicate key {}", def.key);
         }
         assert_eq!(
             keys.len(),
-            42,
-            "the first release ships exactly 42 settings"
+            45,
+            "the first release plus the L34 parity keys ships 45 settings"
         );
     }
 
@@ -577,6 +601,29 @@ mod tests {
             !definition("dialect.mode")
                 .expect("dialect.mode")
                 .needs_restart
+        );
+    }
+
+    #[test]
+    fn the_l34_parity_keys_keep_the_reference_defaults() {
+        // Lane L34: the three keys the reference exposes and this build can
+        // actually consume. Their defaults come from the reference panel, and
+        // every one is read on the next push, so no restart is needed.
+        let expected = [
+            ("logs.displayMode", DefaultValue::Str("keyword_wrap")),
+            ("log.showDuration", DefaultValue::Bool(true)),
+            ("render.formatOnPreview", DefaultValue::Bool(true)),
+        ];
+        for (key, default) in expected {
+            let def = definition(key).unwrap_or_else(|| panic!("{key} is missing"));
+            assert_eq!(def.default, default, "default of {key}");
+            assert!(!def.needs_restart, "{key} is read on the next push");
+        }
+        assert_eq!(
+            definition("logs.displayMode")
+                .expect("logs.displayMode")
+                .kind,
+            Kind::Enum(&["single", "multi", "keyword_wrap"])
         );
     }
 

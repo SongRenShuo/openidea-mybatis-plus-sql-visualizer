@@ -60,6 +60,23 @@
       "group": "Log",
       "default": true
     },
+    "log.showDuration": {
+      "type": "boolean",
+      "title": "Show execution duration",
+      "group": "Log",
+      "default": true
+    },
+    "logs.displayMode": {
+      "type": "string",
+      "title": "SQL display mode",
+      "group": "Log",
+      "enum": [
+        "single",
+        "multi",
+        "keyword_wrap"
+      ],
+      "default": "keyword_wrap"
+    },
     "logs.pageSize": {
       "type": "integer",
       "title": "Maximum SQL log entries",

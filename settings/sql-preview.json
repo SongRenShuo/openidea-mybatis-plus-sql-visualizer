@@ -102,6 +102,12 @@
       "group": "Rendering",
       "default": true
     },
+    "render.formatOnPreview": {
+      "type": "boolean",
+      "title": "Format restored SQL on preview",
+      "group": "Rendering",
+      "default": true
+    },
     "render.indentWidth": {
       "type": "integer",
       "title": "Indent width",
