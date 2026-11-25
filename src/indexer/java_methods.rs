@@ -408,7 +408,10 @@ fn class_matches(written: &str, location: &JavaMethodLocation) -> bool {
 
 /// `written` is a suffix of `real` (segment by segment), where a single-letter
 /// written segment is Spring's shortening of a longer one.
-fn dotted_suffix_matches(written: &str, real: &str) -> bool {
+///
+/// Shared with the XML statement index so both sides match a mapper name the
+/// same way.
+pub(crate) fn dotted_suffix_matches(written: &str, real: &str) -> bool {
     let written: Vec<&str> = written.split('.').collect();
     let real: Vec<&str> = real.split('.').collect();
     if written.len() > real.len() {
