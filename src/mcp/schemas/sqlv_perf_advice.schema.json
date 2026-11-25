@@ -1,12 +1,12 @@
 {
   "title": "sqlv_perf_advice",
   "type": "object",
-  "description": "Run performance rules, a 0-100 complexity score and index advice on one SQL statement.",
+  "description": "Run performance rules, a 0-100 complexity score and index advice on each SQL statement of the text.",
   "additionalProperties": false,
   "properties": {
     "sql": {
       "type": "string",
-      "description": "SQL statement to analyse.",
+      "description": "SQL text; top-level semicolons separate statements, and each statement is analysed on its own.",
       "minLength": 1
     },
     "dialect": {

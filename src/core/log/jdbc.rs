@@ -215,6 +215,7 @@ impl JdbcState {
             affected_rows: None,
             raw_line: (confidence != Confidence::Exact).then(|| line.to_string()),
             message_keys,
+            thread: emitter.current_thread(),
         });
     }
 
@@ -278,6 +279,7 @@ impl JdbcState {
             affected_rows: None,
             raw_line: (confidence != Confidence::Exact).then(|| self.pending_raw_line.clone()),
             message_keys,
+            thread: emitter.current_thread(),
         });
         self.pending_line_no = 0;
         self.pending_raw_line.clear();

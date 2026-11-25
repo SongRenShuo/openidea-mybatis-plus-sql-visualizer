@@ -9,7 +9,7 @@
 
 use super::model::{Confidence, Family, message_keys};
 use super::params::{Param, parse_mybatis, render_param};
-use super::parser::{Emitter, PendingEntry, cap_sql, is_continuation_candidate};
+use super::parser::{CloseRow, Emitter, PendingEntry, cap_sql, is_continuation_candidate};
 use super::restore::restore;
 use super::text::{after_ci, classify, find_ci, is_log_framework_line};
 
@@ -19,6 +19,7 @@ pub(crate) struct MyBatisState {
     pending_line_no: usize,
     pending_raw_line: String,
     pending_timestamp: Option<i64>,
+    pending_thread: Option<String>,
     start_duration: Option<f64>,
     params: Vec<Param>,
     wait_sql: bool,
@@ -99,23 +100,30 @@ impl MyBatisState {
                 } else {
                     Vec::new()
                 },
+                thread: emitter.current_thread(),
             });
             return true;
         }
 
-        // `<== Total: N` closes a parameterless statement and records the row
-        // count on the entry emitted just before it.
+        // Both mybatis close rows finish the current statement: `Total:` reports
+        // result rows, `Updates:` reports changed rows. They also carry the only
+        // end timestamp available, so the statement duration is the gap between
+        // its `Preparing:` line and this row.
         if let Some(after) = after_ci(line, "total:") {
             let rows = parse_leading_u64(&line[after..]);
             if self.pending_sql.is_some() {
                 self.close(emitter, None);
             }
-            if let Some(rows) = rows {
-                emitter.attach_affected_rows(line_no, rows);
+            emitter.close_row(line_no, rows, CloseRow::Total);
+            return true;
+        }
+
+        if let Some(after) = after_ci(line, "updates:") {
+            let rows = parse_leading_u64(&line[after..]);
+            if self.pending_sql.is_some() {
+                self.close(emitter, None);
             }
-            if let Some(duration) = emitter.current_duration() {
-                emitter.notice_duration(line_no, duration);
-            }
+            emitter.close_row(line_no, rows, CloseRow::Updates);
             return true;
         }
 
@@ -187,6 +195,7 @@ impl MyBatisState {
         self.pending_line_no = line_no;
         self.pending_raw_line = line.to_string();
         self.pending_timestamp = emitter.current_timestamp();
+        self.pending_thread = emitter.current_thread();
         self.start_duration = emitter.current_duration();
         self.params.clear();
         self.wait_sql = false;
@@ -200,8 +209,10 @@ impl MyBatisState {
         let Some(sql) = self.pending_sql.take() else {
             self.continuing = false;
             self.wait_params = false;
+            self.pending_thread = None;
             return;
         };
+        let thread = self.pending_thread.take();
         let truncated = self.truncated;
         self.continuing = false;
         self.wait_params = false;
@@ -244,6 +255,7 @@ impl MyBatisState {
             affected_rows: None,
             raw_line: (confidence != Confidence::Exact).then(|| self.pending_raw_line.clone()),
             message_keys,
+            thread,
         });
         self.pending_line_no = 0;
         self.pending_raw_line.clear();
@@ -312,8 +324,21 @@ mod tests {
         let entries = run(&["==>  Preparing: SELECT COUNT(*) FROM user", "==> Total: 1"]);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sql, "SELECT COUNT(*) FROM user");
-        assert_eq!(entries[0].affected_rows, Some(1));
+        assert_eq!(entries[0].result_rows, Some(1));
+        assert_eq!(entries[0].affected_rows, None);
         assert_eq!(entries[0].class, super::super::model::EntryClass::Select);
+    }
+
+    #[test]
+    fn updates_row_records_affected_rows_not_result_rows() {
+        let entries = run(&[
+            "==>  Preparing: UPDATE user SET state = ? WHERE id = ?",
+            "==> Parameters: 1(Integer), 2(Long)",
+            "<==    Updates: 3",
+        ]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].affected_rows, Some(3));
+        assert_eq!(entries[0].result_rows, None);
     }
 
     #[test]

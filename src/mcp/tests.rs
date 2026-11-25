@@ -482,6 +482,126 @@ fn check_sql_classifies_and_flags_unbounded_writes_and_destructive_ddl() {
 }
 
 #[test]
+fn check_sql_checks_every_statement_of_a_multi_statement_text() {
+    let response = call(
+        "sqlv_check_sql",
+        json!({
+            "sql": "DELETE FROM users;\nSELECT id, name FROM users WHERE name LIKE '%abc' ORDER BY created_at DESC;"
+        }),
+    );
+    assert_eq!(response["ok"], true);
+    assert_eq!(response["confidence"], "partial");
+    let data = &response["data"];
+    assert_eq!(data["class"], "DML");
+    assert_eq!(data["keyword"], "DELETE");
+    assert_eq!(data["unbounded_write"], true);
+    assert_eq!(data["destructive"], false);
+    assert_eq!(data["evidence"]["unbounded_write"], json!([1]));
+    assert_eq!(data["evidence"]["destructive"], json!([]));
+    let statements = data["statements"].as_array().expect("statements");
+    assert_eq!(statements.len(), 2);
+    assert_eq!(statements[0]["keyword"], "DELETE");
+    assert_eq!(statements[0]["unbounded_write"], true);
+    assert_eq!(statements[1]["class"], "QUERY");
+    assert_eq!(statements[1]["destructive"], false);
+
+    let rules: Vec<&str> = data["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .map(|finding| finding["rule_id"].as_str().expect("rule id"))
+        .collect();
+    assert!(rules.contains(&"missing_where"));
+    assert!(rules.contains(&"leading_wildcard_like"));
+    let mut unique = rules.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(rules.len(), unique.len(), "findings must not repeat a rule");
+    assert!(
+        data["checks"]
+            .as_array()
+            .expect("checks")
+            .iter()
+            .any(|check| check["message_key"] == "check.unbounded_write"
+                && check["detail"]["index"] == 1)
+    );
+}
+
+#[test]
+fn check_sql_single_statement_payload_is_unchanged() {
+    let response = call(
+        "sqlv_check_sql",
+        json!({ "sql": "UPDATE user SET name = 'x'" }),
+    );
+    let data = &response["data"];
+    assert_eq!(response["confidence"], "partial");
+    assert_eq!(data["class"], "DML");
+    assert_eq!(data["keyword"], "UPDATE");
+    assert_eq!(data["unbounded_write"], true);
+    assert_eq!(data["destructive"], false);
+    assert_eq!(
+        data["checks"][0]["detail"],
+        json!({ "statement": "UPDATE" })
+    );
+    assert_eq!(data["findings"][0]["rule_id"], "missing_where");
+    assert_eq!(data["statements"].as_array().map(Vec::len), Some(1));
+    assert_eq!(data["evidence"]["unbounded_write"], json!([1]));
+}
+
+#[test]
+fn perf_advice_scores_each_statement_and_merges_findings() {
+    let response = call(
+        "sqlv_perf_advice",
+        json!({
+            "sql": "DELETE FROM users;\nSELECT id FROM users WHERE name LIKE '%abc'"
+        }),
+    );
+    assert_eq!(response["ok"], true);
+    assert_eq!(response["confidence"], "partial");
+    let data = &response["data"];
+    assert_eq!(data["score"]["score"], 69);
+    assert_eq!(data["score"]["level"], "medium");
+    let statements = data["statements"].as_array().expect("statements");
+    assert_eq!(statements.len(), 2);
+    assert_eq!(statements[0]["score"], 53);
+    assert_eq!(statements[0]["class"], "DML");
+    // `tableCount` is summed per statement (3 + 3), never mixed.
+    let table = data["score"]["breakdown"]
+        .as_array()
+        .expect("breakdown")
+        .iter()
+        .find(|part| part["factor"] == "tableCount")
+        .expect("tableCount");
+    assert_eq!(table["points"], 6);
+
+    let rules: Vec<&str> = data["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .map(|finding| finding["rule_id"].as_str().expect("rule id"))
+        .collect();
+    assert!(rules.contains(&"missing_where"));
+    assert!(rules.contains(&"leading_wildcard_like"));
+    assert_eq!(rules.len(), 2, "one entry per rule");
+}
+
+#[test]
+fn perf_advice_single_statement_payload_is_unchanged() {
+    let response = call(
+        "sqlv_perf_advice",
+        json!({ "sql": "UPDATE user SET name = 'x'" }),
+    );
+    let data = &response["data"];
+    assert_eq!(data["score"]["score"], 50);
+    assert_eq!(data["score"]["level"], "medium");
+    assert_eq!(data["findings"][0]["rule_id"], "missing_where");
+    assert!(
+        data.get("statements").is_none(),
+        "single-statement payload keeps its historical fields"
+    );
+}
+
+#[test]
 fn render_logs_recovers_parameters() {
     let response = call(
         "sqlv_render_logs",

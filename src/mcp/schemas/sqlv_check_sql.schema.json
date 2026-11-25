@@ -1,12 +1,12 @@
 {
   "title": "sqlv_check_sql",
   "type": "object",
-  "description": "Classify a SQL statement, flag unbounded UPDATE/DELETE and destructive DDL, and list performance findings.",
+  "description": "Classify each SQL statement in the text, flag unbounded UPDATE/DELETE and destructive DDL across all of them, and list performance findings.",
   "additionalProperties": false,
   "properties": {
     "sql": {
       "type": "string",
-      "description": "One SQL statement to classify and check.",
+      "description": "SQL text; top-level semicolons separate statements, and each statement is classified and checked on its own.",
       "minLength": 1
     },
     "dialect": {

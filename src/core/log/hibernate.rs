@@ -213,6 +213,7 @@ impl HibernateState {
             affected_rows: None,
             raw_line: (confidence != Confidence::Exact).then(|| self.first_raw_line.clone()),
             message_keys,
+            thread: emitter.current_thread(),
         });
         self.first_line_no = 0;
         self.first_raw_line.clear();

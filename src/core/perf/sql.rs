@@ -323,6 +323,63 @@ fn scan_word(sc: &mut Scanner<'_>) {
     }
 }
 
+/// Split `sql` into its top-level statements.
+///
+/// This reuses [`tokenize`] instead of a second lexer, so a `;` inside a string
+/// literal, a quoted identifier or a comment never separates statements, and a
+/// `;` nested in parentheses (a procedure body) is left alone. Each returned
+/// slice is trimmed, keeps its trailing `;`, and starts at the first token, so
+/// leading comments are dropped; a text with no top-level `;` yields one slice.
+pub(crate) fn split_statements(sql: &str) -> Vec<&str> {
+    let tokens = tokenize(sql);
+    let mut out = Vec::new();
+    let mut depth = 0u32;
+    let mut start: Option<usize> = None;
+    let mut last_end = 0usize;
+    let mut has_content = false;
+
+    for token in &tokens {
+        if token.is_punct(';') && depth == 0 {
+            push_statement(&mut out, sql, start.take(), token.end, has_content);
+            has_content = false;
+            continue;
+        }
+        if start.is_none() {
+            start = Some(token.start);
+        }
+        last_end = token.end;
+        has_content = true;
+        match token.kind {
+            TokenKind::Punct('(') => depth += 1,
+            TokenKind::Punct(')') => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    if let Some(start) = start {
+        push_statement(&mut out, sql, Some(start), last_end, has_content);
+    }
+    out
+}
+
+fn push_statement<'a>(
+    out: &mut Vec<&'a str>,
+    sql: &'a str,
+    start: Option<usize>,
+    end: usize,
+    has_content: bool,
+) {
+    let (Some(start), true) = (start, has_content) else {
+        return;
+    };
+    if end <= start {
+        return;
+    }
+    let text = sql[start..end].trim();
+    if !text.is_empty() {
+        out.push(text);
+    }
+}
+
 /// Statement kinds the rules and generators care about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StmtKind {

@@ -2,22 +2,28 @@
 //! checks.
 //!
 //! This is a text-level classifier built in this lane, not an executed plan:
-//! it knows the first keyword and the presence of a top-level `WHERE`, nothing
-//! about the catalog. It therefore always reports `partial` — never `exact`.
-//! The checks are:
-//! - `unbounded_write`: UPDATE/DELETE without a top-level WHERE;
-//! - `destructive_ddl`: DROP or TRUNCATE (the statement destroys data/objects).
+//! it knows the leading keyword and the presence of a top-level `WHERE`,
+//! nothing about the catalog. It therefore always reports `partial` — never
+//! `exact`.
 //!
-//! Performance findings come from `core::perf::analyze`, so rule ids and
-//! message keys match the rest of the plugin.
+//! `;`-separated statements are checked one by one (`core::perf::check`), so a
+//! later statement's `WHERE` can no longer hide an earlier unbounded write.
+//! The checks are:
+//! - `unbounded_write`: any UPDATE/DELETE without a top-level WHERE;
+//! - `destructive_ddl`: any DROP or TRUNCATE (the statement destroys data or
+//!   objects).
+//!
+//! The historical payload fields keep their meaning; a multi-statement input
+//! adds `statements` (per-statement summary) and `evidence` (which statements
+//! triggered each verdict). Performance findings come from the same core
+//! module, so rule ids and message keys match the rest of the plugin.
 
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::core::log::{EntryClass, classify_sql};
-use crate::core::perf::analyze;
+use crate::core::log::EntryClass;
 use crate::core::perf::dialect::profile;
-use crate::core::perf::sql::{Analysis, StmtKind};
+use crate::core::perf::{Finding, SqlCheck, check};
 use crate::mcp::contract::{invalid, parse_args, success};
 
 #[derive(Debug, Deserialize)]
@@ -44,49 +50,105 @@ pub fn run(arguments: &str) -> String {
         return invalid(format!("unsupported dialect: {}", args.dialect));
     }
 
-    let analysis = Analysis::parse(&args.sql);
-    let class = class_name(classify_sql(&args.sql));
-    let keyword = analysis.word_at(0).unwrap_or("").to_string();
-    let statement = match analysis.stmt {
-        StmtKind::Update => "UPDATE",
-        StmtKind::Delete => "DELETE",
-        _ => keyword.as_str(),
-    };
-    let unbounded_write = matches!(analysis.stmt, StmtKind::Update | StmtKind::Delete)
-        && analysis.find_top("WHERE").is_none();
-    let destructive = matches!(keyword.as_str(), "DROP" | "TRUNCATE");
+    let report = check(&args.sql, &args.dialect);
+    let checks = check_entries(&report);
+    let findings = findings_payload(&report);
+    success(
+        "partial",
+        json!({
+            "class": class_name(report.class),
+            "keyword": report.keyword,
+            "dialect": args.dialect,
+            "unbounded_write": report.unbounded_write,
+            "destructive": report.destructive,
+            "checks": checks,
+            "findings": findings,
+            "statements": report
+                .statements
+                .iter()
+                .map(|statement| json!({
+                    "index": statement.index,
+                    "class": class_name(statement.class),
+                    "keyword": statement.keyword,
+                    "findings": statement.findings.len(),
+                    "unbounded_write": report.unbounded_statements.contains(&statement.index),
+                    "destructive": report.destructive_statements.contains(&statement.index),
+                }))
+                .collect::<Vec<_>>(),
+            "evidence": {
+                "unbounded_write": report.unbounded_statements,
+                "destructive": report.destructive_statements,
+            },
+        }),
+    )
+}
 
+/// `checks` entries, one per offending statement. The historical `detail`
+/// shape (`{"statement": …}` / `{"keyword": …}`) is kept for a single
+/// statement; multi-statement input adds the `index`.
+fn check_entries(report: &SqlCheck) -> Vec<Value> {
+    let multi = report.is_multi_statement();
     let mut checks: Vec<Value> = Vec::new();
-    if unbounded_write {
+    for index in &report.unbounded_statements {
+        let statement = statement_keyword(report, *index);
         checks.push(json!({
             "rule_id": "unbounded_write",
             "message_key": "check.unbounded_write",
             "severity": "error",
-            "detail": { "statement": statement },
+            "detail": if multi {
+                json!({ "statement": statement, "index": index })
+            } else {
+                json!({ "statement": statement })
+            },
         }));
     }
-    if destructive {
+    for index in &report.destructive_statements {
+        let keyword = statement_keyword(report, *index);
         checks.push(json!({
             "rule_id": "destructive_ddl",
             "message_key": "check.destructive_ddl",
             "severity": "error",
-            "detail": { "keyword": keyword },
+            "detail": if multi {
+                json!({ "keyword": keyword, "index": index })
+            } else {
+                json!({ "keyword": keyword })
+            },
         }));
     }
+    checks
+}
 
-    let findings = analyze(&args.sql, &args.dialect);
-    success(
-        "partial",
-        json!({
-            "class": class,
-            "keyword": keyword,
-            "dialect": args.dialect,
-            "unbounded_write": unbounded_write,
-            "destructive": destructive,
-            "checks": checks,
-            "findings": findings,
-        }),
-    )
+/// Findings for the payload: a single statement keeps every hit in rule order
+/// (historical payload); several statements collapse to one entry per
+/// `rule_id` so a rule that fires in each statement is not repeated.
+fn findings_payload(report: &SqlCheck) -> Vec<Finding> {
+    if !report.is_multi_statement() {
+        return report
+            .statements
+            .first()
+            .map_or_else(Vec::new, |statement| statement.findings.clone());
+    }
+    let mut seen: Vec<&str> = Vec::new();
+    let mut out: Vec<Finding> = Vec::new();
+    for finding in report
+        .statements
+        .iter()
+        .flat_map(|statement| statement.findings.iter())
+    {
+        if seen.contains(&finding.rule_id.as_str()) {
+            continue;
+        }
+        seen.push(&finding.rule_id);
+        out.push(finding.clone());
+    }
+    out
+}
+
+fn statement_keyword(report: &SqlCheck, index: usize) -> &str {
+    report
+        .statements
+        .get(index.saturating_sub(1))
+        .map_or("", |statement| statement.keyword.as_str())
 }
 
 fn class_name(class: EntryClass) -> &'static str {

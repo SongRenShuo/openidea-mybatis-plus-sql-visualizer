@@ -46,14 +46,14 @@ pub const TOOLS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "sqlv_check_sql",
-        description: "Classify a SQL statement, flag unbounded UPDATE/DELETE and destructive DDL, and list performance findings.",
+        description: "Classify each SQL statement in the text, flag unbounded UPDATE/DELETE and destructive DDL across all of them, and list performance findings.",
         schema_path: "src/mcp/schemas/sqlv_check_sql.schema.json",
         read_only: true,
         destructive: false,
     },
     ToolSpec {
         name: "sqlv_perf_advice",
-        description: "Run performance rules, a 0-100 complexity score and index advice on one SQL statement.",
+        description: "Run performance rules, a 0-100 complexity score and index advice on each SQL statement of the text.",
         schema_path: "src/mcp/schemas/sqlv_perf_advice.schema.json",
         read_only: true,
         destructive: false,
