@@ -381,6 +381,22 @@ public interface UserMapper {
     }
 
     #[test]
+    fn result_map_extends_becomes_an_alias() {
+        let xml = r#"<mapper namespace="n"><resultMap id="Base" type="a.A"/><resultMap id="Child" extends="Base"/></mapper>"#;
+        let edges = build_edges(&Facts::Xml(index_xml("m.xml", xml)));
+        assert!(
+            edges
+                .aliases
+                .iter()
+                .any(|a| a.prefix == "rm:n.Child#" && a.target == "rm:n.Base#")
+        );
+        assert!(
+            edges.references.iter().any(|a| a.key == "rm:n.Base"),
+            "the extends value is a reference"
+        );
+    }
+
+    #[test]
     fn a_java_only_mapper_still_has_java_keys() {
         let mut graph = MapperGraph::new();
         graph.add_java(index_java("UserMapper.java", JAVA));
