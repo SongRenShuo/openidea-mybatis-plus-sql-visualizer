@@ -109,11 +109,11 @@ README，提交一次（chore: 注册汇总）。此提交后全量门禁 + 一�
 
 | 车道 | 分支 | 拥有目录 | 任务（TASKS.md） | 依赖 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| L1 | `feat/xml-engine` | `src/core/xml/**` | T1-1~T1-5 | 无 | OGNL/iBatis 与 XML 同车道，避免接口碎片 |
+| L1 | `feat/xml-engine` | `src/core/xml/**`、`src/core/annotation.rs`、`src/core/ibatis/**` | T1-1~T1-5 | 无 | OGNL/iBatis 与 XML 同车道，避免接口碎片；`annotation.rs`/`ibatis/` 按 TASKS 交付路径归 L1 |
 | L2 | `feat/dialect-params` | `src/core/dialect/**`、`src/core/params.rs`、`src/core/format.rs` | T1-6~T1-8 | 无 | 方言表以主仓 `Dialect.kt` 为基准 |
 | L3 | `feat/rules-gen` | `src/core/perf/**`、`src/core/gen/**` | T1-9、T1-10 | 无 | 返回 messageKey，不返回文案 |
 | L4 | `feat/log-parse` | `src/core/log/**` | T1-11 | 无 | 四族解析 + 去重/N+1 |
-| L5 | `feat/ui` | `src/views/**`、`web/**`、`src/settings.rs`、`icons/**` | T2-1~T2-5 | L1、L4 | locales 由主控合入 |
+| L5 | `feat/ui` | `src/views/**`、`web/**`、`src/settings.rs`、`src/i18n.rs`、`icons/**` | T2-1~T2-5 | L1、L4 | locales 由主控合入；`src/i18n.rs` 按 T2-4 归 L5 |
 | L6 | `feat/nav` | `src/indexer/**`、`src/providers/**` | T3-1~T3-5 | 无 | 导航默认关；injections 与宿主 #3641 共存 |
 | L7 | `feat/capture` | `src/capture/**` + 主仓 `sub-projects/sql-visualizer-agent/**` | T4-1~T4-5 | 无 | 唯一允许改主仓的车道之一；gradle 需登记 |
 | L8 | `feat/sidecar` | `src/sidecar/**`、`src/analyze/**`、`src/execute/**` + 主仓 `sub-projects/engine-jar/**` | T5-1~T5-7 | L1、L2 | 唯一允许改主仓的另一条；与 L7 错开 gradle 时间 |
@@ -171,3 +171,13 @@ name = "version"    # 许可：Apache-2.0；理由：一句
 | 车道「顺手」改共享文件 | 报告要求 `git status --short` 只含自己目录 |
 | 合并后测试红但各车道单独绿 | 多半是注册冲突或常量重复；先在 master 复跑定位，再回车道修 |
 | 忘删 worktree 导致磁盘涨 | 合并即 remove；`target/` 不共享硬链 |
+
+## 7 已铺好的基线（2026-11-25）
+
+主控已在 master 落好车道骨架，子代理**不需要也不许**改 `src/lib.rs` / `src/core/mod.rs` 的声明：
+
+- `src/core/mod.rs` 声明 `annotation / dialect / format / gen / ibatis / log / params / perf / xml`；
+- `src/lib.rs` 声明 `analyze / capture / core / execute / i18n / indexer / mcp / providers / settings / sidecar / views`；
+- 每个目录已有 `mod.rs` 占位（只有模块文档注释），车道直接在目录内新增文件、在目录的 `mod.rs` 里
+  `pub mod …;` 即可；
+- 可选接口导出（`register_plugin!(Main, views, …)`）由主控在 `chore: 注册汇总` 时统一加。

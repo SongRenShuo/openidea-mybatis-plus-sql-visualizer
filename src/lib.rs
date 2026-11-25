@@ -8,6 +8,22 @@
 
 mod commands;
 
+// Module tree is declared once here so implementation lanes never touch this
+// file: each lane owns one directory and fills the placeholders in place.
+// Optional exports (`views`, `providers`, `indexing`, `mcp`, …) are added to
+// `register_plugin!` by the controller once a lane's registration is merged.
+pub mod analyze;
+pub mod capture;
+pub mod core;
+pub mod execute;
+pub mod i18n;
+pub mod indexer;
+pub mod mcp;
+pub mod providers;
+pub mod settings;
+pub mod sidecar;
+pub mod views;
+
 use openidea_plugin::{Error, Invocation, Plugin, register_plugin};
 
 /// Plugin state. Every command is stateless for now, so nothing is stored yet;
