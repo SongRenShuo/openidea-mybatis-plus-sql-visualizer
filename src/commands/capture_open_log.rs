@@ -49,6 +49,9 @@ fn open_log(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     log_panel::set_log_text(&text);
     host::reveal_view(log_panel::VIEW_ID)
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
+    // set_log_text only marks the buffer dirty; when the panel is already open
+    // the host does not re-render on reveal alone, so ask for one refresh.
+    host::refresh_view(log_panel::VIEW_ID);
 
     let page = bridge::panel_page_size();
     let mut out = String::new();
@@ -102,6 +105,12 @@ Parameters: 2(Long)
         assert!(text.contains("unparsed: 0"), "{text}");
         assert!(!text.contains(bridge::KEY_OPEN_LOG_LIMITED), "{text}");
         assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
+        assert!(
+            host.refreshed_views()
+                .iter()
+                .any(|view| view == log_panel::VIEW_ID),
+            "an already-open panel must be refreshed, not only revealed"
+        );
     }
 
     #[test]

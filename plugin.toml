@@ -100,6 +100,12 @@ path = "agent/mps-sql-agent.jar"
 args = "port=17890,stackFrames=24"
 vmOptions = ["-Dmpsv.capture.transport=ws"]
 
+# Project view context menu: the first selected path becomes the command
+# argument, so a log file opens without typing a path.
+[[contributes.menus]]
+menu = "projectView.context"
+command = "capture-open-log"
+
 # Panels (L5). `sqlv-logs` is drawn by code; `sqlv-workbench` is the package page.
 [[contributes.views]]
 id = "sqlv-logs"
