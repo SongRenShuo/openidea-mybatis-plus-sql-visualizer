@@ -1,5 +1,7 @@
 # MyBatis SQL Visualizer (OpenIDEA)
 
+[![gate](https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/actions/workflows/build.yml/badge.svg)](https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/actions/workflows/build.yml)
+
 Turns MyBatis mapper XML, annotation SQL, Wrapper chains and MyBatis/Hibernate
 log output into the SQL a database would actually receive, then checks it:
 dialect errors, unsafe writes, and the twenty-one performance rules.
