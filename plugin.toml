@@ -17,8 +17,75 @@ activation = ["on-command:*"]
 #   source files, which is the whole point of the plugin. It cannot write anything.
 [capabilities]
 required = ["project.read"]
+# clipboard: the log panel and the workbench copy/export SQL. Refusing it only
+# disables those two buttons; rendering, navigation and checks keep working.
+optional = ["clipboard"]
 
 [[contributes.commands]]
 id = "render-xml"
 title = "MyBatis SQL: Render XML Snippet"
 category = "MyBatis SQL Visualizer"
+
+# Panels (L5). `sqlv-logs` is drawn by code; `sqlv-workbench` is the package page.
+[[contributes.views]]
+id = "sqlv-logs"
+title = "SQL Logs"
+icon = "icons/marker-statement.svg"
+location = "bottom"
+
+[[contributes.views]]
+id = "sqlv-workbench"
+title = "SQL Workbench"
+icon = "icons/mapper-xml.svg"
+location = "right"
+web = "web/workbench.html"
+
+# Settings page (L5 schema, 40 fields in five groups).
+[contributes.settings]
+schema = "settings.schema.json"
+
+# Gutter markers and the mapper XML file icon (L5).
+[[contributes.markerIcons]]
+id = "mapper"
+icon = "icons/marker-mapper.svg"
+iconDark = "icons/marker-mapper-dark.svg"
+
+[[contributes.markerIcons]]
+id = "statement"
+icon = "icons/marker-statement.svg"
+iconDark = "icons/marker-statement-dark.svg"
+
+[[contributes.markerIcons]]
+id = "resultmap"
+icon = "icons/marker-resultmap.svg"
+iconDark = "icons/marker-resultmap-dark.svg"
+
+[[contributes.fileIcons]]
+id = "mapper-xml"
+patterns = ["*Mapper.xml", "*mapper.xml"]
+icon = "icons/mapper-xml.svg"
+iconDark = "icons/mapper-xml-dark.svg"
+
+# Background Mapper↔XML graph (L6): cross-file definitions and references.
+[[contributes.documentIndexers]]
+extensions = ["xml", "java"]
+
+# Name-level navigation and gutter markers; off by default (`nav.enabled`).
+[[contributes.providers]]
+kinds = ["definition", "line-markers"]
+languages = ["xml", "java"]
+
+# SQL highlighting inside mapper XML; off by default (`injections.enabled`).
+[[contributes.providers]]
+kinds = ["injections"]
+languages = ["xml"]
+
+# INSERT target columns, only when a column source is supplied.
+[[contributes.providers]]
+kinds = ["inlay-hints"]
+languages = ["xml", "java"]
+
+# Unknown columns and dialect quote mismatches; never guesses without a schema.
+[[contributes.providers]]
+kinds = ["diagnostics"]
+languages = ["xml", "java"]

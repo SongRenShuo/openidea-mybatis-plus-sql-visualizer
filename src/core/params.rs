@@ -111,10 +111,10 @@ pub fn bind(sql: &str, params: &[Value], dialect: &Dialect) -> BoundSql {
     // Map `:name` → value (only objects carrying a `"name"` string).
     let mut named: HashMap<&str, &Value> = HashMap::new();
     for p in params {
-        if let Value::Object(map) = p {
-            if let Some(Value::String(n)) = map.get("name") {
-                named.insert(n.as_str(), p);
-            }
+        if let Value::Object(map) = p
+            && let Some(Value::String(n)) = map.get("name")
+        {
+            named.insert(n.as_str(), p);
         }
     }
 
@@ -267,10 +267,10 @@ fn render_literal(v: &Value, ctx: &mut Ctx) -> (SqlLiteral, String) {
             };
         }
         // Named wrapper `{"name": …, "value": …}` → bind its value.
-        if map.contains_key("name") {
-            if let Some(raw) = map.get("value") {
-                return render_literal(raw, ctx);
-            }
+        if map.contains_key("name")
+            && let Some(raw) = map.get("value")
+        {
+            return render_literal(raw, ctx);
         }
         // Unrecognised object.
         ctx.degrade("params.unknown_type");

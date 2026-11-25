@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SQL Workbench</title>
+  <style>
+    body {
+      font: var(--openidea-font-size, 13px)/1.5 var(--openidea-font-ui, sans-serif);
+      color: var(--openidea-fg);
+      margin: 0;
+      padding: 8px;
+    }
+    .bar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    select, button {
+      background: var(--openidea-bg-input);
+      color: var(--openidea-fg);
+      border: 1px solid var(--openidea-border);
+      border-radius: 3px;
+      padding: 2px 6px;
+    }
+    button { cursor: pointer; }
+    label { font-weight: 600; display: block; margin: 8px 0 4px; }
+    pre {
+      margin: 0;
+      padding: 8px;
+      border: 1px solid var(--openidea-border);
+      border-radius: 4px;
+      background: var(--openidea-bg-elevated);
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--openidea-font-mono, monospace);
+    }
+    .badge {
+      padding: 0 6px;
+      border-radius: 3px;
+      background: var(--openidea-bg-selected);
+      font-size: 11px;
+    }
+    .muted { color: var(--openidea-fg-muted); }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <label id="dialect-label" for="dialect">Dialect</label>
+    <select id="dialect"></select>
+    <button id="copy" type="button">Copy</button>
+    <button id="export" type="button">Export</button>
+    <span id="confidence" class="badge" hidden></span>
+  </div>
+
+  <label id="sql-label">SQL</label>
+  <pre id="sql"></pre>
+
+  <label id="params-label">Parameters</label>
+  <pre id="params" class="muted"></pre>
+
+  <p id="empty" class="muted">Nothing to preview yet.</p>
+
+  <script>
+    (function () {
+      function post(message) {
+        if (window.openidea && window.openidea.postMessage) {
+          window.openidea.postMessage(JSON.stringify(message));
+        }
+      }
+
+      var select = document.getElementById('dialect');
+      var copy = document.getElementById('copy');
+      var exportButton = document.getElementById('export');
+      var sqlNode = document.getElementById('sql');
+      var paramsNode = document.getElementById('params');
+      var emptyNode = document.getElementById('empty');
+      var confidence = document.getElementById('confidence');
+      var labels = {
+        dialect: document.getElementById('dialect-label'),
+        sql: document.getElementById('sql-label'),
+        params: document.getElementById('params-label')
+      };
+
+      function setText(node, text) {
+        if (node) {
+          node.textContent = text;
+        }
+      }
+
+      function fillDialects(model) {
+        if (!select) {
+          return;
+        }
+        select.innerHTML = '';
+        var names = model.dialects || [];
+        for (var i = 0; i < names.length; i++) {
+          var option = document.createElement('option');
+          option.value = names[i];
+          option.textContent = names[i];
+          select.appendChild(option);
+        }
+        select.value = model.dialect || '';
+      }
+
+      function apply(payload) {
+        if (!payload) {
+          return;
+        }
+        var model = payload.model || {};
+        var texts = payload.labels || {};
+        setText(labels.dialect, texts.dialect);
+        setText(labels.sql, texts.sql);
+        setText(labels.params, texts.params);
+        setText(copy, texts.copy);
+        setText(exportButton, texts.export);
+        setText(emptyNode, texts.empty);
+        fillDialects(model);
+        setText(sqlNode, model.sql || '');
+        setText(paramsNode, (model.params || []).join(', '));
+        var hasSql = !!model.sql && model.sql.trim().length > 0;
+        if (sqlNode) { sqlNode.hidden = !hasSql; }
+        if (paramsNode) { paramsNode.hidden = !hasSql; }
+        if (emptyNode) { emptyNode.hidden = hasSql; }
+        if (confidence) {
+          var label = texts.confidence || '';
+          confidence.textContent = label;
+          confidence.hidden = !label;
+        }
+      }
+
+      if (copy) {
+        copy.addEventListener('click', function () { post({ op: 'copy' }); });
+      }
+      if (exportButton) {
+        exportButton.addEventListener('click', function () { post({ op: 'export' }); });
+      }
+      if (select) {
+        select.addEventListener('change', function () {
+          post({ op: 'dialect', value: select.value });
+        });
+      }
+      if (window.openidea && window.openidea.onMessage) {
+        window.openidea.onMessage(function (raw) {
+          try {
+            var message = JSON.parse(raw);
+            if (message.op === 'load') {
+              apply(message);
+            }
+          } catch (error) {
+            return;
+          }
+        });
+      }
+      post({ op: 'ready' });
+    })();
+  </script>
+</body>
+</html>

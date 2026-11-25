@@ -45,7 +45,15 @@ impl Plugin for Main {
     }
 }
 
-register_plugin!(Main);
+register_plugin!(
+    Main,
+    views,
+    indexing,
+    providers,
+    injections,
+    inlay_hints,
+    diagnostics
+);
 
 #[cfg(test)]
 mod tests {
