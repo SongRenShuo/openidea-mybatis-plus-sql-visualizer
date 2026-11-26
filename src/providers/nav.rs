@@ -1,4 +1,6 @@
-//! `definition` and `line_markers` for mapper XML and Java (T3-2).
+//! `definition` for mapper XML and Java (T3-2); the gutter markers are the
+//! document indexer's (`indexer::build_edges` → `Edges.markers`, drawn by the
+//! host from its own graph).
 //!
 //! A document answers inside the editing budget, so it never searches the
 //! project. Two kinds of answer are on offer:
@@ -22,18 +24,15 @@
 
 use crate::indexer::scan::{self, Positions};
 use crate::indexer::{index_java, index_xml};
-use openidea_plugin::providers::{Document, LineMarker, Providers};
+use openidea_plugin::providers::{Document, Providers};
 use openidea_plugin::{Location, Position, Range};
 
 pub const SETTING: &str = "nav.enabled";
-/// The gutter markers have their own switch, on by default like IntelliJ.
+/// The gutter markers have their own switch, on by default like IntelliJ. The
+/// host draws them from the document indexer's `Edges.markers`; this switch is
+/// read while indexing (`indexer::DocumentIndexer`), so it takes effect on the
+/// next index of a file.
 pub const MARKERS_SETTING: &str = "nav.showLineMarkers";
-
-/// The IntelliJ edition's marker artwork (black bird for XML, method badge for
-/// Java). `LineMarker::icon` takes a package SVG path; `"navigate"` is a host
-/// alias for the generic arrow, so using it here silently discarded our icon.
-pub const ICON_XML: &str = "icons/toolbar/mapperStatement.svg";
-pub const ICON_JAVA: &str = "icons/toolbar/mapperMethod.svg";
 
 impl Providers for crate::Main {
     fn definition(&mut self, doc: &Document, at: Position) -> Vec<Location> {
@@ -41,13 +40,6 @@ impl Providers for crate::Main {
             return Vec::new();
         }
         definition_in(doc, at)
-    }
-
-    fn line_markers(&mut self, doc: &Document) -> Vec<LineMarker> {
-        if !super::setting_on(SETTING) || !super::setting_on(MARKERS_SETTING) {
-            return Vec::new();
-        }
-        markers_in(doc)
     }
 }
 
@@ -229,101 +221,6 @@ fn contains(range: &Range, at: Position) -> bool {
     range.start <= at && at < range.end
 }
 
-/// Gutter markers for the XML document: statement rows that jump to the
-/// fragment, result map or interface method they use, and fragment/result-map
-/// rows that jump to the first statement using them.
-///
-/// The Java document gets its own set: a mapper method row jumps to the
-/// statement that implements it, when this project has one.
-pub fn markers_in(doc: &Document) -> Vec<LineMarker> {
-    if super::is_xml(&doc.path) {
-        xml_markers(doc)
-    } else if super::is_java(&doc.path) {
-        java_markers(doc)
-    } else {
-        Vec::new()
-    }
-}
-
-fn xml_markers(doc: &Document) -> Vec<LineMarker> {
-    let facts = index_xml(&doc.path, &doc.text);
-    let mut out: Vec<LineMarker> = Vec::new();
-    let mut lines: Vec<u32> = Vec::new();
-    let mut push = |marker: LineMarker| {
-        if !lines.contains(&marker.line) {
-            lines.push(marker.line);
-            out.push(marker);
-        }
-    };
-
-    // Root namespace → the mapper interface (the reference's root marker).
-    if let Some(namespace) = facts.namespace.as_ref() {
-        if let Some(target) = class_targets(&namespace.name).into_iter().next() {
-            push(LineMarker {
-                line: namespace.range.start.line,
-                icon: Some(ICON_XML.to_owned()),
-                tooltip: "MyBatis: go to mapper interface".to_string(),
-                target: Some(target),
-            });
-        }
-    }
-
-    // A statement row pairs with the interface method that runs it. Result
-    // maps and fragments are reached from their attribute (`Ctrl+B`), not from
-    // the statement row: putting them here made the row jump to the wrong
-    // place for every statement that uses one.
-    for statement in &facts.statements {
-        let Some(id) = &statement.id else { continue };
-        if let Some(target) = method_targets(facts.namespace.as_ref(), &id.name)
-            .into_iter()
-            .next()
-        {
-            push(LineMarker {
-                line: id.range.start.line,
-                icon: Some(ICON_XML.to_owned()),
-                tooltip: format!("MyBatis: go to mapper method {}", id.name),
-                target: Some(target),
-            });
-        }
-    }
-    out
-}
-
-fn java_markers(doc: &Document) -> Vec<LineMarker> {
-    let facts = index_java(&doc.path, &doc.text);
-    let Some(fqn) = facts.fqn.as_deref() else {
-        return Vec::new();
-    };
-    let mut out: Vec<LineMarker> = Vec::new();
-    let mut lines: Vec<u32> = Vec::new();
-    for method in &facts.methods {
-        let Some(target) = statement_targets(fqn, &method.name.name).into_iter().next() else {
-            continue;
-        };
-        let line = method.name.range.start.line;
-        if lines.contains(&line) {
-            continue;
-        }
-        lines.push(line);
-        out.push(LineMarker {
-            line,
-            // The IntelliJ edition draws a different marker on the Java side
-            // (`mapperMethod`, brand colour) than on the XML side.
-            icon: Some(ICON_JAVA.to_owned()),
-            tooltip: format!("MyBatis: go to statement {}", method.name.name),
-            target: Some(target),
-        });
-    }
-    out
-}
-
-fn refers_to(reference: &str, local: &str, namespace: &Option<crate::indexer::Named>) -> bool {
-    match (reference.rsplit_once('.'), namespace) {
-        (Some((ns, id)), Some(namespace)) => id == local && ns == namespace.name,
-        _ => reference == local,
-    }
-}
-
 /// UTF-16 range of a byte span, for callers that keep offsets.
 pub fn range_of(text: &str, start: usize, end: usize) -> Range {
     let mut positions = Positions::new(text);
@@ -367,6 +264,8 @@ public interface UserMapper {
 
     #[test]
     fn the_setting_defaults_to_on_and_an_explicit_false_turns_it_off() {
+        // The global indexes are process-wide; other tests clear them.
+        let _guard = crate::views::test_state_lock();
         // Nothing is stored: the schema default (`nav.enabled = true`) answers.
         let _host = MockHost::install();
         index_java();
@@ -377,31 +276,17 @@ public interface UserMapper {
             1,
             "navigation is on by default"
         );
-        assert!(
-            !Providers::line_markers(&mut plugin, &document).is_empty(),
-            "markers are on by default too"
-        );
 
         // An explicit `false` in the settings store wins over the default.
         let host = MockHost::install();
         host.set_setting(SETTING, "false");
         let mut plugin = crate::Main;
         assert!(Providers::definition(&mut plugin, &document, at(XML, "cols\"/>")).is_empty());
-        assert!(Providers::line_markers(&mut plugin, &document).is_empty());
-
-        // The marker switch alone silences the gutter, not Ctrl+B.
-        let host = MockHost::install();
-        host.set_setting(MARKERS_SETTING, "false");
-        let mut plugin = crate::Main;
-        assert_eq!(
-            Providers::definition(&mut plugin, &document, at(XML, "cols\"/>")).len(),
-            1
-        );
-        assert!(Providers::line_markers(&mut plugin, &document).is_empty());
     }
 
     #[test]
     fn definition_resolves_includes_and_result_maps() {
+        let _guard = crate::views::test_state_lock();
         let host = MockHost::install();
         host.set_setting(SETTING, "true");
         let mut plugin = crate::Main;
@@ -430,37 +315,48 @@ public interface UserMapper {
     }
 
     #[test]
-    fn markers_pair_the_statement_and_the_root_with_the_interface() {
+    fn marker_keys_pair_the_statement_and_the_root_with_the_interface() {
+        let _guard = crate::views::test_state_lock();
+        // The gutter markers are the indexer's (`Edges.markers`); the host
+        // resolves their keys against its own graph. The source side says
+        // `java:<namespace>#<id>` for a statement row and `type:<namespace>`
+        // for the root, and `stmt:<namespace>.<id>` from the Java side.
+        let edges = crate::indexer::build_edges(&crate::indexer::Facts::Xml(
+            crate::indexer::index_xml("/p/mapper/UserMapper.xml", XML),
+        ));
+        let keys: Vec<(&str, u32)> = edges
+            .markers
+            .iter()
+            .map(|anchor| (anchor.key.as_str(), anchor.range.start.line))
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                ("type:com.acme.UserMapper", 0),
+                ("java:com.acme.UserMapper#findById", 2),
+            ],
+            "root + statement row"
+        );
+
+        let java = crate::indexer::build_edges(&crate::indexer::Facts::Java(
+            crate::indexer::index_java("/p/mapper/UserMapper.java", JAVA),
+        ));
+        let keys: Vec<(&str, u32)> = java
+            .markers
+            .iter()
+            .map(|anchor| (anchor.key.as_str(), anchor.range.start.line))
+            .collect();
+        assert_eq!(
+            keys,
+            vec![("stmt:com.acme.UserMapper.findById", 2)],
+            "mapper method → XML statement"
+        );
+
+        // Ctrl+B still resolves the result map and the fragment locally.
         let host = MockHost::install();
         host.set_setting(SETTING, "true");
         index_java();
         let mut plugin = crate::Main;
-        let markers = Providers::line_markers(&mut plugin, &doc(XML));
-        assert_eq!(
-            markers.len(),
-            2,
-            "root namespace + statement row: {markers:?}"
-        );
-        let statement = markers
-            .iter()
-            .find(|m| m.line == 2)
-            .expect("statement marker");
-        // The statement row goes to the interface method, not to the result map
-        // it references (that was the wrong-position bug).
-        let target = statement.target.as_ref().unwrap();
-        assert_eq!(target.path, "/p/mapper/UserMapper.java");
-        assert_eq!(target.range.start.line, 2, "findById declaration");
-        assert_eq!(target.range.start.character, 7, "caret on the method name");
-
-        let root = markers
-            .iter()
-            .find(|m| m.line == 0)
-            .expect("root mapper marker");
-        let target = root.target.as_ref().unwrap();
-        assert_eq!(target.path, "/p/mapper/UserMapper.java");
-        assert_eq!(target.range.start.line, 1, "interface declaration");
-
-        // Ctrl+B still resolves the result map and the fragment locally.
         let result_map = Providers::definition(&mut plugin, &doc(XML), at(XML, "BaseMap\">"));
         assert_eq!(result_map.len(), 1);
         assert_eq!(result_map[0].range.start.line, 5);
@@ -497,6 +393,9 @@ public interface UserMapper {
             text: "<project><select id=\"x\"/></project>".into(),
         };
         assert!(Providers::definition(&mut plugin, &document, Position::new(0, 5)).is_empty());
-        assert!(Providers::line_markers(&mut plugin, &document).is_empty());
+        let edges = crate::indexer::build_edges(&crate::indexer::Facts::Xml(
+            crate::indexer::index_xml(&document.path, &document.text),
+        ));
+        assert!(edges.markers.is_empty(), "非 mapper 文档不出标记");
     }
 }

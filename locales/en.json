@@ -278,5 +278,7 @@
   "view.logs.community.title": "Community",
   "view.logs.community.guide": "The community group and the author's contact are listed on the project page.",
   "SQL Visualizer": "SQL Visualizer",
-  "Preview SQL in Diff": "Preview SQL in Diff"
+  "Preview SQL in Diff": "Preview SQL in Diff",
+  "MyBatis: go to mapper interface or method": "MyBatis: go to mapper interface or method",
+  "MyBatis: go to SQL statement": "MyBatis: go to SQL statement"
 }

@@ -9,7 +9,8 @@
 //!
 //! | setting | default | effect |
 //! | --- | --- | --- |
-//! | `nav.enabled` | `true` | `definition` and `line_markers` |
+//! | `nav.enabled` | `true` | `definition` (Ctrl+B) |
+//! | `nav.showLineMarkers` | `true` | gutter markers, read while indexing: the markers are the document indexer's `Edges.markers`, drawn by the host |
 //! | `injections.enabled` | `true` | SQL `Injections` inside mapper XML |
 //! | `sql.dialect` | unset | dialect for quote checks in diagnostics |
 //!

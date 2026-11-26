@@ -65,7 +65,7 @@ MCP 工具同样遵守：禁止把 `partial` 当 `exact` 返回给 agent。
 | --- | --- | --- |
 | `src/commands/` | 命令实现，薄壳，只做参数与编排 | 放解析逻辑 |
 | `src/core/` | 纯逻辑（XML/OGNL/方言/规则/日志） | 引用 `host::` |
-| `src/providers/` | definition / line-markers / completion / inlay / diagnostics / injections | 长耗时同步调用 |
+| `src/providers/` | definition / completion / inlay / diagnostics / injections；gutter 标记由 `src/indexer/` 的 `Edges.markers` 发布，宿主从自己的图里画（不回调插件） | 长耗时同步调用 |
 | `src/indexer/` | documentIndexer 图（Mapper↔XML） | 持久化到 storage 当索引 |
 | `src/views/` | 面板数据装配 | 在视图里做解析 |
 | `src/sidecar/` | jar 生命周期、JSON 协议、降级判定 | 业务规则 |

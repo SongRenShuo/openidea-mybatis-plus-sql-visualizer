@@ -305,19 +305,21 @@ fn xml_edges(facts: &XmlFacts) -> Edges {
     edges
         .definitions
         .push(anchor(mapper_key(ns), namespace.range));
+    // Root namespace gutter marker → the interface declaration. The host draws
+    // markers from its own graph (`navigation_markers` never calls the plugin),
+    // so the gutter stays responsive while a big project is still indexing.
+    edges.markers.push(anchor(type_key(ns), namespace.range));
 
     for statement in &facts.statements {
         let Some(id) = &statement.id else { continue };
         let stmt = statement_key(ns, &id.name);
         edges.definitions.push(anchor(stmt, id.range));
         // A statement id names the interface method that runs it; the method
-        // may live in another module, and the host matches it by key.
-        //
-        // No `markers` entry here: the gutter icons are the `line-markers`
-        // provider's (providers::nav), which answers from the same indexes plus
-        // this file. Both paths would draw one icon for the same row, and the
-        // provider is the one that honours `nav.showLineMarkers`.
+        // may live in another module, and the host matches it by key. The
+        // marker uses the same key, so the gutter icon comes back as soon as
+        // the interface is indexed — and never blocks on a plugin call.
         let as_java = java_key(ns, &id.name);
+        edges.markers.push(anchor(as_java.clone(), id.range));
         edges.references.push(anchor(as_java, id.range));
         if let Some(result_map) = &statement.result_map {
             edges.references.push(anchor(
@@ -402,9 +404,11 @@ fn java_edges(facts: &JavaFacts) -> Edges {
             .definitions
             .push(anchor(java_key(fqn, &name.name), name.range));
         if facts.is_mapper {
-            // Reference only, for the same reason as the XML side: the gutter
-            // icon comes from the `line-markers` provider.
+            // The mapper method's gutter marker goes the other way, to the XML
+            // statement that implements it; the host resolves both keys from
+            // its graph without calling the plugin.
             let stmt = statement_key(fqn, &name.name);
+            edges.markers.push(anchor(stmt.clone(), name.range));
             edges.references.push(anchor(stmt, name.range));
         }
         for result_map in &method.result_maps {
@@ -448,9 +452,16 @@ impl DocumentIndexer for crate::Main {
         // and both indexes cap themselves (files, bytes) and count what they
         // refused instead of growing without bound.
         index_source(&doc.path, &doc.text);
-        facts_for(&doc.path, &doc.text)
+        let mut edges = facts_for(&doc.path, &doc.text)
             .map(|facts| build_edges(&facts))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // `nav.showLineMarkers` off: publish no gutter markers. The setting is
+        // read at index time, so it applies to files indexed after the change
+        // (the settings page already says a reopen is needed).
+        if !crate::providers::setting_on(crate::providers::nav::MARKERS_SETTING) {
+            edges.markers.clear();
+        }
+        edges
     }
 }
 
@@ -483,6 +494,42 @@ public interface UserMapper {
         assert!(refs.contains(&"frag:com.acme.UserMapper.cols"));
         assert!(refs.contains(&"rm:com.acme.UserMapper.BaseMap"));
         assert!(refs.contains(&"java:com.acme.UserMapper#findById"));
+        // Gutter markers: the host resolves these keys from its graph; the
+        // statement row points at the interface method, the root at the type.
+        let markers: Vec<&str> = edges.markers.iter().map(|a| a.key.as_str()).collect();
+        assert_eq!(
+            markers,
+            vec![
+                "type:com.acme.UserMapper",
+                "java:com.acme.UserMapper#findById"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_marker_switch_clears_markers_from_the_published_edges() {
+        let _guard = crate::views::test_state_lock();
+        let host = openidea_plugin::mock::MockHost::install();
+        let document = Document {
+            path: "/p/src/main/resources/mapper/UserMapper.xml".into(),
+            text: XML.into(),
+            symbols: Vec::new(),
+        };
+        let mut plugin = crate::Main;
+        assert!(
+            !crate::indexer::DocumentIndexer::index(&mut plugin, &document)
+                .markers
+                .is_empty(),
+            "on by default"
+        );
+        host.set_setting(crate::providers::nav::MARKERS_SETTING, "false");
+        assert!(
+            crate::indexer::DocumentIndexer::index(&mut plugin, &document)
+                .markers
+                .is_empty(),
+            "nav.showLineMarkers 关闭后不再发布标记"
+        );
+        clear_indexes();
     }
 
     #[test]

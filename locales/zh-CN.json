@@ -278,5 +278,7 @@
   "view.logs.community.title": "交流群",
   "view.logs.community.guide": "交流群与作者联系方式见项目主页。",
   "SQL Visualizer": "SQL Visualizer",
-  "Preview SQL in Diff": "在差异视图中预览 SQL"
+  "Preview SQL in Diff": "在差异视图中预览 SQL",
+  "MyBatis: go to mapper interface or method": "MyBatis：跳转到 Mapper 接口或方法",
+  "MyBatis: go to SQL statement": "MyBatis：跳转到 SQL 语句"
 }

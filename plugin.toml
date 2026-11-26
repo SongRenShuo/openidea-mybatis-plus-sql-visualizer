@@ -240,19 +240,26 @@ schema = "settings/engine.json"
 
 # Gutter markers and the mapper XML file icon (L5), with the IntelliJ edition's
 # own SVGs: the XML side uses `mapperStatement` (black bird with a cyan wing),
-# the Java side `mapperMethod`, and the file icon `mapperXml`. The ids must not
-# be the host's bare icon aliases (`navigate`, `implemented`, …): a provider's
-# `icon` is resolved against those aliases first, and an alias hit silently
-# replaces a plugin icon with the generic arrow.
+# the Java side `mapperMethod`, and the file icon `mapperXml`. The `markers`
+# prefixes brand the host-resolved gutter markers: a statement row's marker key
+# is `java:<namespace>#<id>` and the root namespace's `type:<namespace>`, while
+# a mapper method's is `stmt:<namespace>.<id>`. The ids must not be the host's
+# bare icon aliases (`navigate`, `implemented`, …): a provider's `icon` is
+# resolved against those aliases first, and an alias hit silently replaces a
+# plugin icon with the generic arrow.
 [[contributes.markerIcons]]
 id = "sqlv-nav-xml"
 icon = "icons/toolbar/mapperStatement.svg"
 iconDark = "icons/toolbar/mapperStatement.svg"
+markers = ["java:", "type:"]
+tooltip = "MyBatis: go to mapper interface or method"
 
 [[contributes.markerIcons]]
 id = "sqlv-nav-java"
 icon = "icons/toolbar/mapperMethod.svg"
 iconDark = "icons/toolbar/mapperMethod.svg"
+markers = ["stmt:"]
+tooltip = "MyBatis: go to SQL statement"
 
 # The gutter preview button's icon (L35a): declared here so the package ships and
 # validates it; the button itself is a `gutter-actions` entry.
@@ -271,10 +278,13 @@ iconDark = "icons/mapper-xml-dark.svg"
 [[contributes.documentIndexers]]
 extensions = ["xml", "java"]
 
-# Name-level navigation and gutter markers; on by default (`nav.enabled`), and
-# the markers can be turned off on their own (`nav.showLineMarkers`).
+# Name-level navigation. The gutter markers are published through the document
+# indexer (`Edges.markers`), which the host draws from its own graph — a gutter
+# request never waits on a plugin call, so a big project that is still indexing
+# cannot time the plugin out. On by default (`nav.enabled`), and the markers can
+# be turned off on their own (`nav.showLineMarkers`).
 [[contributes.providers]]
-kinds = ["definition", "line-markers"]
+kinds = ["definition"]
 languages = ["xml", "java"]
 
 # The preview button beside each mapper statement (L35a); its click runs

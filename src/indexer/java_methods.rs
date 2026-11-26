@@ -78,16 +78,29 @@ pub struct JavaIndexBudget {
 
 impl Default for JavaIndexBudget {
     fn default() -> Self {
-        // Measured on a 21-module, 17k-file demo project: the whole Java side
-        // indexed in ~1.5 s over ~50 MiB of text (`sqlv_index_stats`), so the
-        // caps cover a repository of that size instead of cutting it at 4k
-        // files — a skipped file simply has no jump target.
+        // Measured on the 21-module, 19.6k-file demo project (73.6 MiB of Java
+        // text): the index keeps method/class positions, not the text, so the
+        // byte cap bounds the work rather than the heap. A mapper interface
+        // bypasses the total cap (`add_file`): it is the XML namespace's jump
+        // target, and a generated-source-heavy module would otherwise exhaust
+        // the budget before any real mapper is reached.
         Self {
             max_files: 20000,
             max_file_bytes: 2 * 1024 * 1024,
-            max_total_bytes: 64 * 1024 * 1024,
+            max_total_bytes: 256 * 1024 * 1024,
         }
     }
+}
+
+/// A file whose name promises a mapper interface (`RoleMapper.java`,
+/// `UserDao.java`): the XML namespace's jump target, kept past the total-byte
+/// cap so navigation survives a repository dominated by generated code.
+fn mapper_named(path: &str) -> bool {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let Some(stem) = name.strip_suffix(".java") else {
+        return false;
+    };
+    stem.ends_with("Mapper") || stem.ends_with("Dao")
 }
 
 /// One method declaration, as the text states it.
@@ -217,9 +230,10 @@ impl JavaMethodIndex {
         }
         let known = self.files.contains_key(path);
         let too_many_files = !known && self.files.len() >= self.budget.max_files;
+        let over_total = self.bytes.saturating_add(text.len()) > self.budget.max_total_bytes;
         if text.len() > self.budget.max_file_bytes
             || too_many_files
-            || self.bytes.saturating_add(text.len()) > self.budget.max_total_bytes
+            || (over_total && !mapper_named(path))
         {
             self.skipped += 1;
             return 0;
@@ -509,6 +523,11 @@ fn scan_file(
     let mut scan = FileScan {
         path,
         text,
+        line_starts: {
+            let mut starts = vec![0];
+            starts.extend(text.match_indices('\n').map(|(at, _)| at + 1));
+            starts
+        },
         package: package_of(text),
         methods: Vec::new(),
         declared: Vec::new(),
@@ -529,6 +548,11 @@ fn scan_file(
 struct FileScan<'a> {
     path: &'a str,
     text: &'a str,
+    /// Byte offset of every line start: computing a position costs a binary
+    /// search and the line's own length, not a scan of the whole file. A large
+    /// generated file has thousands of declarations, and a per-declaration scan
+    /// put an index call over the provider budget.
+    line_starts: Vec<usize>,
     package: Option<String>,
     methods: Vec<JavaMethodLocation>,
     /// `(simple, fqn)` of every declared type, method-less ones included.
@@ -538,6 +562,19 @@ struct FileScan<'a> {
 }
 
 impl FileScan<'_> {
+    /// UTF-16 `(line, character)` of a byte offset, the same convention as
+    /// `Position`.
+    fn position(&self, offset: usize) -> (u32, u32) {
+        let at = offset.min(self.text.len());
+        let line = self.line_starts.partition_point(|&start| start <= at) - 1;
+        let start = self.line_starts[line];
+        let character = self.text[start..at]
+            .chars()
+            .map(|c| c.len_utf16() as u32)
+            .sum();
+        (line as u32, character)
+    }
+
     /// Walks a region that may contain type declarations, recursing into every
     /// type body it finds.
     fn scan_types(&mut self, start: usize, end: usize, prefix: Option<&str>) {
@@ -564,12 +601,13 @@ impl FileScan<'_> {
             };
             if !self.declared.iter().any(|(_, known)| known == &fqn) {
                 self.declared.push((simple.to_owned(), fqn.clone()));
+                let (line, character) = self.position(name_start);
                 self.class_locations.push(JavaClassLocation {
                     file: self.path.to_owned(),
                     fqn: fqn.clone(),
                     class_simple: simple.to_owned(),
-                    line: position_of(text, name_start).0,
-                    character: position_of(text, name_start).1,
+                    line,
+                    character,
                 });
             }
             self.scan_members(open + 1, close, &fqn, simple, kind);
@@ -611,13 +649,14 @@ impl FileScan<'_> {
                 // A constructor is not a statement method.
                 continue;
             }
+            let (line, character) = self.position(member_start + decl.name.0);
             self.methods.push(JavaMethodLocation {
                 file: self.path.to_owned(),
                 fqn: fqn.to_owned(),
                 class_simple: simple.to_owned(),
                 method: name.to_owned(),
-                line: line_of(text, member_start + decl.name.0),
-                character: position_of(text, member_start + decl.name.0).1,
+                line,
+                character,
                 arity: decl.arity,
             });
         }
@@ -1079,20 +1118,6 @@ fn matching(bytes: &[u8], open: usize) -> Option<usize> {
     None
 }
 
-/// 0-based line of `offset`.
-fn line_of(text: &str, offset: usize) -> u32 {
-    text.as_bytes()[..offset.min(text.len())]
-        .iter()
-        .filter(|&&b| b == b'\n')
-        .count() as u32
-}
-
-/// UTF-16 `(line, character)` of `offset` — the same convention as `Position`.
-fn position_of(text: &str, offset: usize) -> (u32, u32) {
-    let position = openidea_plugin::text::position(text, offset.min(text.len()));
-    (position.line, position.character)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1392,6 +1417,42 @@ public interface GoldenDbDeviceMapper extends BaseMapper<GoldenDbDevice> {
             0
         );
         assert_eq!(index.file_count(), 1);
+    }
+
+    #[test]
+    fn a_mapper_interface_is_indexed_past_the_total_byte_budget() {
+        // A generated module (76 MiB in the demo project) can exhaust the total
+        // byte budget long before a real mapper is reached; the mapper must
+        // still be indexed or its XML loses every gutter marker.
+        let mut index = JavaMethodIndex::with_budget(JavaIndexBudget {
+            max_total_bytes: 32,
+            ..JavaIndexBudget::default()
+        });
+        assert_eq!(
+            index.add_file(
+                "generated/src/com/demo/Generated.java",
+                "package com.demo; class Generated { void build() {} }",
+            ),
+            0,
+            "普通文件超总预算后跳过"
+        );
+        assert!(
+            index.add_file(
+                "app/src/com/acme/RoleMapper.java",
+                "package com.acme; interface RoleMapper { int insertBatch(); }",
+            ) > 0,
+            "mapper 接口不受总预算限制"
+        );
+        assert_eq!(
+            index.class_location("com.acme.RoleMapper").len(),
+            1,
+            "根节点标记需要的是类声明位置"
+        );
+        assert!(
+            index.class_location("com.demo.Generated").is_empty(),
+            "被跳过的文件仍没有跳转目标"
+        );
+        assert_eq!(index.skipped_files(), 1);
     }
 
     #[test]
