@@ -185,6 +185,20 @@ menu = "projectView.context"
 command = "open-workbench"
 submenu = "SQL Visualizer"
 
+# Editor context menu: the preview entries belong here rather than only in Find
+# Action. A command run from Find Action sees no focused editor, so with no
+# argument it reports `preview.error.no_input`; from this menu the current file
+# is passed as the argument, and the editor keeps its selection otherwise.
+[[contributes.menus]]
+menu = "editor.context"
+command = "preview-sql"
+submenu = "SQL Visualizer"
+
+[[contributes.menus]]
+menu = "editor.context"
+command = "preview-sql-diff"
+submenu = "SQL Visualizer"
+
 # The single plugin tool window: SQL Logs on the right rail, as the IntelliJ
 # plugin's SQL Logs tool window. Its five tabs carry the workbench too
 # (SQL logs / log to SQL / SQL to Java / history / SQL preview).
