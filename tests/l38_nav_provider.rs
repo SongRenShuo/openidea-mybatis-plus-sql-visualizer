@@ -180,10 +180,11 @@ fn providers_gutter_markers_are_published_as_index_keys() {
     assert_eq!(
         keys,
         vec![
+            ("mapper:com.acme.mapper.UserMapper", 1),
             ("stmt:com.acme.mapper.UserMapper.findById", 2),
             ("stmt:com.acme.mapper.UserMapper.touch", 3),
         ],
-        "both interface methods point back at their statements"
+        "interface declaration, then both methods"
     );
 }
 

@@ -348,8 +348,11 @@ public interface UserMapper {
             .collect();
         assert_eq!(
             keys,
-            vec![("stmt:com.acme.UserMapper.findById", 2)],
-            "mapper method → XML statement"
+            vec![
+                ("mapper:com.acme.UserMapper", 1),
+                ("stmt:com.acme.UserMapper.findById", 2),
+            ],
+            "interface declaration → XML root, then every method → its statement"
         );
 
         // Ctrl+B still resolves the result map and the fragment locally.

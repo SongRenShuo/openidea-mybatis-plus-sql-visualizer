@@ -386,11 +386,20 @@ fn java_edges(facts: &JavaFacts) -> Edges {
     edges
         .definitions
         .push(anchor(type_key(fqn), type_name.range));
-    if facts.is_mapper {
-        edges
-            .definitions
-            .push(anchor(mapper_key(fqn), type_name.range));
+    // Only a mapper interface carries cross-file navigation. Every other Java
+    // file would add one definition per method for a Java↔Java jump the
+    // language server already answers, and a large repository then blows the
+    // host's 200,000-anchor graph budget ("navigation association limit
+    // reached"), which drops the whole plugin graph.
+    if !facts.is_mapper {
+        return edges;
     }
+    edges
+        .definitions
+        .push(anchor(mapper_key(fqn), type_name.range));
+    // The interface declaration pairs with the XML's root `<mapper namespace>`,
+    // so the class row carries the same jump the XML's root marker has.
+    edges.markers.push(anchor(mapper_key(fqn), type_name.range));
     for supertype in &facts.supertypes {
         // Methods declared on a base mapper are visible through this interface.
         edges.aliases.push(openidea_plugin::indexing::Alias {
@@ -403,14 +412,12 @@ fn java_edges(facts: &JavaFacts) -> Edges {
         edges
             .definitions
             .push(anchor(java_key(fqn, &name.name), name.range));
-        if facts.is_mapper {
-            // The mapper method's gutter marker goes the other way, to the XML
-            // statement that implements it; the host resolves both keys from
-            // its graph without calling the plugin.
-            let stmt = statement_key(fqn, &name.name);
-            edges.markers.push(anchor(stmt.clone(), name.range));
-            edges.references.push(anchor(stmt, name.range));
-        }
+        // The mapper method's gutter marker goes the other way, to the XML
+        // statement that implements it; the host resolves both keys from its
+        // graph without calling the plugin.
+        let stmt = statement_key(fqn, &name.name);
+        edges.markers.push(anchor(stmt.clone(), name.range));
+        edges.references.push(anchor(stmt, name.range));
         for result_map in &method.result_maps {
             edges.references.push(anchor(
                 result_map_key(fqn, &result_map.name),

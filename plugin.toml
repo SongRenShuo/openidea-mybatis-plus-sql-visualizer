@@ -258,7 +258,7 @@ tooltip = "MyBatis: go to mapper interface or method"
 id = "sqlv-nav-java"
 icon = "icons/toolbar/mapperMethod.svg"
 iconDark = "icons/toolbar/mapperMethod.svg"
-markers = ["stmt:"]
+markers = ["stmt:", "mapper:"]
 tooltip = "MyBatis: go to SQL statement"
 
 # The gutter preview button's icon (L35a): declared here so the package ships and
