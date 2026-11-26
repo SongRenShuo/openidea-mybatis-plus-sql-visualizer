@@ -278,6 +278,13 @@ fn editor_error(path: &str, error: &Error) -> CliError {
     )
 }
 
+/// One rendered statement: its id and the confidence word the summary prints.
+type RenderedStatement = (String, &'static str);
+
+/// The workbench model to show plus every rendered statement and its
+/// confidence.
+type MapperRender = (workbench::WorkbenchModel, Vec<RenderedStatement>);
+
 /// Render one mapper statement (or every statement) into the workbench model.
 ///
 /// The model carries the first statement; the returned list is every statement
@@ -287,7 +294,7 @@ fn mapper_model(
     xml: &str,
     statement: Option<&str>,
     dialect: &str,
-) -> Result<(workbench::WorkbenchModel, Vec<(String, &'static str)>), CliError> {
+) -> Result<MapperRender, CliError> {
     let (set, issues) = MapperSet::load(&[(path, xml)]);
     let ids = match statement {
         Some(id) => vec![id.to_string()],
@@ -457,7 +464,7 @@ mod tests {
             // A successful preview leaves the Output tab alone; the tab is the
             // surface. (Errors still go there, tested below.)
             assert!(
-                host.output().get(common::CHANNEL).is_none(),
+                !host.output().contains_key(common::CHANNEL),
                 "{:?}",
                 host.output().get(common::CHANNEL)
             );
@@ -488,7 +495,7 @@ mod tests {
                     .is_some_and(|raw| raw.contains("<mapper")),
                 "the input box holds the whole mapper file"
             );
-            assert!(host.output().get(common::CHANNEL).is_none());
+            assert!(!host.output().contains_key(common::CHANNEL));
         });
     }
 

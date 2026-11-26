@@ -50,7 +50,7 @@ mod tests {
         let state: serde_json::Value = serde_json::from_str(&pushed[0].1).expect("valid JSON");
         assert_eq!(state["op"], "state");
         assert!(
-            host.output().get(common::CHANNEL).is_none(),
+            !host.output().contains_key(common::CHANNEL),
             "revealing the panel does not open Output"
         );
     }

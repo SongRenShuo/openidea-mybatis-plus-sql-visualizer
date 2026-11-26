@@ -419,7 +419,6 @@ mod tests {
     use openidea_plugin::mock::MockHost;
     use openidea_plugin::providers::Document;
 
-    const NAMESPACE: &str = "com.acme.UserMapper";
     const MAPPER: &str = r#"<mapper namespace="com.acme.UserMapper">
     <sql id="cols">id, name</sql>
     <select id="findById" resultType="User">select <include refid="cols"/> from users where id = #{id}</select>
@@ -480,7 +479,7 @@ mod tests {
         // Caret on the tag name `<select` and on `resultType=` both sit in the
         // start tag, so both answer with the statement card.
         for needle in ["<select", "resultType"] {
-            let hover = hover_in(&xml_doc(MAPPER), at(&MAPPER, needle)).expect(needle);
+            let hover = hover_in(&xml_doc(MAPPER), at(MAPPER, needle)).expect(needle);
             assert!(
                 hover.markdown.contains("```sql"),
                 "{needle}: {}",
@@ -493,7 +492,7 @@ mod tests {
     fn hover_inside_the_sql_body_is_none() {
         let _host = MockHost::install();
         // "from users" is statement content, not the start tag.
-        assert!(hover_in(&xml_doc(MAPPER), at(&MAPPER, "from users")).is_none());
+        assert!(hover_in(&xml_doc(MAPPER), at(MAPPER, "from users")).is_none());
     }
 
     #[test]
@@ -537,7 +536,7 @@ mod tests {
     #[test]
     fn hover_fragment_reports_include_count() {
         let _host = MockHost::install();
-        let hover = hover_in(&xml_doc(MAPPER), at(&MAPPER, "cols\"")).expect("a hover");
+        let hover = hover_in(&xml_doc(MAPPER), at(MAPPER, "cols\"")).expect("a hover");
         assert!(
             hover.markdown.contains("SQL fragment"),
             "{}",
@@ -551,7 +550,7 @@ mod tests {
     #[test]
     fn hover_result_map_reports_type_and_usage() {
         let _host = MockHost::install();
-        let hover = hover_in(&xml_doc(MAPPER), at(&MAPPER, "BaseMap")).expect("a hover");
+        let hover = hover_in(&xml_doc(MAPPER), at(MAPPER, "BaseMap")).expect("a hover");
         assert!(hover.markdown.contains("Result map"), "{}", hover.markdown);
         assert!(
             hover.markdown.contains("com.acme.User"),

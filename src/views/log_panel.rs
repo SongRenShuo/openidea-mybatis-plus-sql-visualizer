@@ -325,17 +325,12 @@ impl PanelRow {
 /// The "SQL 类型" selection: the button shows 全部 / 无 / N 项, so "all six" and
 /// "none" must stay distinguishable (an empty `Only` set is never produced by
 /// the page; empty defaults to `All`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum TypeFilter {
+    #[default]
     All,
     None,
     Only(BTreeSet<SqlType>),
-}
-
-impl Default for TypeFilter {
-    fn default() -> Self {
-        TypeFilter::All
-    }
 }
 
 impl TypeFilter {
@@ -640,17 +635,13 @@ fn display_rows(
             continue;
         }
         let mut lines: Vec<usize> = Vec::new();
-        if d_new {
-            if let Some(group) = dedupe_by_key.get(&row.dedupe_key) {
-                lines.extend(group.line_nos.iter().copied());
-            }
+        if d_new && let Some(group) = dedupe_by_key.get(&row.dedupe_key) {
+            lines.extend(group.line_nos.iter().copied());
         }
-        if n_new {
-            if let Some(group) = n_plus_one_by_key.get(&row.n_plus_one_key) {
-                for line in &group.line_nos {
-                    if !lines.contains(line) {
-                        lines.push(*line);
-                    }
+        if n_new && let Some(group) = n_plus_one_by_key.get(&row.n_plus_one_key) {
+            for line in &group.line_nos {
+                if !lines.contains(line) {
+                    lines.push(*line);
                 }
             }
         }
@@ -735,6 +726,10 @@ fn first_keyword(sql: &str) -> String {
         .to_ascii_uppercase()
 }
 
+/// Assembles one list row: the log entry plus the derived columns the list
+/// needs to render and filter it. Every argument is a distinct derived value,
+/// so bundling them into a struct would only move the same list elsewhere.
+#[allow(clippy::too_many_arguments)]
 fn row_of(
     entry: &LogEntry,
     category: RowCategory,
@@ -1633,9 +1628,6 @@ fn help_text() -> String {
 // ---------------------------------------------------------------------------
 // Tab payloads (lane L22, docs/registration/L22.md)
 // ---------------------------------------------------------------------------
-
-/// Matches one history search returns (the handler's own default).
-const HISTORY_LIMIT: usize = 20;
 
 /// `tabs.logToSql`: the tab's result and status line (lane L33).
 ///
@@ -3433,8 +3425,10 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
 ==> Parameters: 1(Long)
 ";
         let rows = rows_of(text);
-        let mut filter = Filter::default();
-        filter.keyword = "name".to_string();
+        let mut filter = Filter {
+            keyword: "name".to_string(),
+            ..Filter::default()
+        };
         assert_eq!(filter_rows(&rows, &filter, 1000.0).len(), 1);
         filter.keyword = "NAME".to_string();
         assert_eq!(filter_rows(&rows, &filter, 1000.0).len(), 1);
@@ -3457,9 +3451,11 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
 ==> Parameters: 42(Long)
 ";
         let rows = rows_of(text);
-        let mut filter = Filter::default();
-        filter.regex = true;
-        filter.keyword = "ord.rs".to_string();
+        let mut filter = Filter {
+            regex: true,
+            keyword: "ord.rs".to_string(),
+            ..Filter::default()
+        };
         assert_eq!(filter_rows(&rows, &filter, 1000.0).len(), 1);
 
         filter.keyword = "(".to_string();
@@ -5154,7 +5150,7 @@ public interface UserMapper {
   <select id="selectById">select 1</select>
 </mapper>"#;
 
-    fn row_of_line<'a>(state: &'a Value, line: usize) -> &'a Value {
+    fn row_of_line(state: &Value, line: usize) -> &Value {
         state["rows"]
             .as_array()
             .expect("rows")

@@ -117,7 +117,7 @@ mod tests {
             );
             assert!(preview["labels"].is_object());
             assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
-            assert!(host.output().get(common::CHANNEL).is_none());
+            assert!(!host.output().contains_key(common::CHANNEL));
         });
     }
 

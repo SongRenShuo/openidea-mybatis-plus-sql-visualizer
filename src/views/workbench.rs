@@ -411,6 +411,7 @@ fn advice_text(sql: &str, dialect_name: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// What the preview tab keeps between state pushes.
+#[derive(Default)]
 struct PreviewStore {
     model: WorkbenchModel,
     /// Last status line (the panel keeps it across unrelated pushes).
@@ -428,18 +429,6 @@ struct PreviewStore {
     /// reports its tab, so only handed-over SQL — never what the user typed —
     /// goes through `render.formatOnPreview`.
     handoff: bool,
-}
-
-impl Default for PreviewStore {
-    fn default() -> Self {
-        Self {
-            model: WorkbenchModel::default(),
-            status: String::new(),
-            replace_input: false,
-            select_pending: false,
-            handoff: false,
-        }
-    }
 }
 
 static PREVIEW: OnceLock<Mutex<PreviewStore>> = OnceLock::new();
@@ -1527,7 +1516,7 @@ mod tests {
     fn exporting_without_sql_reports_the_status() {
         let (host, _guard) = test_host();
         send(json!({ "op": "preview-export" }));
-        assert!(host.output().get(common::CHANNEL).is_none());
+        assert!(!host.output().contains_key(common::CHANNEL));
         assert_eq!(
             tab()["status"]["text"],
             t("view.workbench.status.export_empty")

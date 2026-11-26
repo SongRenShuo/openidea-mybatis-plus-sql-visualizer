@@ -312,10 +312,10 @@ impl JavaMethodIndex {
             }
         }
         for index in &slot.methods {
-            if let Some(entry) = self.methods.get_mut(*index) {
-                if entry.take().is_some() {
-                    self.dead += 1;
-                }
+            if let Some(entry) = self.methods.get_mut(*index)
+                && entry.take().is_some()
+            {
+                self.dead += 1;
             }
         }
         if self.dead > 64 && self.dead * 2 > self.methods.len() {
@@ -412,7 +412,7 @@ impl JavaMethodIndex {
         }
         if name.contains('.') {
             // FQN or abbreviated FQN: compare segments from the right.
-            for (_, fqns) in &self.classes {
+            for fqns in self.classes.values() {
                 for fqn in fqns {
                     if out.contains(fqn) {
                         continue;
@@ -478,11 +478,9 @@ pub(crate) fn dotted_suffix_matches(written: &str, real: &str) -> bool {
     if written.len() > real.len() {
         return false;
     }
-    let mut offset = real.len() - written.len();
-    for segment in &written {
-        let candidate = real[offset];
-        offset += 1;
-        if *segment == candidate {
+    let offset = real.len() - written.len();
+    for (segment, candidate) in written.iter().zip(&real[offset..]) {
+        if *segment == *candidate {
             continue;
         }
         // `c` for `com`, `e` for `example`: only a single letter shortens, and
@@ -509,17 +507,18 @@ fn excluded_path(path: &str) -> bool {
         .any(|segment| EXCLUDED_DIRS.contains(&segment))
 }
 
-/// Reads one file: its methods, the types it declares, and whether the text
-/// ended inside a type body (a half-written file cannot be trusted).
-fn scan_file(
-    path: &str,
-    text: &str,
-) -> (
+/// One file's scan result: its methods, the `(simple, fqn)` of every type it
+/// declares, those types' declaration positions, and whether the text ended
+/// inside a type body (a half-written file cannot be trusted).
+type ScannedFile = (
     Vec<JavaMethodLocation>,
     Vec<(String, String)>,
     Vec<JavaClassLocation>,
     bool,
-) {
+);
+
+/// Reads one file into a [`ScannedFile`].
+fn scan_file(path: &str, text: &str) -> ScannedFile {
     let mut scan = FileScan {
         path,
         text,

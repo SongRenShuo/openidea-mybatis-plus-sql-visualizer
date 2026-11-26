@@ -144,36 +144,56 @@ fn providers_definition_jumps_from_the_interface_method_to_the_statement() {
 }
 
 #[test]
-fn providers_line_markers_cover_both_files() {
+fn providers_gutter_markers_are_published_as_index_keys() {
+    // The gutter no longer calls the plugin: the document indexer publishes
+    // marker anchors, and the host resolves them against its own graph. The
+    // XML side says `java:<namespace>#<id>` per statement row and
+    // `type:<namespace>` for the root; the Java side says `stmt:<ns>.<id>`.
     let _guard = serial();
-    index_fixture();
+    let _host = openidea_plugin::mock::MockHost::install();
+    let mut plugin = openidea_plugin_mybatis_plus_sql_visualizer::Main;
 
-    let xml = nav::markers_in(&xml_doc());
-    let mut lines: Vec<u32> = xml.iter().map(|marker| marker.line).collect();
-    lines.sort_unstable();
-    assert_eq!(
-        lines,
-        vec![1, 4, 5, 8],
-        "result map row, fragment row, statement row (to its result map) and the \
-         unbound statement row (to UserMapper#touch)"
-    );
-    let to_java = xml
+    let xml = index_doc(XML_PATH, XML);
+    let edges = openidea_plugin::indexing::DocumentIndexer::index(&mut plugin, &xml);
+    let keys: Vec<(&str, u32)> = edges
+        .markers
         .iter()
-        .find(|marker| marker.line == 8)
-        .expect("the <update> row points at UserMapper#touch");
-    assert_eq!(to_java.target.as_ref().unwrap().path, JAVA_PATH);
-    assert_eq!(to_java.target.as_ref().unwrap().range.start.line, 3);
-
-    let java = nav::markers_in(&java_doc());
-    let java_lines: Vec<u32> = java.iter().map(|marker| marker.line).collect();
-    assert_eq!(java_lines, vec![2, 3], "both interface methods");
-    assert!(
-        java.iter()
-            .all(|marker| marker.target.as_ref().unwrap().path == XML_PATH),
-        "each marker jumps into the mapper XML"
+        .map(|anchor| (anchor.key.as_str(), anchor.range.start.line))
+        .collect();
+    assert_eq!(
+        keys,
+        vec![
+            ("type:com.acme.mapper.UserMapper", 0),
+            ("java:com.acme.mapper.UserMapper#findById", 5),
+            ("java:com.acme.mapper.UserMapper#touch", 8),
+        ],
+        "root namespace, then every statement row"
     );
-    let find_by_id = java.iter().find(|marker| marker.line == 2).unwrap();
-    assert_eq!(find_by_id.target.as_ref().unwrap().range.start.line, 5);
+
+    let java = index_doc(JAVA_PATH, JAVA);
+    let edges = openidea_plugin::indexing::DocumentIndexer::index(&mut plugin, &java);
+    let keys: Vec<(&str, u32)> = edges
+        .markers
+        .iter()
+        .map(|anchor| (anchor.key.as_str(), anchor.range.start.line))
+        .collect();
+    assert_eq!(
+        keys,
+        vec![
+            ("stmt:com.acme.mapper.UserMapper.findById", 2),
+            ("stmt:com.acme.mapper.UserMapper.touch", 3),
+        ],
+        "both interface methods point back at their statements"
+    );
+}
+
+/// The indexing feed's document shape (the host's own; not the provider one).
+fn index_doc(path: &str, text: &str) -> openidea_plugin::indexing::Document {
+    openidea_plugin::indexing::Document {
+        path: path.into(),
+        text: text.into(),
+        symbols: Vec::new(),
+    }
 }
 
 #[test]

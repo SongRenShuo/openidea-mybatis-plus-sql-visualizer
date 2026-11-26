@@ -94,7 +94,7 @@ mod tests {
             "the left side is the original input"
         );
         assert!(
-            host.output().get(common::CHANNEL).is_none(),
+            !host.output().contains_key(common::CHANNEL),
             "the diff tab is the surface; Output stays closed"
         );
     }
