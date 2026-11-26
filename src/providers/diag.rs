@@ -23,6 +23,9 @@ use openidea_plugin::diagnostics::{Diagnostic, DiagnosticsProvider, Document};
 /// `sql.dialect`, which the schema never declared.
 pub const DIALECT_SETTING: &str = "dialect.default";
 
+/// The settings-page switch that arms the provider.
+pub const DIAGNOSTICS_SETTING: &str = "diagnostics.enabled";
+
 /// The pre-schema key, honoured only when the declared one is empty.
 pub const DIALECT_SETTING_LEGACY: &str = "sql.dialect";
 
@@ -31,7 +34,18 @@ impl DiagnosticsProvider for crate::Main {
         if !(super::is_xml(&doc.path) || super::is_java(&doc.path)) {
             return Vec::new();
         }
-        diagnose(&doc.text, &super::dialect_setting(), &super::columns_for)
+        // Both the master switch and the two rule switches are real: before this
+        // they were declared but never read, so the feature was always on.
+        if !super::setting_on(DIAGNOSTICS_SETTING) {
+            return Vec::new();
+        }
+        diagnose_with(
+            &doc.text,
+            &super::dialect_setting(),
+            &super::columns_for,
+            super::setting_on("diagnostics.unknownColumn"),
+            super::setting_on("diagnostics.dialectQuotes"),
+        )
     }
 }
 
@@ -69,12 +83,25 @@ pub fn diagnose(
     dialect: &str,
     columns: &dyn Fn(&str) -> Option<Vec<String>>,
 ) -> Vec<Diagnostic> {
+    diagnose_with(text, dialect, columns, true, true)
+}
+
+/// [`diagnose`] with the two rule switches the settings page exposes.
+pub fn diagnose_with(
+    text: &str,
+    dialect: &str,
+    columns: &dyn Fn(&str) -> Option<Vec<String>>,
+    unknown_columns: bool,
+    quote_style: bool,
+) -> Vec<Diagnostic> {
     let family = family(dialect);
     let mut findings: Vec<Finding> = Vec::new();
     for region in super::sqltext::regions(text) {
         for (start, end) in region.spans {
-            quote_findings(text, start, end, dialect, family, &mut findings);
-            if let Some(kind) = region.kind {
+            if quote_style {
+                quote_findings(text, start, end, dialect, family, &mut findings);
+            }
+            if unknown_columns && let Some(kind) = region.kind {
                 column_findings(text, start, end, kind, columns, &mut findings);
             }
         }
@@ -501,6 +528,10 @@ mod tests {
             text: xml.into(),
         };
         let mut plugin = crate::Main;
+        // The master switch is off by default, so nothing is reported yet ...
+        assert!(DiagnosticsProvider::diagnostics(&mut plugin, &document).is_empty());
+        host.set_setting(DIAGNOSTICS_SETTING, "true");
+        // ... and with it on, an unset dialect still means "no rule to run".
         assert!(DiagnosticsProvider::diagnostics(&mut plugin, &document).is_empty());
         host.set_setting(DIALECT_SETTING, "\"mysql\"");
         assert_eq!(

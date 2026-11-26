@@ -253,7 +253,8 @@ iconDark = "icons/mapper-xml-dark.svg"
 [[contributes.documentIndexers]]
 extensions = ["xml", "java"]
 
-# Name-level navigation and gutter markers; off by default (`nav.enabled`).
+# Name-level navigation and gutter markers; on by default (`nav.enabled`), and
+# the markers can be turned off on their own (`nav.showLineMarkers`).
 [[contributes.providers]]
 kinds = ["definition", "line-markers"]
 languages = ["xml", "java"]
@@ -271,7 +272,7 @@ languages = ["xml"]
 kinds = ["hover"]
 languages = ["xml", "java"]
 
-# SQL highlighting inside mapper XML; off by default (`injections.enabled`).
+# SQL highlighting inside mapper XML; on by default (`injections.enabled`).
 [[contributes.providers]]
 kinds = ["injections"]
 languages = ["xml"]
@@ -281,7 +282,9 @@ languages = ["xml"]
 kinds = ["inlay-hints"]
 languages = ["xml", "java"]
 
-# Unknown columns and dialect quote mismatches; never guesses without a schema.
+# Unknown columns and dialect quote mismatches; off by default
+# (`diagnostics.enabled`), and each rule can be switched separately. Never
+# guesses without a schema.
 [[contributes.providers]]
 kinds = ["diagnostics"]
 languages = ["xml", "java"]
