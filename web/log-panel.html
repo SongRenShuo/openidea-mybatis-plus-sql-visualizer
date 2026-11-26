@@ -438,19 +438,22 @@
     #panelLogToSql .statusline.error, #panelSqlToJava .statusline.error {
       color: var(--openidea-danger);
     }
+    /* Options row: the reference's GridBag layout — the form combo spans the
+       row, then the entity field, then caller / result type half each. Labels
+       live in placeholders (as the reference does), so no label eats width. */
     #panelSqlToJava .optionsrow {
-      display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 8px 6px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px 6px;
+      padding: 0 8px 6px;
     }
-    #panelSqlToJava .optionsrow label {
-      color: var(--openidea-fg-muted); font-size: 11px;
-    }
+    #panelSqlToJava .optionsrow .optlabel { display: none; }
     #panelSqlToJava .optselect, #panelSqlToJava .optinput {
       background: var(--openidea-bg-input); color: var(--openidea-fg);
       border: 1px solid var(--openidea-border); border-radius: 3px;
-      padding: 2px 4px; font-size: 12px;
+      padding: 3px 5px; font-size: 12px; min-width: 0;
     }
-    #panelSqlToJava .optselect { flex: 0 0 auto; }
-    #panelSqlToJava .optinput { flex: 0 1 120px; min-width: 70px; }
+    #panelSqlToJava .optwide,
+    #panelSqlToJava .optfull { grid-column: 1 / -1; width: 100%; }
+    #panelSqlToJava .opthalf { width: 100%; }
 
     /* Fifth tab: the preview workbench (L23). Everything is scoped to
        #panelPreview so the log list's own .meta / .badge / .status rules keep
@@ -837,17 +840,17 @@
         <button id="s2jClearInput" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
       </div>
       <div class="optionsrow">
-        <label id="s2jFormatLabel" for="s2jFormatMode"></label>
-        <select id="s2jFormatMode" class="optselect">
+        <label id="s2jFormatLabel" for="s2jFormatMode" class="optlabel"></label>
+        <select id="s2jFormatMode" class="optselect optwide">
           <option value="lambda"></option>
           <option value="stringColumns"></option>
         </select>
-        <label id="s2jEntityLabel" for="s2jEntity"></label>
-        <input id="s2jEntity" class="optinput" type="text" autocomplete="off" spellcheck="false">
-        <label id="s2jCallerLabel" for="s2jCaller"></label>
-        <input id="s2jCaller" class="optinput" type="text" autocomplete="off" spellcheck="false">
-        <label id="s2jReturnLabel" for="s2jReturnType"></label>
-        <input id="s2jReturnType" class="optinput" type="text" autocomplete="off" spellcheck="false">
+        <label id="s2jEntityLabel" for="s2jEntity" class="optlabel"></label>
+        <input id="s2jEntity" class="optinput optfull" type="text" autocomplete="off" spellcheck="false">
+        <label id="s2jCallerLabel" for="s2jCaller" class="optlabel"></label>
+        <input id="s2jCaller" class="optinput opthalf" type="text" autocomplete="off" spellcheck="false">
+        <label id="s2jReturnLabel" for="s2jReturnType" class="optlabel"></label>
+        <input id="s2jReturnType" class="optinput opthalf" type="text" autocomplete="off" spellcheck="false">
       </div>
       <div class="tabhint" id="s2jOptionHint" hidden></div>
       <div class="tabhint" id="s2jInputHint"></div>

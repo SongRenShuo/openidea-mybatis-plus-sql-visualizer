@@ -709,21 +709,29 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "view.logs.tab.sql_to_java.entity_hint",
-        "e.g. User (required)",
-        "如 User（必填）",
+        "Entity class (required, e.g. User)",
+        "实体类名（必填，如 User）",
     ),
     (
         "view.logs.tab.sql_to_java.caller_label",
         "Caller class",
         "调用类",
     ),
-    ("view.logs.tab.sql_to_java.caller_hint", "optional", "可选"),
+    (
+        "view.logs.tab.sql_to_java.caller_hint",
+        "Caller class (e.g. UserService)",
+        "调用类（如 UserService）",
+    ),
     (
         "view.logs.tab.sql_to_java.return_label",
         "Result type",
         "返回类型",
     ),
-    ("view.logs.tab.sql_to_java.return_hint", "optional", "可选"),
+    (
+        "view.logs.tab.sql_to_java.return_hint",
+        "Result type (e.g. List<User>)",
+        "返回类型（如 List<User>）",
+    ),
     (
         "view.logs.tab.sql_to_java.empty",
         "Please enter SQL first",
