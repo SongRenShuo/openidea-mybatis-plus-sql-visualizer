@@ -29,6 +29,12 @@ pub const SETTING: &str = "nav.enabled";
 /// The gutter markers have their own switch, on by default like IntelliJ.
 pub const MARKERS_SETTING: &str = "nav.showLineMarkers";
 
+/// The IntelliJ edition's marker artwork (black bird for XML, method badge for
+/// Java). `LineMarker::icon` takes a package SVG path; `"navigate"` is a host
+/// alias for the generic arrow, so using it here silently discarded our icon.
+pub const ICON_XML: &str = "icons/toolbar/mapperStatement.svg";
+pub const ICON_JAVA: &str = "icons/toolbar/mapperMethod.svg";
+
 impl Providers for crate::Main {
     fn definition(&mut self, doc: &Document, at: Position) -> Vec<Location> {
         if !super::setting_on(SETTING) {
@@ -250,7 +256,7 @@ fn xml_markers(doc: &Document) -> Vec<LineMarker> {
         if let Some((kind, found)) = target {
             push(LineMarker {
                 line: id.range.start.line,
-                icon: Some("navigate".to_owned()),
+                icon: Some(ICON_XML.to_owned()),
                 tooltip: format!("MyBatis: go to {kind} {}", found.name),
                 target: Some(location(doc, found.range)),
             });
@@ -262,7 +268,7 @@ fn xml_markers(doc: &Document) -> Vec<LineMarker> {
             {
                 push(LineMarker {
                     line: id.range.start.line,
-                    icon: Some("navigate".to_owned()),
+                    icon: Some(ICON_XML.to_owned()),
                     tooltip: format!("MyBatis: go to mapper method {}", id.name),
                     target: Some(target),
                 });
@@ -283,7 +289,7 @@ fn xml_markers(doc: &Document) -> Vec<LineMarker> {
         {
             push(LineMarker {
                 line: fragment.range.start.line,
-                icon: Some("navigate".to_owned()),
+                icon: Some(ICON_XML.to_owned()),
                 tooltip: format!("MyBatis: used by statement {}", id.name),
                 target: Some(location(doc, id.range)),
             });
@@ -302,7 +308,7 @@ fn xml_markers(doc: &Document) -> Vec<LineMarker> {
         {
             push(LineMarker {
                 line: id.range.start.line,
-                icon: Some("navigate".to_owned()),
+                icon: Some(ICON_XML.to_owned()),
                 tooltip: format!("MyBatis: used by statement {}", user_id.name),
                 target: Some(location(doc, user_id.range)),
             });
@@ -331,7 +337,7 @@ fn java_markers(doc: &Document) -> Vec<LineMarker> {
             line,
             // The IntelliJ edition draws a different marker on the Java side
             // (`mapperMethod`, brand colour) than on the XML side.
-            icon: Some("navigate-java".to_owned()),
+            icon: Some(ICON_JAVA.to_owned()),
             tooltip: format!("MyBatis: go to statement {}", method.name.name),
             target: Some(target),
         });

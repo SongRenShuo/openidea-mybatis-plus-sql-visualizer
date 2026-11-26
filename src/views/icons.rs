@@ -18,8 +18,8 @@ pub const MAPPER_XML_DARK: &str = include_str!("../../icons/mapper-xml-dark.svg"
 
 /// `(id, light, dark)` for every declared icon, in registration order.
 pub const ALL: &[(&str, &str, &str)] = &[
-    ("navigate", NAVIGATE_XML, NAVIGATE_XML),
-    ("navigate-java", NAVIGATE_JAVA, NAVIGATE_JAVA),
+    ("sqlv-nav-xml", NAVIGATE_XML, NAVIGATE_XML),
+    ("sqlv-nav-java", NAVIGATE_JAVA, NAVIGATE_JAVA),
     ("mapper-xml", MAPPER_XML, MAPPER_XML_DARK),
 ];
 

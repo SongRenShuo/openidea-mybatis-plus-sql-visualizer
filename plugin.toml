@@ -237,15 +237,18 @@ title = "Engine"
 schema = "settings/engine.json"
 
 # Gutter markers and the mapper XML file icon (L5), with the IntelliJ edition's
-# own SVGs: the XML side uses `mapperStatement` (cyan), the Java side
-# `mapperMethod`, and the file icon `mapperXml`.
+# own SVGs: the XML side uses `mapperStatement` (black bird with a cyan wing),
+# the Java side `mapperMethod`, and the file icon `mapperXml`. The ids must not
+# be the host's bare icon aliases (`navigate`, `implemented`, …): a provider's
+# `icon` is resolved against those aliases first, and an alias hit silently
+# replaces a plugin icon with the generic arrow.
 [[contributes.markerIcons]]
-id = "navigate"
+id = "sqlv-nav-xml"
 icon = "icons/toolbar/mapperStatement.svg"
 iconDark = "icons/toolbar/mapperStatement.svg"
 
 [[contributes.markerIcons]]
-id = "navigate-java"
+id = "sqlv-nav-java"
 icon = "icons/toolbar/mapperMethod.svg"
 iconDark = "icons/toolbar/mapperMethod.svg"
 
