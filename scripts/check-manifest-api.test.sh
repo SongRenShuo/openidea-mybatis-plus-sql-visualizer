@@ -198,6 +198,22 @@ TOML
     'ok (engines.openidea "^1.18"'
 fi
 
+# k) a commented-out higher-version key is not a declaration: this is the
+#    natural "park the dialog block until 1.18" move and must stay green.
+cat > "$work/k.toml" <<'TOML'
+id = "t"
+version = "0.0.1"
+engines.openidea = "^1.15"   # raised to ^1.18 with the dialog below
+
+# [[contributes.dialogs]]
+# id = "sqlv-preview"
+# web = "web/preview.html"
+
+[[contributes.commands]]
+id = "x"
+TOML
+check "k: commented-out dialogs stays green" 0 "$work/k.toml" 'floor 1.15, 0 key(s) checked'
+
 echo
 echo "pass=$pass fail=$fail"
 [[ "$fail" -eq 0 ]] || exit 1
