@@ -36,6 +36,14 @@ jobs:
           targets: wasm32-wasip2
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
+      # The manifest gate needs no toolchain: it is a shell check that a
+      # contributes key does not need a newer plugin API than engines.openidea
+      # allows. `openidea-plugin check` cannot stand in for it — the CLI only
+      # knows its own release's extension points and downgrades an unknown key
+      # to `not supported by this version of the IDE; skipped` with exit 0,
+      # while the host rejects the whole package once it knows the key.
+      - run: bash scripts/check-manifest-api.test.sh
+      - run: bash scripts/check-manifest-api.sh
       - run: cargo fmt --all --check
       # --all-targets is the superset gate: it also lints the unit tests.
       - run: cargo clippy --all-targets -- -D warnings
