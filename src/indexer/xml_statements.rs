@@ -36,8 +36,10 @@ pub struct XmlStatementLocation {
     pub namespace: String,
     /// `<select|insert|update|delete id="…">`.
     pub id: String,
-    /// 0-based line of the start tag.
+    /// 0-based line of the `id` attribute.
     pub line: u32,
+    /// UTF-16 column of the `id` value, so the caret lands on the id.
+    pub character: u32,
 }
 
 impl XmlStatementLocation {
@@ -115,7 +117,8 @@ impl XmlStatementIndex {
                 file: path.to_owned(),
                 namespace: namespace.clone(),
                 id: id.name.clone(),
-                line: statement.line,
+                line: id.range.start.line,
+                character: id.range.start.character,
             }));
             slots.push(slot);
         }

@@ -73,10 +73,10 @@ fn location(doc: &Document, range: Range) -> Location {
     }
 }
 
-/// A target inside another file: the index gives a line, not a range, and the
-/// caret is the caller's to place.
-fn other_file(path: &str, line: u32) -> Location {
-    let position = Position::new(line, 0);
+/// A target inside another file: the index gives the symbol's own line and
+/// UTF-16 column, so the caret lands on the name rather than the line start.
+fn other_file(path: &str, line: u32, character: u32) -> Location {
+    let position = Position::new(line, character);
     Location {
         path: path.into(),
         range: Range::new(position, position),
@@ -91,7 +91,16 @@ fn method_targets(namespace: Option<&crate::indexer::Named>, id: &str) -> Vec<Lo
     crate::indexer::java_methods()
         .resolve_statement(&namespace.name, id)
         .into_iter()
-        .map(|hit| other_file(&hit.file, hit.line))
+        .map(|hit| other_file(&hit.file, hit.line, hit.character))
+        .collect()
+}
+
+/// The type declarations `namespace` names, across the project.
+fn class_targets(namespace: &str) -> Vec<Location> {
+    crate::indexer::java_methods()
+        .class_location(namespace)
+        .into_iter()
+        .map(|hit| other_file(&hit.file, hit.line, hit.character))
         .collect()
 }
 
@@ -100,7 +109,7 @@ fn statement_targets(namespace: &str, id: &str) -> Vec<Location> {
     crate::indexer::xml_statements()
         .lookup(namespace, id)
         .into_iter()
-        .map(|hit| other_file(&hit.file, hit.line))
+        .map(|hit| other_file(&hit.file, hit.line, hit.character))
         .collect()
 }
 
@@ -114,6 +123,16 @@ fn xml_definition(doc: &Document, offset: usize) -> Vec<Location> {
     let elements = scan::elements(text);
     let mut out = Vec::new();
     for element in &elements {
+        // The root `<mapper namespace="…">` names the interface: the jump the
+        // reference's root marker offers, and the only one a method-less
+        // mapper still has.
+        if element.name == "mapper"
+            && let Some(namespace) = value_at(element, "namespace", offset)
+        {
+            for target in class_targets(namespace) {
+                push_target(&mut out, target);
+            }
+        }
         match element.name {
             "include" => {
                 if let Some(referenced) = value_at(element, "refid", offset)
@@ -237,80 +256,33 @@ fn xml_markers(doc: &Document) -> Vec<LineMarker> {
         }
     };
 
-    for statement in &facts.statements {
-        let Some(id) = &statement.id else { continue };
-        let mut target: Option<(&str, &crate::indexer::Named)> = None;
-        if let Some(result_map) = &statement.result_map
-            && let Some(found) = facts.local_result_map(&result_map.name)
-        {
-            target = Some(("result map", found));
-        }
-        if target.is_none() {
-            for include in &statement.includes {
-                if let Some(found) = facts.local_fragment(&include.name) {
-                    target = Some(("sql fragment", found));
-                    break;
-                }
-            }
-        }
-        if let Some((kind, found)) = target {
+    // Root namespace → the mapper interface (the reference's root marker).
+    if let Some(namespace) = facts.namespace.as_ref() {
+        if let Some(target) = class_targets(&namespace.name).into_iter().next() {
             push(LineMarker {
-                line: id.range.start.line,
+                line: namespace.range.start.line,
                 icon: Some(ICON_XML.to_owned()),
-                tooltip: format!("MyBatis: go to {kind} {}", found.name),
-                target: Some(location(doc, found.range)),
+                tooltip: "MyBatis: go to mapper interface".to_string(),
+                target: Some(target),
             });
-        } else {
-            // Nothing in this file: the statement's method, if it is indexed.
-            if let Some(target) = method_targets(facts.namespace.as_ref(), &id.name)
-                .into_iter()
-                .next()
-            {
-                push(LineMarker {
-                    line: id.range.start.line,
-                    icon: Some(ICON_XML.to_owned()),
-                    tooltip: format!("MyBatis: go to mapper method {}", id.name),
-                    target: Some(target),
-                });
-            }
         }
     }
 
-    // Reverse: the fragment and result-map lines point at their first user.
-    for fragment in &facts.fragments {
-        let user = facts.statements.iter().find(|statement| {
-            statement
-                .includes
-                .iter()
-                .any(|include| refers_to(include.name.as_str(), &fragment.name, &facts.namespace))
-        });
-        if let Some(user) = user
-            && let Some(id) = &user.id
-        {
-            push(LineMarker {
-                line: fragment.range.start.line,
-                icon: Some(ICON_XML.to_owned()),
-                tooltip: format!("MyBatis: used by statement {}", id.name),
-                target: Some(location(doc, id.range)),
-            });
-        }
-    }
-    for result_map in &facts.result_maps {
-        let Some(id) = &result_map.id else { continue };
-        let user = facts.statements.iter().find(|statement| {
-            statement
-                .result_map
-                .as_ref()
-                .is_some_and(|reference| refers_to(&reference.name, &id.name, &facts.namespace))
-        });
-        if let Some(user) = user
-            && let Some(user_id) = &user.id
+    // A statement row pairs with the interface method that runs it. Result
+    // maps and fragments are reached from their attribute (`Ctrl+B`), not from
+    // the statement row: putting them here made the row jump to the wrong
+    // place for every statement that uses one.
+    for statement in &facts.statements {
+        let Some(id) = &statement.id else { continue };
+        if let Some(target) = method_targets(facts.namespace.as_ref(), &id.name)
+            .into_iter()
+            .next()
         {
             push(LineMarker {
                 line: id.range.start.line,
                 icon: Some(ICON_XML.to_owned()),
-                tooltip: format!("MyBatis: used by statement {}", user_id.name),
-                target: Some(location(doc, user_id.range)),
+                tooltip: format!("MyBatis: go to mapper method {}", id.name),
+                target: Some(target),
             });
         }
     }
@@ -366,6 +338,19 @@ mod tests {
 
     const XML: &str = "<mapper namespace=\"com.acme.UserMapper\">\n  <sql id=\"cols\">id, name</sql>\n  <select id=\"findById\" resultMap=\"BaseMap\">\n    select <include refid=\"cols\"/> from t_user\n  </select>\n  <resultMap id=\"BaseMap\" type=\"com.acme.User\">\n    <id column=\"id\" property=\"id\"/>\n  </resultMap>\n</mapper>";
 
+    /// The interface the XML namespace names, indexed so statement/root
+    /// markers have a jump target.
+    const JAVA: &str = "package com.acme;
+public interface UserMapper {
+  User findById(int id);
+}
+";
+
+    fn index_java() {
+        crate::indexer::clear_indexes();
+        crate::indexer::index_source("/p/mapper/UserMapper.java", JAVA);
+    }
+
     fn doc(text: &str) -> Document {
         Document {
             path: "/p/mapper/UserMapper.xml".into(),
@@ -384,6 +369,7 @@ mod tests {
     fn the_setting_defaults_to_on_and_an_explicit_false_turns_it_off() {
         // Nothing is stored: the schema default (`nav.enabled = true`) answers.
         let _host = MockHost::install();
+        index_java();
         let mut plugin = crate::Main;
         let document = doc(XML);
         assert_eq!(
@@ -432,35 +418,52 @@ mod tests {
         assert_eq!(result_map.len(), 1);
         assert_eq!(result_map[0].range.start.line, 5);
 
+        // The root namespace jumps to the interface.
+        index_java();
+        let root = Providers::definition(&mut plugin, &document, at(XML, "com.acme.UserMapper"));
+        assert_eq!(root.len(), 1);
+        assert_eq!(root[0].path, "/p/mapper/UserMapper.java");
+
         // A word that is neither a reference nor resolvable answers nothing.
-        let nowhere = Providers::definition(&mut plugin, &document, at(XML, "namespace"));
+        let nowhere = Providers::definition(&mut plugin, &document, at(XML, "resultMap"));
         assert!(nowhere.is_empty());
     }
 
     #[test]
-    fn markers_go_both_ways_within_the_file() {
+    fn markers_pair_the_statement_and_the_root_with_the_interface() {
         let host = MockHost::install();
         host.set_setting(SETTING, "true");
+        index_java();
         let mut plugin = crate::Main;
         let markers = Providers::line_markers(&mut plugin, &doc(XML));
-        assert!(!markers.is_empty());
-        assert_eq!(markers.len(), 3, "statement, fragment and result map rows");
-        let statement_line = markers
+        assert_eq!(
+            markers.len(),
+            2,
+            "root namespace + statement row: {markers:?}"
+        );
+        let statement = markers
             .iter()
             .find(|m| m.line == 2)
             .expect("statement marker");
-        // The statement names a result map, which wins over its include.
-        assert_eq!(statement_line.target.as_ref().unwrap().range.start.line, 5);
-        let fragment_line = markers
+        // The statement row goes to the interface method, not to the result map
+        // it references (that was the wrong-position bug).
+        let target = statement.target.as_ref().unwrap();
+        assert_eq!(target.path, "/p/mapper/UserMapper.java");
+        assert_eq!(target.range.start.line, 2, "findById declaration");
+        assert_eq!(target.range.start.character, 7, "caret on the method name");
+
+        let root = markers
             .iter()
-            .find(|m| m.line == 1)
-            .expect("fragment marker");
-        assert_eq!(fragment_line.target.as_ref().unwrap().range.start.line, 2);
-        let map_line = markers
-            .iter()
-            .find(|m| m.line == 5)
-            .expect("result map marker");
-        assert_eq!(map_line.target.as_ref().unwrap().range.start.line, 2);
+            .find(|m| m.line == 0)
+            .expect("root mapper marker");
+        let target = root.target.as_ref().unwrap();
+        assert_eq!(target.path, "/p/mapper/UserMapper.java");
+        assert_eq!(target.range.start.line, 1, "interface declaration");
+
+        // Ctrl+B still resolves the result map and the fragment locally.
+        let result_map = Providers::definition(&mut plugin, &doc(XML), at(XML, "BaseMap\">"));
+        assert_eq!(result_map.len(), 1);
+        assert_eq!(result_map[0].range.start.line, 5);
     }
 
     #[test]

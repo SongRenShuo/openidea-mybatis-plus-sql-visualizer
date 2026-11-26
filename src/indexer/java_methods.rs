@@ -102,6 +102,8 @@ pub struct JavaMethodLocation {
     pub method: String,
     /// 0-based, the same convention as `Position::line` (`Range`).
     pub line: u32,
+    /// UTF-16 column of the declaration name, so the caret lands on the name.
+    pub character: u32,
     /// Declared parameter count, which is what tells overloads apart.
     pub arity: usize,
 }
@@ -129,6 +131,21 @@ struct FileSlot {
     methods: Vec<usize>,
     /// `(simple, fqn)` of every type the file declared.
     declared: Vec<(String, String)>,
+    /// The class locations this file declared, removed with it.
+    class_fqns: Vec<String>,
+}
+
+/// A type declaration's file position: the mapper-interface jump target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JavaClassLocation {
+    pub file: String,
+    /// Fully qualified name (`com.acme.mapper.UserMapper`).
+    pub fqn: String,
+    pub class_simple: String,
+    /// 0-based line of the type name.
+    pub line: u32,
+    /// UTF-16 column of the type name.
+    pub character: u32,
 }
 
 /// The resolved method/class index of one project.
@@ -144,6 +161,8 @@ pub struct JavaMethodIndex {
     /// `Simple` → fully qualified names, including types that declare no
     /// method (a marker interface still resolves).
     classes: HashMap<String, Vec<String>>,
+    /// FQN → declaration position, for the `<mapper namespace>` jump.
+    class_locations: HashMap<String, JavaClassLocation>,
     files: HashMap<String, FileSlot>,
     bytes: usize,
     dead: usize,
@@ -209,7 +228,7 @@ impl JavaMethodIndex {
             self.remove_file(path);
         }
 
-        let (locations, declared, truncated) = scan_file(path, text);
+        let (locations, declared, class_locations, truncated) = scan_file(path, text);
         if truncated {
             self.skipped += 1;
         }
@@ -229,6 +248,12 @@ impl JavaMethodIndex {
                 known.push(fqn.clone());
             }
         }
+        let mut class_fqns = Vec::new();
+        for location in &class_locations {
+            self.class_locations
+                .insert(location.fqn.clone(), location.clone());
+            class_fqns.push(location.fqn.clone());
+        }
         self.bytes += text.len();
         self.files.insert(
             path.to_owned(),
@@ -236,6 +261,7 @@ impl JavaMethodIndex {
                 bytes: text.len(),
                 methods: slots.clone(),
                 declared,
+                class_fqns,
             },
         );
         slots.len()
@@ -247,6 +273,15 @@ impl JavaMethodIndex {
             return 0;
         };
         self.bytes = self.bytes.saturating_sub(slot.bytes);
+        for fqn in &slot.class_fqns {
+            let still_declared = self
+                .files
+                .iter()
+                .any(|(other, other_slot)| other != path && other_slot.class_fqns.contains(fqn));
+            if !still_declared {
+                self.class_locations.remove(fqn);
+            }
+        }
         for (simple, fqn) in &slot.declared {
             let still_declared = self
                 .files
@@ -401,6 +436,14 @@ impl JavaMethodIndex {
     pub fn lookup_source_unique(&self, source: &SourceRef) -> Option<&JavaMethodLocation> {
         self.lookup_unique(&source.key())
     }
+
+    /// The declaration positions of the types `namespace` names.
+    pub fn class_location(&self, namespace: &str) -> Vec<&JavaClassLocation> {
+        self.lookup_class(namespace)
+            .into_iter()
+            .filter_map(|fqn| self.class_locations.get(&fqn))
+            .collect()
+    }
 }
 
 /// Does `written` (FQN, simple name or abbreviated FQN) denote `location`?
@@ -454,17 +497,31 @@ fn excluded_path(path: &str) -> bool {
 
 /// Reads one file: its methods, the types it declares, and whether the text
 /// ended inside a type body (a half-written file cannot be trusted).
-fn scan_file(path: &str, text: &str) -> (Vec<JavaMethodLocation>, Vec<(String, String)>, bool) {
+fn scan_file(
+    path: &str,
+    text: &str,
+) -> (
+    Vec<JavaMethodLocation>,
+    Vec<(String, String)>,
+    Vec<JavaClassLocation>,
+    bool,
+) {
     let mut scan = FileScan {
         path,
         text,
         package: package_of(text),
         methods: Vec::new(),
         declared: Vec::new(),
+        class_locations: Vec::new(),
         truncated: false,
     };
     scan.scan_types(0, text.len(), None);
-    (scan.methods, scan.declared, scan.truncated)
+    (
+        scan.methods,
+        scan.declared,
+        scan.class_locations,
+        scan.truncated,
+    )
 }
 
 /// One file's scan state; a struct because the walk is recursive in two
@@ -476,6 +533,7 @@ struct FileScan<'a> {
     methods: Vec<JavaMethodLocation>,
     /// `(simple, fqn)` of every declared type, method-less ones included.
     declared: Vec<(String, String)>,
+    class_locations: Vec<JavaClassLocation>,
     truncated: bool,
 }
 
@@ -506,6 +564,13 @@ impl FileScan<'_> {
             };
             if !self.declared.iter().any(|(_, known)| known == &fqn) {
                 self.declared.push((simple.to_owned(), fqn.clone()));
+                self.class_locations.push(JavaClassLocation {
+                    file: self.path.to_owned(),
+                    fqn: fqn.clone(),
+                    class_simple: simple.to_owned(),
+                    line: position_of(text, name_start).0,
+                    character: position_of(text, name_start).1,
+                });
             }
             self.scan_members(open + 1, close, &fqn, simple, kind);
             cursor = close + 1;
@@ -552,6 +617,7 @@ impl FileScan<'_> {
                 class_simple: simple.to_owned(),
                 method: name.to_owned(),
                 line: line_of(text, member_start + decl.name.0),
+                character: position_of(text, member_start + decl.name.0).1,
                 arity: decl.arity,
             });
         }
@@ -1019,6 +1085,12 @@ fn line_of(text: &str, offset: usize) -> u32 {
         .iter()
         .filter(|&&b| b == b'\n')
         .count() as u32
+}
+
+/// UTF-16 `(line, character)` of `offset` — the same convention as `Position`.
+fn position_of(text: &str, offset: usize) -> (u32, u32) {
+    let position = openidea_plugin::text::position(text, offset.min(text.len()));
+    (position.line, position.character)
 }
 
 #[cfg(test)]
