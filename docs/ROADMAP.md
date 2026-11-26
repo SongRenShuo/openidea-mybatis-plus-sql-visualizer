@@ -44,6 +44,7 @@
 | P-5 | `injections` 与宿主 PR #3641 不打架 | mapper XML 上同时开两者 | 放弃 injections |
 | P-6 | 自建索引在中国网络可用 | Gitee Pages 托管 index.json 实测 | 只走官方注册表（要求开源） |
 | P-7 | `documentIndexer` 图能驱动 Ctrl+B | 最小插件建假 Mapper 图 | 导航退回 provider 现算 |
+| P-8 | 插件模态弹窗可用（升 SDK 到 API 1.18 后） | 1.18 发布后 `reveal_view(<dialog>)` 真机弹出，Esc／尺寸记忆／`closed` 事件逐项验 | 预览继续落在页签，不改外壳；证据见 `docs/调研报告/20261126-2330-OpenIDEA插件弹窗能力到货验证-调研报告.md` |
 
 本版落地后的前提状态（2026-11-25 收口）：
 

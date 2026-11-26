@@ -10,6 +10,12 @@
 | T8-2 | [`T8-2-symbols-detail.md`](T8-2-symbols-detail.md) | 把宿主索引里已有的语法级 detail（字段类型、形参、返回类型、bases）暴露出来 | 无新能力（`project.read`） | 低 |
 | T8-3 | [`T8-3-lsp-readonly-whitelist.md`](T8-3-lsp-readonly-whitelist.md) | 只放行 LSP 只读方法白名单，不碰同步、生命周期与任何编辑 | `lsp.read:<server>` | medium，optional |
 
+## 已提交并被上游采纳
+
+| 编号 | 提案 | 上游状态 | 落地版本 |
+| --- | --- | --- | --- |
+| #6012 | 插件模态／非模态浮层窗口（本仓 2026-11-26 提交） | issue `closed / completed`；实现 PR #6178（dialogs）、#6046（overlays）均已合并 | **API 1.18，尚未发布**（最新发布 `v0.1.53` 只到 1.17）。到货验证见 [`../调研报告/20261126-2330-OpenIDEA插件弹窗能力到货验证-调研报告.md`](../调研报告/20261126-2330-OpenIDEA插件弹窗能力到货验证-调研报告.md) |
+
 ## 证据基线
 
 上游 checkout `30e72ffa5`（tag `v0.1.51`，SDK `openidea-plugin` 0.1.51）。三份提案里的

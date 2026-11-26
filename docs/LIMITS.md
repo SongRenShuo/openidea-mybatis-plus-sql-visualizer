@@ -40,9 +40,12 @@
     `MCP arguments exceed 1 MiB`）。大日志请走面板（`capture-open-log` 读文件）或 `render-log` 命令；MCP 的
     `sqlv_render_logs` 适合中小片段（实测 7200 行 / 935 KB 可用，median 231 ms）。
 
-22. **没有插件可用的模态对话框 API**：原版「SQL 预览」从 gutter 图标/`Alt+Shift+Q` 弹出 `SqlPreviewDialog`（模态窗）；
+22. **本版还没有插件模态对话框**：原版「SQL 预览」从 gutter 图标/`Alt+Shift+Q` 弹出 `SqlPreviewDialog`（模态窗）；
     本平台只能打开工具窗/页签，所以预览统一落在右侧 `SQL 日志` 工具窗的第 5 页签（`SQL 预览`），
     gutter 图标与快捷键都打开同一个页签（状态行给出说明）。渲染链与原版一致，差别只在外壳。
+    上游已在插件 API 1.18 提供 `[[contributes.dialogs]]`（`views.reveal(id)` 打开、`closed` 事件、页面 `openidea.dialog.close()`），
+    但截至 OpenIDEA 0.1.53 的已发布版本最高只到 1.17，本版因此仍用页签；升级 SDK 到 1.18 后改为弹窗。
+    证据与升级影响见 `docs/调研报告/20261126-2330-OpenIDEA插件弹窗能力到货验证-调研报告.md`。
 
 23. **导航图上限 20,000 个文件、200,000 个关联，且标记有索引延迟**：宿主的插件导航图一次最多装
     2 万个匹配文件、整图 20 万个关联（定义/引用/标记/别名），任一超限即整图拒绝更新，
