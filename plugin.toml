@@ -199,12 +199,13 @@ menu = "editor.context"
 command = "preview-sql-diff"
 submenu = "SQL Visualizer"
 
-# The single plugin tool window: SQL Logs on the right rail, as the IntelliJ
-# plugin's SQL Logs tool window. Its five tabs carry the workbench too
+# The single plugin tool window: SQL Visualizer on the right rail, as the
+# IntelliJ plugin's SQL Logs tool window. Its five tabs carry the workbench too
 # (SQL logs / log to SQL / SQL to Java / history / SQL preview).
 [[contributes.views]]
 id = "sqlv-logs"
-title = "SQL Logs"
+# The sidebar header carries the plugin's name (the first tab is "SQL logs").
+title = "SQL Visualizer"
 icon = "icons/sqlLog.svg"
 location = "right"
 web = "web/log-panel.html"

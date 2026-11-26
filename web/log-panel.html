@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SQL Logs</title>
+  <title>SQL Visualizer</title>
   <style>
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -37,7 +37,7 @@
     .iconbtn:focus-visible { border-color: var(--openidea-accent); outline: none; }
     .iconbtn.on { background: var(--openidea-bg-selected); color: var(--openidea-fg-strong); }
     .iconbtn.run { color: var(--openidea-success); }
-    .iconbtn svg { width: 16px; height: 16px; display: block; }
+    .iconbtn svg { width: 16px; height: 16px; display: block; fill: none; }
     /* Toolbar layout (L32): the icon actions on the left, then a spacer so the
        slow count, the SQL-type selector and the dedupe box keep their width at
        the right edge, the way the reference toolbar draws them. No `overflow`
@@ -545,10 +545,10 @@
          actions (L32). -->
     <button id="captureBtn" class="iconbtn" type="button">
       <svg id="captureRunIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="currentColor" stroke="currentColor"/>
+        <path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/>
       </svg>
       <svg id="captureStopIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden>
-        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="currentColor" stroke="currentColor"/>
+        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="var(--openidea-danger)"/>
       </svg>
     </button>
     <!-- Pause / resume (L26) in the slot the reference gives its capture-pause
@@ -588,7 +588,7 @@
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
         <circle cx="8" cy="8" r="1.72" stroke="currentColor" stroke-width="1.4"/>
   <path d="M8.0000 12.0250C5.2670 12.0250 2.5648 10.2367 1.7105 8.0000C2.5648 5.7633 5.2670 3.9750 8.0000 3.9750C10.7330 3.9750 13.4352 5.7633 14.2895 8.0000C13.4352 10.2367 10.7330 12.0250 8.0000 12.0250Z" stroke="currentColor" stroke-width="1.4"/>
-  <path d="M2.250 13.750L13.750 2.250" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M2.250 13.750L13.750 2.250" stroke="var(--openidea-danger)" stroke-width="1.6" stroke-linecap="round"/>
       </svg>
       </button>
       <div id="blockedMenu" class="menu" hidden>
@@ -637,10 +637,10 @@
     <!-- Community (L32): the reference toolbar's 交流群 entry. -->
     <button id="communityBtn" class="iconbtn" type="button">
       <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M3.5 2.5H12.5C13.6 2.5 14.5 3.4 14.5 4.5V9.7C14.5 10.8 13.6 11.7 12.5 11.7H7.2L2.5 14V11.4C1.9 11.1 1.5 10.5 1.5 9.7V4.5C1.5 3.4 2.4 2.5 3.5 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-    <circle cx="5" cy="7.2" r="0.85" fill="currentColor"/>
-    <circle cx="8" cy="7.2" r="0.85" fill="currentColor"/>
-    <circle cx="11" cy="7.2" r="0.85" fill="currentColor"/>
+        <path d="M3.5 2.5H12.5C13.6 2.5 14.5 3.4 14.5 4.5V9.7C14.5 10.8 13.6 11.7 12.5 11.7H7.2L2.5 14V11.4C1.9 11.1 1.5 10.5 1.5 9.7V4.5C1.5 3.4 2.4 2.5 3.5 2.5Z" stroke="var(--openidea-success)" stroke-width="1.4" stroke-linejoin="round"/>
+    <circle cx="5" cy="7.2" r="0.85" fill="#B48EFF"/>
+    <circle cx="8" cy="7.2" r="0.85" fill="#B48EFF"/>
+    <circle cx="11" cy="7.2" r="0.85" fill="#B48EFF"/>
       </svg>
     </button>
     <!-- Help (L26): prints a shortcut cheat sheet to the Output channel. -->
