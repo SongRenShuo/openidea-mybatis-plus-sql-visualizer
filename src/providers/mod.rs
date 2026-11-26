@@ -10,7 +10,7 @@
 //! | setting | default | effect |
 //! | --- | --- | --- |
 //! | `nav.enabled` | `true` | `definition` and `line_markers` |
-//! | `injections.enabled` | `false` | SQL `Injections` inside mapper XML |
+//! | `injections.enabled` | `true` | SQL `Injections` inside mapper XML |
 //! | `sql.dialect` | unset | dialect for quote checks in diagnostics |
 //!
 //! `gutter` (the preview button on every mapper statement) has no switch: it is
@@ -32,10 +32,17 @@ pub(crate) mod sqltext;
 use openidea_plugin::host;
 use std::sync::{OnceLock, RwLock};
 
-/// Turns `nav.enabled` (and friends) into a boolean; an absent setting keeps the
-/// schema default (navigation and injection are on, diagnostics is off).
+/// Turns `nav.enabled` (and friends) into a boolean; an absent value keeps the
+/// schema's own default (navigation, injections and inlays are on, diagnostics
+/// is off). The host's `setting()` already answers the schema default, but it
+/// returns `None` when the schema item cannot be read, and the providers must
+/// not turn a default-on feature off in that case.
 pub(crate) fn setting_on(key: &str) -> bool {
-    host::setting_bool(key).unwrap_or(false)
+    match host::setting_bool(key) {
+        Some(value) => value,
+        None => crate::settings::definition(key)
+            .is_some_and(|def| matches!(def.default, crate::settings::DefaultValue::Bool(true))),
+    }
 }
 
 /// The configured dialect name (`mysql`, `postgres`, `oracle`, `sqlserver`, …),
