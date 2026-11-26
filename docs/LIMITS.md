@@ -60,8 +60,9 @@
    `sqlv_schema_context` 只格式化调用方给的结构；`sqlv_explain` 缺结果时返回 `unresolved`。
 4. **schema 由调用方提供**：`sqlv_schema_context` 格式化入参里的表/列/索引，不做数据库自省；
    诊断与 inlay 在没有列清单时一律不出结果（宁可不报，也不误报）。
-5. **MCP `sqlv_history_search` 只搜入参文本**：平台没有 IDE 历史记录 API，所以它不检索历史面板，
-   只对本次调用传入的日志文本做字面量搜索。
+5. **MCP `sqlv_history_search` 只搜入参文本**：UI 的「SQL 历史」页会把快照按项目存进插件 storage
+   （每个项目最多 10 个、单文件 512 KB，打开/捕获日志时自动保存），但 MCP 工具不读这份存储，
+   只对本次调用传入的日志文本做字面量搜索；平台也没有供插件跨工具读取历史记录的统一 API。
 6. **捕获只覆盖三类运行配置**：`[[contributes.javaAgents]]` 只注入 Application / Spring Boot /
    JAR Application（Run 与 Debug）；JUnit、Maven/Gradle goal、应用服务器、远程目标不注入。
    没有 agent 时用 `capture-open-log` 读工程内导出的日志文件；项目外路径需要额外文件授权。
@@ -69,3 +70,7 @@
    本版用 `port=<固定端口>`，`capture-start` 显式传端口。端口冲突时换端口并重启目标应用。
 8. **引擎 jar 不入库**：仓库只钉 `engine/ENGINE_VERSION` 与 sha256；安装态首次使用需要
    `engine.downloadUrl`（默认空）。留空即不联网，直接用本地/仓库 jar，缺失时降级为纯文本模式。
+9. **SQL 历史的存储位置不同**：原版把日志自动保存成 `.idea` 下的日志文件，历史页读那个目录；
+   本版把快照按项目写进插件 `storage`（每项目最多 10 个、单文件 512 KB），因此历史文件不会出现在
+   项目树里、不能被外部编辑器打开，也不跨机器同步。交互（文件列表 / 语句列表 / 返回 / 刷新 /
+   滚动到底 / 快速预览 / 复制 / 跳转）按原版对齐。

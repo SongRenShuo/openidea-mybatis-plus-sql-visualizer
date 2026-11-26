@@ -19,8 +19,10 @@ activation = ["on-command:*", "on-event:websocket-ready"]
 # What the code may do. The user approves these when installing.
 # - project.read: render and check statements against the project's mapper XML and
 #   source files, which is the whole point of the plugin. It cannot write anything.
+# - storage: the SQL history tab persists snapshots in the plugin's own key-value
+#   store (per project, max 10 files / 512 KB each). No project files are touched.
 [capabilities]
-required = ["project.read", "events"]
+required = ["project.read", "events", "storage"]
 # clipboard: the log panel and the workbench copy/export SQL. Refusing it only
 # disables those two buttons; rendering, navigation and checks keep working.
 # process:java: starts the pinned engine jar (engine/ENGINE_VERSION) for Wrapper
@@ -38,74 +40,74 @@ optional = ["clipboard", "clipboard.read", "process:java", "net:127.0.0.1", "edi
 
 [[contributes.commands]]
 id = "render-xml"
-title = "MyBatis SQL: Render Mapper XML"
+title = "Render Mapper XML"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "check-sql"
-title = "MyBatis SQL: Check SQL"
+title = "Check SQL"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "perf-advice"
-title = "MyBatis SQL: Performance Advice"
+title = "Performance Advice"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "generate-crud"
-title = "MyBatis SQL: Generate CRUD"
+title = "Generate CRUD"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "rollback-plan"
-title = "MyBatis SQL: Rollback Plan"
+title = "Rollback Plan"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "render-log"
-title = "MyBatis SQL: Render SQL Log"
+title = "Render SQL Log"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "capture-start"
-title = "MyBatis SQL: Start Capture"
+title = "Start Capture"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "capture-stop"
-title = "MyBatis SQL: Stop Capture"
+title = "Stop Capture"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "capture-status"
-title = "MyBatis SQL: Capture Status"
+title = "Capture Status"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "capture-poll"
-title = "MyBatis SQL: Poll Capture"
+title = "Poll Capture"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "capture-open-log"
-title = "MyBatis SQL: Open Capture Log"
+title = "Open Capture Log"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "open-logs"
-title = "MyBatis SQL: Open SQL Logs"
+title = "Open SQL Logs"
 category = "MyBatis SQL Visualizer"
 
 [[contributes.commands]]
 id = "open-workbench"
-title = "MyBatis SQL: Open Workbench"
+title = "Open Workbench"
 category = "MyBatis SQL Visualizer"
 
 # Diagnostics for big projects: what the Java/XML indexes hold and what indexing
 # cost (documents, bytes, total and slowest document). No arguments.
 [[contributes.commands]]
 id = "index-stats"
-title = "MyBatis SQL: Index Stats"
+title = "Index Stats"
 category = "MyBatis SQL Visualizer"
 
 # SQL preview (the plugin's main action): `<mapper.xml>#<id>`, a mapper file, a
@@ -113,7 +115,7 @@ category = "MyBatis SQL Visualizer"
 # whole document (`editor.read`, optional). Opens the preview tab on the right.
 [[contributes.commands]]
 id = "preview-sql"
-title = "MyBatis SQL: Preview SQL"
+title = "Preview SQL"
 category = "MyBatis SQL Visualizer"
 
 # The same render, opened in the diff viewer (original vs SQL): its tab has
@@ -121,7 +123,7 @@ category = "MyBatis SQL Visualizer"
 # window without a dialog API.
 [[contributes.commands]]
 id = "preview-sql-diff"
-title = "MyBatis SQL: Preview SQL in Diff"
+title = "Preview SQL in Diff"
 category = "MyBatis SQL Visualizer"
 
 # The IntelliJ edition binds Alt+Shift+Q to its preview action; the same key here.

@@ -342,13 +342,62 @@
       color: var(--openidea-fg-muted); padding: 16px 8px; text-align: center;
     }
     .btn[disabled] { opacity: 0.5; cursor: default; }
-    .histlist { flex: 1 1 auto; overflow: auto; min-height: 0; }
-    .histrow {
-      border-bottom: 1px solid var(--openidea-border); padding: 4px 8px;
-      cursor: pointer;
+    /* SQL history: the reference's two-level panel (file list, then the file's
+       statements) with the toolbar above and the docked quick preview below. */
+    #panelHistory { position: relative; }
+    .histbody { overflow: hidden; }
+    .histtoolbar { flex: 0 0 auto; flex-wrap: nowrap; gap: 2px; }
+    .histtoolbar .kw { flex: 1 1 auto; min-width: 60px; }
+    .histfiles, .histentries {
+      flex: 1 1 auto; overflow: auto; min-height: 0;
+      border-top: 1px solid var(--openidea-border);
     }
-    .histrow:hover { background: var(--openidea-bg-hover); }
-    .histrow .sql { margin-top: 2px; }
+    .histfile {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 5px 8px; cursor: pointer;
+      border-bottom: 1px solid var(--openidea-border);
+    }
+    .histfile:hover { background: var(--openidea-bg-hover); }
+    .histfile.selected { background: var(--openidea-bg-selected); }
+    .histfile .hname {
+      flex: 1 1 auto; min-width: 0; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .histfile .hmeta { flex: 0 0 auto; color: var(--openidea-fg-muted); font-size: 11px; }
+    .histentry {
+      padding: 5px 8px; cursor: pointer;
+      border-bottom: 1px solid var(--openidea-border);
+    }
+    .histentry:hover { background: var(--openidea-bg-hover); }
+    .histentry.selected { background: var(--openidea-bg-selected); }
+    .histentry .hhead {
+      display: flex; align-items: baseline; gap: 8px;
+      color: var(--openidea-fg-muted); font-size: 11px;
+      white-space: nowrap; overflow: hidden;
+    }
+    .histentry .hhead .loc {
+      overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
+    .histentry .hsql {
+      margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
+      font-size: 12px; color: var(--openidea-fg);
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .histentry .hsql mark {
+      background: color-mix(in srgb, var(--openidea-warning) 35%, transparent);
+      color: inherit;
+    }
+    .histpreview {
+      flex: 0 0 32%; min-height: 0; overflow: auto;
+      margin: 6px 8px 8px; background: var(--openidea-bg-input);
+      border: 1px solid var(--openidea-border); border-radius: 3px;
+    }
+    .histpreview pre {
+      margin: 0; padding: 6px 8px;
+      font-family: var(--openidea-font-mono, monospace); font-size: 12px;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .histmenu { position: absolute; right: 8px; top: 38px; z-index: 40; }
 
     /* L33: the two input tabs — a vertical editor split (input on top, result
        below), a toolbar per pane and one status line under both. Everything is
@@ -442,12 +491,16 @@
       border: 1px solid var(--openidea-border); border-radius: 3px;
       background: var(--openidea-bg-elevated);
     }
-    #panelPreview .pv-more-item {
+    #panelPreview .pv-more-item,
+    .histmenu .pv-more-item {
       padding: 3px 8px; background: transparent; border: none; border-radius: 2px;
       cursor: pointer; text-align: left; color: var(--openidea-fg); font-size: 12px;
+      display: block; width: 100%;
     }
-    #panelPreview .pv-more-item:hover { background: var(--openidea-bg-selected); }
-    #panelPreview .pv-more-item:disabled { color: var(--openidea-fg-muted); cursor: default; }
+    #panelPreview .pv-more-item:hover,
+    .histmenu .pv-more-item:hover { background: var(--openidea-bg-selected); }
+    #panelPreview .pv-more-item:disabled,
+    .histmenu .pv-more-item:disabled { color: var(--openidea-fg-muted); cursor: default; }
     #panelPreview .hint { padding: 0 8px 4px; color: var(--openidea-fg-muted); }
     #panelPreview #pvInput {
       flex: 1 1 auto; min-height: 0; margin: 0 8px 8px; padding: 6px 8px; resize: none;
@@ -817,17 +870,42 @@
     <div class="statusline" id="s2jStatus"></div>
   </div>
 
-  <!-- SQL 历史 -->
+<!-- SQL history: two levels like the reference's HistorySqlLogPanel — saved
+       log files first, then the statements of the opened file. The toolbar
+       carries the same actions (back / refresh / scroll to end / quick
+       preview) and the search field filters the current level. -->
   <div class="panel" id="panelHistory" hidden>
-    <div class="tabbody">
-      <div class="tabactions">
+    <div class="tabbody histbody">
+      <div class="tabactions histtoolbar">
+        <button id="histBackBtn" class="btn" type="button" hidden><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.3464 3.64645C6.54166 3.45118 6.85824 3.45118 7.0535 3.64645C7.24877 3.84171 7.24877 4.15829 7.0535 4.35355L3.90352 7.50354L13.5035 7.50354C13.7797 7.50354 14.0035 7.7274 14.0035 8.00354C14.0035 8.27968 13.7797 8.50354 13.5035 8.50354L3.91059 8.50354L7.05351 11.6464C7.24877 11.8417 7.24877 12.1583 7.05351 12.3536C6.85824 12.5488 6.54166 12.5488 6.3464 12.3536L2.3464 8.35355L1.99284 8L2.3464 7.64645L6.3464 3.64645Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="histRefreshBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9V8C2.5 4.96243 4.96243 2.5 8 2.5C9.10679 2.5 10.1372 2.82692 11 3.38947" stroke="currentColor" stroke-linecap="round"/>
+<path d="M5 12.6105C5.86278 13.1731 6.89321 13.5 8 13.5C11.0376 13.5 13.5 11.0376 13.5 8V7" stroke="currentColor" stroke-linecap="round"/>
+<path d="M0.49997 7.50027L2.5 9.5L4.49998 7.50023" stroke="currentColor" stroke-linecap="round"/>
+<path d="M11.5 8.49982L13.5 6.5L15.5 8.49982" stroke="currentColor" stroke-linecap="round"/></svg><span data-btnlabel></span></button>
+        <button id="histScrollBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.85355 10.8536C8.04882 10.6583 8.04882 10.3417 7.85355 10.1464C7.65829 9.95119 7.34171 9.95119 7.14645 10.1464L5 12.2929L4.99999 2.5C4.99999 2.22386 4.77614 2 4.49999 2C4.22385 2 3.99999 2.22386 3.99999 2.5L3.99999 12.2929L1.85355 10.1464C1.65829 9.95118 1.34171 9.95118 1.14645 10.1464C0.951184 10.3417 0.951184 10.6583 1.14645 10.8536L4.14645 13.8536C4.34171 14.0488 4.65829 14.0488 4.85355 13.8536L7.85355 10.8536Z" fill="currentColor"/>
+<path d="M11 2.5H14C14.2761 2.5 14.5 2.72386 14.5 3V5C14.5 5.27614 14.2761 5.5 14 5.5H11C10.7239 5.5 10.5 5.27614 10.5 5V3C10.5 2.72386 10.7239 2.5 11 2.5Z" stroke="currentColor"/>
+<path d="M11 7.5H14C14.2761 7.5 14.5 7.72386 14.5 8V10C14.5 10.2761 14.2761 10.5 14 10.5H11C10.7239 10.5 10.5 10.2761 10.5 10V8C10.5 7.72386 10.7239 7.5 11 7.5Z" stroke="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="histPreviewBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.00002 3H12C12.5523 3 13 3.44772 13 4V12C13 12.5523 12.5523 13 12 13H7.00002V3ZM6.00002 2H7.00002H12C13.1046 2 14 2.89543 14 4V12C14 13.1046 13.1046 14 12 14H7.00002H6.00002H4C2.89543 14 2 13.1046 2 12V4C2 2.89543 2.89543 2 4 2H6.00002ZM6.00002 13H4C3.44772 13 3 12.5523 3 12V4C3 3.44772 3.44772 3 4 3H6.00002V13Z" fill="currentColor"/>
+<rect x="8" y="5" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="8" y="7.5" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="8" y="10" width="4" height="1" rx="0.5" fill="currentColor"/></svg><span data-btnlabel></span></button>
         <input id="histKw" class="kw" type="text" autocomplete="off" spellcheck="false">
         <button id="histSearchBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5" stroke="currentColor"/>
 <path d="M10.1992 10.2002L13.4992 13.4961" stroke="currentColor" stroke-linecap="round"/></svg><span data-btnlabel></span></button>
+        <span id="histCount" class="muted"></span>
       </div>
-      <div id="histCount" class="muted"></div>
-      <div id="histList" class="histlist"></div>
+      <div id="histFiles" class="histfiles"></div>
+      <div id="histEntries" class="histentries" hidden></div>
       <div id="histEmpty" class="tabempty" hidden></div>
+      <div id="histPreviewPane" class="histpreview" hidden>
+        <pre id="histPreviewBody"></pre>
+      </div>
+    </div>
+    <div class="menu histmenu" id="histMenu" hidden>
+      <button class="pv-more-item" type="button" data-hact="copy"></button>
+      <button class="pv-more-item" type="button" data-hact="preview"></button>
+      <button class="pv-more-item" type="button" data-hact="jump-java"></button>
+      <button class="pv-more-item" type="button" data-hact="jump-xml"></button>
     </div>
   </div>
 
@@ -1298,8 +1376,22 @@
         $('s2jCaller').placeholder = L.tabSqlToJavaCallerHint || '';
         setText($('s2jReturnLabel'), L.tabSqlToJavaReturnLabel);
         $('s2jReturnType').placeholder = L.tabSqlToJavaReturnHint || '';
-        $('histKw').placeholder = L.tabHistoryKeyword || '';
         setText($('histSearchBtn'), L.tabHistorySearch);
+        setText($('histBackBtn'), L.tabHistoryBack);
+        setText($('histRefreshBtn'), L.tabHistoryRefresh);
+        setText($('histScrollBtn'), L.tabHistoryScrollEnd);
+        setText($('histPreviewBtn'), L.tabHistoryPreviewToggle);
+        var histActs = {
+          'copy': L.tabHistoryCopy,
+          'preview': L.tabHistoryOpenPreview,
+          'jump-java': L.tabHistoryJumpJava,
+          'jump-xml': L.tabHistoryJumpXml
+        };
+        var histItems = $('histMenu').querySelectorAll('[data-hact]');
+        for (var hi = 0; hi < histItems.length; hi++) {
+          setText(histItems[hi], histActs[histItems[hi].getAttribute('data-hact')] || '');
+        }
+        if (historyTab && historyTab.level) { applyHistory(historyTab); }
       }
 
       function updateTypeButton() {
@@ -1860,56 +1952,176 @@
         node.classList.toggle('error', tab.statusKind === 'error');
       }
 
-      // "SQL history" -------------------------------------------------------
-      function buildHistoryRow(item) {
+      // "SQL history": two levels, like the reference's HistorySqlLogPanel.
+      // Level 1 lists saved log files; opening one shows its statements.
+      var historyTab = {};
+      var histSelected = null;
+
+      function fmtBytes(bytes) {
+        if (!bytes) { return '0 KB'; }
+        if (bytes >= 1024 * 1024) { return (bytes / (1024 * 1024)).toFixed(1) + ' MB'; }
+        return Math.max(1, Math.round(bytes / 1024)) + ' KB';
+      }
+
+      function historyFileRow(file) {
         var el = document.createElement('div');
-        el.className = 'histrow';
-        var meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.appendChild(makePart('seq', '#' + item.line));
-        meta.appendChild(makePart('part time', item.time || '-'));
-        // This build captures no source file for a log line (see LIMITS.md).
-        meta.appendChild(makePart('part src', '[' + (L.tabHistorySource || '') + ': -]'));
-        el.appendChild(meta);
-        var sql = document.createElement('div');
-        sql.className = 'sql';
-        sql.textContent = item.sql || item.text || '';
-        el.appendChild(sql);
-        el.title = item.text || '';
+        el.className = 'histfile';
+        el.setAttribute('role', 'listitem');
+        var name = document.createElement('span');
+        name.className = 'hname';
+        name.textContent = file.name || '';
+        var size = document.createElement('span');
+        size.className = 'hmeta';
+        size.textContent = fmtBytes(file.bytes);
+        var count = document.createElement('span');
+        count.className = 'hmeta';
+        count.textContent = (file.count || 0) + ' ' + (L.tabHistoryFileCountSuffix || '');
+        el.appendChild(name);
+        el.appendChild(size);
+        el.appendChild(count);
+        el.title = (file.saved || '') + ' · ' + (file.name || '');
         el.addEventListener('click', function () {
-          post({ op: 'history-open', line: item.line });
+          if (histSelected) { histSelected.classList.remove('selected'); }
+          histSelected = el;
+          el.classList.add('selected');
+        });
+        el.addEventListener('dblclick', function () {
+          post({ op: 'history-open-file', id: file.id });
         });
         return el;
       }
 
+      function historyEntryRow(entry) {
+        var el = document.createElement('div');
+        el.className = 'histentry';
+        el.dataset.line = String(entry.line);
+        var head = document.createElement('div');
+        head.className = 'hhead';
+        head.appendChild(makePart('part time', entry.time || '-'));
+        if (entry.duration_ms != null) {
+          head.appendChild(makePart('part', entry.duration_ms + (L.durationUnit || 'ms')));
+        }
+        var loc = document.createElement('span');
+        loc.className = 'part loc';
+        loc.textContent = entry.source || '';
+        loc.title = entry.method || '';
+        head.appendChild(loc);
+        var sql = document.createElement('div');
+        sql.className = 'hsql';
+        sql.textContent = entry.sql || '';
+        el.appendChild(head);
+        el.appendChild(sql);
+        el.title = entry.method || '';
+        el.addEventListener('click', function () {
+          selectHistoryEntry(entry.line, el);
+        });
+        el.addEventListener('dblclick', function () {
+          selectHistoryEntry(entry.line, el);
+          post({ op: 'history-open', line: entry.line });
+        });
+        el.addEventListener('contextmenu', function (event) {
+          event.preventDefault();
+          selectHistoryEntry(entry.line, el);
+          openHistoryMenu(event, entry);
+        });
+        return el;
+      }
+
+      function selectHistoryEntry(line, el) {
+        var rows = $('histEntries').children;
+        for (var i = 0; i < rows.length; i++) { rows[i].classList.remove('selected'); }
+        el.classList.add('selected');
+        histSelected = el;
+        if (historyTab.preview) {
+          post({ op: 'history-preview', line: line });
+        }
+      }
+
+      function openHistoryMenu(event, entry) {
+        var menu = $('histMenu');
+        var items = menu.querySelectorAll('[data-hact]');
+        for (var i = 0; i < items.length; i++) {
+          var act = items[i].getAttribute('data-hact');
+          items[i].disabled = (act === 'jump-java' || act === 'jump-xml') && !entry.method;
+        }
+        menu.hidden = false;
+        var rect = $('panelHistory').getBoundingClientRect();
+        var x = event.clientX - rect.left;
+        var y = event.clientY - rect.top;
+        x = Math.min(x, rect.width - menu.offsetWidth - 8);
+        y = Math.min(y, rect.height - menu.offsetHeight - 8);
+        menu.style.left = Math.max(4, x) + 'px';
+        menu.style.top = Math.max(4, y) + 'px';
+      }
+
+      function closeHistoryMenu() { $('histMenu').hidden = true; }
+
+      function historyEmptyText(tab) {
+        if (tab.ran && tab.keyword) { return L.tabHistoryNoMatch || ''; }
+        return tab.level === 'files'
+          ? (L.tabHistoryFilesEmpty || '')
+          : (L.tabHistoryEntriesEmpty || '');
+      }
+
       function applyHistory(tab) {
         tab = tab || {};
-        var list = $('histList');
-        while (list.firstChild) { list.removeChild(list.firstChild); }
-        var matches = tab.matches || [];
-        if (matches.length === 0) {
-          list.hidden = true;
-          $('histEmpty').hidden = false;
-          setText($('histEmpty'), tab.ran ? (L.tabHistoryNoMatch || '') : (L.tabHistoryEmpty || ''));
-        } else {
-          list.hidden = false;
-          $('histEmpty').hidden = true;
-          var frag = document.createDocumentFragment();
-          for (var i = 0; i < matches.length; i++) { frag.appendChild(buildHistoryRow(matches[i])); }
-          list.appendChild(frag);
+        historyTab = tab;
+        var level = tab.level === 'entries' ? 'entries' : 'files';
+        $('histBackBtn').hidden = level !== 'entries';
+        $('histPreviewBtn').classList.toggle('on', !!tab.preview);
+        $('histFiles').hidden = level !== 'files';
+        $('histEntries').hidden = level !== 'entries';
+        $('histKw').placeholder = level === 'files'
+          ? (L.tabHistorySearchFiles || '')
+          : (L.tabHistorySearchEntries || '');
+
+        var target = level === 'files' ? $('histFiles') : $('histEntries');
+        var items = level === 'files' ? (tab.files || []) : (tab.entries || []);
+        while (target.firstChild) { target.removeChild(target.firstChild); }
+        var frag = document.createDocumentFragment();
+        for (var i = 0; i < items.length; i++) {
+          frag.appendChild(level === 'files'
+            ? historyFileRow(items[i])
+            : historyEntryRow(items[i]));
         }
+        target.appendChild(frag);
+        histSelected = null;
+
+        var empty = items.length === 0;
+        target.hidden = empty;
+        $('histEmpty').hidden = !empty;
+        if (empty) { setText($('histEmpty'), historyEmptyText(tab)); }
+
         var count = '';
-        if (tab.ran && tab.total > 0) {
-          count = tab.total + ' ' + (L.tabHistoryCountSuffix || '');
+        if (tab.total > 0) {
+          var suffix = level === 'files'
+            ? (L.tabHistoryFilesCountSuffix || '')
+            : (L.tabHistoryCountSuffix || '');
+          count = tab.total + ' ' + suffix;
         }
         if (tab.truncated) {
           count += (count ? ' · ' : '') + (L.tabHistoryTruncated || '');
         }
         setText($('histCount'), count.replace(/\s+/g, ' ').trim());
+
+        var pane = $('histPreviewPane');
+        pane.hidden = !tab.preview || level !== 'entries';
+        if (!pane.hidden) {
+          var line = tab.previewLine;
+          var body = '';
+          if (line != null) {
+            for (var j = 0; j < items.length; j++) {
+              if (items[j].line === line) { body = items[j].sql || ''; break; }
+            }
+          }
+          $('histPreviewBody').textContent = body || (L.tabHistoryPreviewEmpty || '');
+        }
+
         if (document.activeElement !== $('histKw')) {
           $('histKw').value = tab.keyword || '';
         }
       }
+
 
       // "SQL 预览" (L23) ----------------------------------------------------
       // The workbench moved here from its own view. Same behaviour as before:
@@ -2340,7 +2552,12 @@
         (function (tab) {
           var btn = tabButton(tab);
           if (btn) {
-            btn.addEventListener('click', function () { selectTab(tab, true); });
+            btn.addEventListener('click', function () {
+              selectTab(tab, true);
+              if (tab === 'history') {
+                post({ op: historyTab.level === 'entries' ? 'history-refresh' : 'history-list' });
+              }
+            });
           }
         })(TAB_IDS[tabIndex]);
       }
@@ -2460,6 +2677,35 @@
       });
       $('histKw').addEventListener('keydown', function (event) {
         if (event.key === 'Enter') { event.preventDefault(); $('histSearchBtn').click(); }
+      });
+      $('histBackBtn').addEventListener('click', function () {
+        post({ op: 'history-back' });
+      });
+      $('histRefreshBtn').addEventListener('click', function () {
+        post({ op: 'history-refresh' });
+      });
+      $('histScrollBtn').addEventListener('click', function () {
+        var list = historyTab.level === 'entries' ? $('histEntries') : $('histFiles');
+        list.scrollTop = list.scrollHeight;
+      });
+      $('histPreviewBtn').addEventListener('click', function () {
+        post({ op: 'history-preview-toggle', on: !historyTab.preview });
+      });
+      $('histMenu').addEventListener('click', function (event) {
+        var item = event.target.closest('[data-hact]');
+        if (!item || !histSelected) { return; }
+        var line = parseInt(histSelected.dataset.line, 10);
+        var act = item.getAttribute('data-hact');
+        if (act === 'copy') { post({ op: 'history-copy', line: line }); }
+        else if (act === 'preview') { post({ op: 'history-open', line: line }); }
+        else if (act === 'jump-java') { post({ op: 'history-jump-java', line: line }); }
+        else if (act === 'jump-xml') { post({ op: 'history-jump-xml', line: line }); }
+        closeHistoryMenu();
+      });
+      document.addEventListener('click', function (event) {
+        if (!$('histMenu').hidden && !event.target.closest('#histMenu')) {
+          closeHistoryMenu();
+        }
       });
 
       // "SQL 预览" (L23): splitter, actions, inner tabs, Ctrl+Enter.

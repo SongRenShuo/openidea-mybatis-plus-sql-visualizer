@@ -55,6 +55,7 @@ openidea-plugin link .         # 之后 Settings › Plugins › Reload
 | --- | --- | --- |
 | `project.read` | 低 | 插件的工作就是读项目里的 mapper XML、Java 源码和 SQL 日志再渲染。不给读权限等于没有功能。它不能写、删、改项目里的任何东西。 |
 | `events` | 低 | 用 `websocket-ready` 唤醒捕获消费，不轮询。没有它只剩日志文件一条路。 |
+| `storage` | 低 | 「SQL 历史」页把日志快照存进插件自己的键值存储（按项目隔离，每项目最多 10 个、单文件 512 KB）。不碰项目文件。 |
 | `clipboard`（可选） | 中 | 日志面板和工作台复制/导出渲染出的 SQL。拒绝它只关掉这两个按钮，渲染、导航、校验都照旧。 |
 | `process:java`（可选） | 高 | 启动钉住版本且校验 sha256 的引擎 jar（`engine/ENGINE_VERSION`），用于 Wrapper 渲染与 EXPLAIN 语句包装，同时承载 Java agent 挂载。拒绝它降级成纯文本模式，其他功能都在。 |
 | `net:127.0.0.1`（可选） | 中 | 以客户端身份连 Java agent 的回环捕获 WebSocket（沙箱没有裸 socket）。拒绝它仍有日志文件路径。 |

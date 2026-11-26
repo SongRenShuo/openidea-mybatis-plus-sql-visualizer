@@ -772,6 +772,67 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "Only the first matches are listed.",
         "只列出前若干条命中。",
     ),
+    // Two-level history (parity with HistorySqlLogPanel): files first, then the
+    // statements of the opened file.
+    (
+        "view.logs.tab.history.files_empty",
+        "No history files yet. Logs are saved when you capture or open one.",
+        "尚无历史文件；捕获或打开日志后会自动保存。",
+    ),
+    (
+        "view.logs.tab.history.entries_empty",
+        "This file has no statements to show.",
+        "该文件没有可显示的 SQL。",
+    ),
+    (
+        "view.logs.tab.history.search_files",
+        "Search history files…",
+        "搜索历史文件…",
+    ),
+    (
+        "view.logs.tab.history.search_entries",
+        "Search SQL / source…",
+        "搜索 SQL / 源文件…",
+    ),
+    (
+        "view.logs.tab.history.file_count_suffix",
+        "statements",
+        "条 SQL",
+    ),
+    (
+        "view.logs.tab.history.files_count_suffix",
+        "files",
+        "个文件",
+    ),
+    ("view.logs.tab.history.back", "Back", "返回"),
+    ("view.logs.tab.history.refresh", "Refresh", "刷新"),
+    (
+        "view.logs.tab.history.scroll_end",
+        "Scroll to end",
+        "滚动到底",
+    ),
+    (
+        "view.logs.tab.history.preview_toggle",
+        "Quick preview",
+        "快速预览",
+    ),
+    (
+        "view.logs.tab.history.preview_empty",
+        "Select a statement to preview it here.",
+        "选中一条 SQL 在此快速预览。",
+    ),
+    ("view.logs.tab.history.copy", "Copy SQL", "复制 SQL"),
+    ("view.logs.tab.history.jump_java", "Go to Java", "跳转 Java"),
+    (
+        "view.logs.tab.history.jump_xml",
+        "Go to Mapper XML",
+        "跳转 Mapper XML",
+    ),
+    (
+        "view.logs.tab.history.open_preview",
+        "Open in SQL preview",
+        "在 SQL 预览中打开",
+    ),
     // Lane L32: row fragments, toolbar entries and row actions the reference
     // panel has (duration unit, affected-row suffix, quick preview, community,
     // per-template focus and the two "send to an input tab" hand-offs).

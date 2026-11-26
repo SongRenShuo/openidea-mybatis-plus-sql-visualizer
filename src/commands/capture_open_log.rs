@@ -47,6 +47,11 @@ fn open_log(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     let analysis = parse(&text, &bridge::parse_options());
 
     log_panel::set_log_text(&text);
+    // A loaded log becomes a history file (the reference's auto-saver); the
+    // file stem names it so the history list is readable.
+    let stem = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let stem = stem.strip_suffix(".log").unwrap_or(stem);
+    log_panel::history_capture(ctx, stem);
     host::reveal_view(log_panel::VIEW_ID)
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
     // The body is a packaged page: the host never re-renders it, so push the new
