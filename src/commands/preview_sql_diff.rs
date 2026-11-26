@@ -11,8 +11,6 @@
 //! Input forms and the render are `preview_sql::model_for`, so both entries can
 //! never disagree about what a mapper renders to.
 
-use std::fmt::Write as _;
-
 use openidea_plugin::{ContentDiff, Error, Invocation, host};
 
 use crate::capture::bridge;
@@ -32,16 +30,14 @@ const DIFF_FILE_NAME: &str = "sql";
 /// Dispatch entry.
 pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
     match open(ctx, arg) {
-        Ok(text) => {
-            common::emit(&text)?;
-            Ok(None)
-        }
+        // The diff tab is the surface; do not pop the Output tab as well.
+        Ok(()) => Ok(None),
         Err(err) => common::fail(err),
     }
 }
 
-fn open(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
-    let (model, detail, raw) = preview_sql::model_for(ctx, arg)?;
+fn open(ctx: &Invocation, arg: Option<&str>) -> Result<(), CliError> {
+    let (model, _detail, raw) = preview_sql::model_for(ctx, arg)?;
     let sql = model.sql.trim_end();
     if sql.trim().is_empty() {
         return Err(CliError::new(
@@ -64,9 +60,7 @@ fn open(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     host::open_diff(&diff, Some(DIFF_FILE_NAME))
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
 
-    let mut out = String::new();
-    let _ = writeln!(out, "-- preview-sql-diff: {detail} -> diff tab");
-    Ok(out)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -99,7 +93,10 @@ mod tests {
                 .is_some_and(|raw| raw.contains("select id from user")),
             "the left side is the original input"
         );
-        assert!(host.output()[common::CHANNEL].contains("-- preview-sql-diff:"));
+        assert!(
+            host.output().get(common::CHANNEL).is_none(),
+            "the diff tab is the surface; Output stays closed"
+        );
     }
 
     #[test]

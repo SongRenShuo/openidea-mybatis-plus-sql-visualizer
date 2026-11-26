@@ -3,8 +3,6 @@
 //! The panel may be hidden or showing stale rows; this command is the explicit
 //! "show me the logs now" entry, used after a file is loaded or a capture starts.
 
-use std::fmt::Write as _;
-
 use openidea_plugin::{Error, Invocation, host};
 
 use crate::capture::bridge;
@@ -17,15 +15,14 @@ pub const ID: &str = "open-logs";
 /// Dispatch entry.
 pub fn run(_ctx: &Invocation, _arg: Option<&str>) -> Result<Option<String>, Error> {
     match open() {
-        Ok(text) => {
-            common::emit(&text)?;
-            Ok(None)
-        }
+        // Revealing the panel is the whole effect; opening Output on top of it
+        // would steal the focus the user asked for.
+        Ok(()) => Ok(None),
         Err(err) => common::fail(err),
     }
 }
 
-fn open() -> Result<String, CliError> {
+fn open() -> Result<(), CliError> {
     host::reveal_view(log_panel::VIEW_ID)
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
     // The panel body is a packaged page; a `refresh_view` alone does not reach
@@ -33,14 +30,7 @@ fn open() -> Result<String, CliError> {
     log_panel::push_state()
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
     host::refresh_view(log_panel::VIEW_ID);
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "-- open-logs: revealed {} (buffered: {} chars)",
-        log_panel::VIEW_ID,
-        log_panel::buffered_len()
-    );
-    Ok(out)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -60,9 +50,8 @@ mod tests {
         let state: serde_json::Value = serde_json::from_str(&pushed[0].1).expect("valid JSON");
         assert_eq!(state["op"], "state");
         assert!(
-            host.output()[common::CHANNEL].contains("-- open-logs: revealed sqlv-logs"),
-            "{}",
-            &host.output()[common::CHANNEL]
+            host.output().get(common::CHANNEL).is_none(),
+            "revealing the panel does not open Output"
         );
     }
 }

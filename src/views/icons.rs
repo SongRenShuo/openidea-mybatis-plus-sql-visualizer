@@ -3,25 +3,23 @@
 //!
 //! The SVGs are embedded so the tests validate exactly the bytes the package
 //! ships: 16×16, no scripts, no external references, under the 64 KiB limit.
+//! The navigation markers and the mapper file icon are the IntelliJ edition's
+//! own artwork (`mapperStatement` / `mapperMethod` / `mapperXml`), copied as-is:
+//! the two markers only exist in a light variant upstream, so the dark slot
+//! points at the same file.
 
-/// Mapper marker (a mapper interface or XML namespace).
-pub const MARKER_MAPPER: &str = include_str!("../../icons/marker-mapper.svg");
-pub const MARKER_MAPPER_DARK: &str = include_str!("../../icons/marker-mapper-dark.svg");
-/// Statement marker (`<select>` / `<insert>` / …).
-pub const MARKER_STATEMENT: &str = include_str!("../../icons/marker-statement.svg");
-pub const MARKER_STATEMENT_DARK: &str = include_str!("../../icons/marker-statement-dark.svg");
-/// Result-map marker.
-pub const MARKER_RESULTMAP: &str = include_str!("../../icons/marker-resultmap.svg");
-pub const MARKER_RESULTMAP_DARK: &str = include_str!("../../icons/marker-resultmap-dark.svg");
-/// File icon for mapper XML files.
+/// XML-side statement marker (`<select>` / `<insert>` / …), cyan.
+pub const NAVIGATE_XML: &str = include_str!("../../icons/toolbar/mapperStatement.svg");
+/// Java-side mapper method marker, same artwork in the method colour.
+pub const NAVIGATE_JAVA: &str = include_str!("../../icons/toolbar/mapperMethod.svg");
+/// File icon for mapper XML files (the IntelliJ edition's `mapperXml`).
 pub const MAPPER_XML: &str = include_str!("../../icons/mapper-xml.svg");
 pub const MAPPER_XML_DARK: &str = include_str!("../../icons/mapper-xml-dark.svg");
 
 /// `(id, light, dark)` for every declared icon, in registration order.
 pub const ALL: &[(&str, &str, &str)] = &[
-    ("marker-mapper", MARKER_MAPPER, MARKER_MAPPER_DARK),
-    ("marker-statement", MARKER_STATEMENT, MARKER_STATEMENT_DARK),
-    ("marker-resultmap", MARKER_RESULTMAP, MARKER_RESULTMAP_DARK),
+    ("navigate", NAVIGATE_XML, NAVIGATE_XML),
+    ("navigate-java", NAVIGATE_JAVA, NAVIGATE_JAVA),
     ("mapper-xml", MAPPER_XML, MAPPER_XML_DARK),
 ];
 
@@ -30,7 +28,8 @@ mod tests {
     use super::*;
 
     /// Fragments the host's SVG sanitiser rejects (or that would make an icon
-    /// depend on anything outside the package).
+    /// depend on anything outside the package). Internal gradient references
+    /// (`url(#id)`) are allowed and checked separately.
     const FORBIDDEN: &[&str] = &[
         "<script",
         "<image",
@@ -39,7 +38,6 @@ mod tests {
         "onclick",
         "xlink:href",
         "href=",
-        "url(",
         "javascript:",
     ];
 
@@ -47,10 +45,12 @@ mod tests {
     fn every_icon_is_a_16px_svg() {
         for (id, light, dark) in ALL {
             for (variant, svg) in [("light", *light), ("dark", *dark)] {
+                // Upstream files start with a licence or design comment.
                 assert!(
-                    svg.trim_start().starts_with("<svg"),
+                    svg.trim_start().starts_with("<svg") || svg.trim_start().starts_with("<!--"),
                     "{id} ({variant}) is an SVG document"
                 );
+                assert!(svg.contains("<svg"), "{id} ({variant})");
                 assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""), "{id}");
                 assert!(
                     svg.contains("width=\"16\""),
@@ -69,13 +69,6 @@ mod tests {
     }
 
     #[test]
-    fn every_icon_has_a_distinct_dark_variant() {
-        for (id, light, dark) in ALL {
-            assert_ne!(light, dark, "{id} ships a separate dark variant");
-        }
-    }
-
-    #[test]
     fn icons_carry_no_scripts_or_external_references() {
         for (id, light, dark) in ALL {
             for (variant, svg) in [("light", *light), ("dark", *dark)] {
@@ -83,6 +76,14 @@ mod tests {
                     assert!(
                         !svg.contains(forbidden),
                         "{id} ({variant}) must not contain {forbidden}"
+                    );
+                }
+                // `url(...)` is fine only when it names a gradient defined in the
+                // same document; anything else is an external dependency.
+                for (at, _) in svg.match_indices("url(") {
+                    assert!(
+                        svg[at..].starts_with("url(#"),
+                        "{id} ({variant}) references something outside the file"
                     );
                 }
             }

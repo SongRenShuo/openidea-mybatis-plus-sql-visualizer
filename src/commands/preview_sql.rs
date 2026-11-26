@@ -55,18 +55,19 @@ const FALLBACK_DIALECT: &str = "MySQL";
 /// Dispatch entry.
 pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
     match preview(ctx, arg) {
-        Ok(text) => {
-            common::emit(&text)?;
-            Ok(None)
-        }
+        // The preview tab is the surface: success must not pop the Output tab
+        // open on every gutter click or shortcut press. Failures still go to
+        // Output (`common::fail`), because the reason is the content there.
+        Ok(_) => Ok(None),
         Err(err) => common::fail(err),
     }
 }
 
 /// Resolve the input and render it into the workbench model.
 ///
-/// Returns the model, a one-line description for the Output channel, and the raw
-/// input the diff view shows on its left side (`preview-sql-diff`).
+/// Returns the model, a one-line description (kept for `preview-sql-diff`'s
+/// diagnostics and tests), and the raw input the diff view shows on its left
+/// side (`preview-sql-diff`).
 pub fn model_for(
     ctx: &Invocation,
     arg: Option<&str>,
@@ -453,12 +454,13 @@ mod tests {
                     .as_str()
                     .is_some_and(|sql| sql.contains("UPDATE users SET name = ?"))
             );
-            let out = &host.output()[common::CHANNEL];
+            // A successful preview leaves the Output tab alone; the tab is the
+            // surface. (Errors still go there, tested below.)
             assert!(
-                out.contains("-- preview-sql: /project/UserMapper.xml#"),
-                "{out}"
+                host.output().get(common::CHANNEL).is_none(),
+                "{:?}",
+                host.output().get(common::CHANNEL)
             );
-            assert!(out.contains("statements: 1"), "{out}");
             assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
         });
     }
@@ -486,8 +488,7 @@ mod tests {
                     .is_some_and(|raw| raw.contains("<mapper")),
                 "the input box holds the whole mapper file"
             );
-            let out = &host.output()[common::CHANNEL];
-            assert!(out.contains("statements: 2"), "{out}");
+            assert!(host.output().get(common::CHANNEL).is_none());
         });
     }
 

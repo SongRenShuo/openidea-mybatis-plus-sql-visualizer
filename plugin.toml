@@ -235,27 +235,25 @@ id = "engine"
 title = "Engine"
 schema = "settings/engine.json"
 
-# Gutter markers and the mapper XML file icon (L5).
+# Gutter markers and the mapper XML file icon (L5), with the IntelliJ edition's
+# own SVGs: the XML side uses `mapperStatement` (cyan), the Java side
+# `mapperMethod`, and the file icon `mapperXml`.
 [[contributes.markerIcons]]
-id = "mapper"
-icon = "icons/marker-mapper.svg"
-iconDark = "icons/marker-mapper-dark.svg"
+id = "navigate"
+icon = "icons/toolbar/mapperStatement.svg"
+iconDark = "icons/toolbar/mapperStatement.svg"
 
 [[contributes.markerIcons]]
-id = "statement"
-icon = "icons/marker-statement.svg"
-iconDark = "icons/marker-statement-dark.svg"
-
-[[contributes.markerIcons]]
-id = "resultmap"
-icon = "icons/marker-resultmap.svg"
-iconDark = "icons/marker-resultmap-dark.svg"
+id = "navigate-java"
+icon = "icons/toolbar/mapperMethod.svg"
+iconDark = "icons/toolbar/mapperMethod.svg"
 
 # The gutter preview button's icon (L35a): declared here so the package ships and
 # validates it; the button itself is a `gutter-actions` entry.
 [[contributes.markerIcons]]
 id = "sql-preview"
 icon = "icons/sqlGutter.svg"
+iconDark = "icons/sqlGutter_dark.svg"
 
 [[contributes.fileIcons]]
 id = "mapper-xml"

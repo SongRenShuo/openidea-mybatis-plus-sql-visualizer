@@ -12,8 +12,6 @@
 //! when it finishes loading (that handshake would otherwise overwrite the load
 //! with an empty model).
 
-use std::fmt::Write as _;
-
 use openidea_plugin::{Error, Invocation, host};
 
 use crate::capture::bridge;
@@ -27,15 +25,14 @@ pub const ID: &str = "open-workbench";
 /// the workbench opens empty.
 pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error> {
     match open(ctx, arg) {
-        Ok(text) => {
-            common::emit(&text)?;
-            Ok(None)
-        }
+        // The panel is the surface; a successful hand-off must not also pop the
+        // Output tab open. Failures keep going to Output.
+        Ok(()) => Ok(None),
         Err(err) => common::fail(err),
     }
 }
 
-fn open(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
+fn open(ctx: &Invocation, arg: Option<&str>) -> Result<(), CliError> {
     let (sql, source) = match arg.map(str::trim).filter(|text| !text.is_empty()) {
         Some(_) => common::sql_arg(ctx, arg)?,
         None => (String::new(), None),
@@ -70,18 +67,7 @@ fn open(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     host::reveal_view(log_panel::VIEW_ID)
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
 
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "-- open-workbench: sent to {}#preview (dialect: {}, sql: {} chars)",
-        log_panel::VIEW_ID,
-        dialect,
-        sql.chars().count()
-    );
-    if let Some(source) = source {
-        let _ = writeln!(out, "-- source: {source}");
-    }
-    Ok(out)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -131,11 +117,7 @@ mod tests {
             );
             assert!(preview["labels"].is_object());
             assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
-            let out = &host.output()[common::CHANNEL];
-            assert!(
-                out.contains("-- open-workbench: sent to sqlv-logs#preview"),
-                "{out}"
-            );
+            assert!(host.output().get(common::CHANNEL).is_none());
         });
     }
 

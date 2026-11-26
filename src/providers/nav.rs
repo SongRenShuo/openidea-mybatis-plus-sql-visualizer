@@ -329,7 +329,9 @@ fn java_markers(doc: &Document) -> Vec<LineMarker> {
         lines.push(line);
         out.push(LineMarker {
             line,
-            icon: Some("navigate".to_owned()),
+            // The IntelliJ edition draws a different marker on the Java side
+            // (`mapperMethod`, brand colour) than on the XML side.
+            icon: Some("navigate-java".to_owned()),
             tooltip: format!("MyBatis: go to statement {}", method.name.name),
             target: Some(target),
         });
