@@ -1,6 +1,6 @@
 # Release scripts
 
-Two scripts, used in this order:
+Two release scripts, used in this order:
 
 | Script | Output |
 | --- | --- |
@@ -11,6 +11,61 @@ Two scripts, used in this order:
 engine jar against `engine/ENGINE_VERSION.sha256` and runs in CI's `package`
 job. `release.sh` deliberately does not call it, so a change to the pin check
 cannot break an unrelated release run.
+
+`scripts/check-manifest-api.sh` is a manifest gate, not a packaging step: it
+fails when `plugin.toml` declares a contributes key newer than its own
+`engines.openidea` floor allows.
+
+## The manifest API gate
+
+```sh
+scripts/check-manifest-api.sh              # defaults to ./plugin.toml
+scripts/check-manifest-api.sh path/to/plugin.toml
+bash scripts/check-manifest-api.test.sh    # self-test, temp fixtures only
+```
+
+It reads the lower bound of `engines.openidea` (the minor of `^1.15` → 15) and
+each contributes key present, then compares against:
+
+| Key | Needs |
+| --- | --- |
+| `frames`, `markdownHover` / `markdown_hover`, `customEditors` … `binary` | API 1.16 |
+| `dialogs`, `overlays` | API 1.18 |
+
+Everything else this repo ships today (commands, keymaps, menus, views,
+settings, providers, markerIcons, fileIcons, documentIndexers, mcpTools,
+javaAgents, skills) is 1.15 and is not judged. A key above the floor prints
+`error: <key> needs plugin API 1.18, but engines.openidea is "^1.15"` and exits
+1; a clean manifest prints `ok` and exits 0. A missing `engines.openidea` is
+exit 2 (not a pass). An `engines.openidea` form the script cannot parse (e.g.
+`*`) yields a warning and exit 0 — the floor is unknown, so nothing is claimed
+in either direction.
+
+### Why the CLI's check cannot replace it
+
+`openidea-plugin check` only knows the extension points of the release it was
+built from. A key it does not recognise is downgraded to
+
+```
+warning: contributes.dialogs: not supported by this version of the IDE; skipped
+```
+
+which reads as harmless and exits 0. But once the host release *does* know the
+point, its own validator calls `needs_api("contributes.dialogs", 18)`, and a
+floor below 1.18 is a hard error: the extension point fails to prepare and the
+whole package does not activate. The CLI is silent in exactly the case this gate
+has to catch — and a package that silently skips a dialog shows up in manual
+acceptance as "nothing happened", easily logged as our bug.
+
+So the two checks are complementary, not redundant: the CLI catches what its own
+release knows, this script catches the version-versus-manifest mismatch the CLI
+structurally cannot see. Wire it next to `openidea-plugin check` in CI, and run
+it locally before pushing any manifest change.
+
+Maintenance: when upstream ships a point we intend to use, add it to the mapping
+inside the script and to the self-test in the same change. The self-test copies
+the real `plugin.toml` for its "all current keys" case, so it also breaks if
+someone lands an API 1.16+/1.18 key without raising `engines.openidea`.
 
 ## Prerequisites
 
