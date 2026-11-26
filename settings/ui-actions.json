@@ -4,7 +4,7 @@
       "type": "boolean",
       "title": "Mapper and XML navigation",
       "group": "Navigation",
-      "default": false
+      "default": true
     },
     "nav.showLineMarkers": {
       "type": "boolean",
@@ -16,7 +16,7 @@
       "type": "boolean",
       "title": "SQL injection in mapper XML",
       "group": "Navigation",
-      "default": false
+      "default": true
     },
     "injections.language": {
       "type": "string",
@@ -28,7 +28,7 @@
       "type": "boolean",
       "title": "Inlay hints",
       "group": "Navigation",
-      "default": false
+      "default": true
     },
     "inlay.insertColumns": {
       "type": "boolean",

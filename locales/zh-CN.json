@@ -276,5 +276,6 @@
   "view.logs.focus.template_prefix": "模板",
   "view.logs.button.community": "交流群",
   "view.logs.community.title": "交流群",
-  "view.logs.community.guide": "交流群与作者联系方式见项目主页。"
+  "view.logs.community.guide": "交流群与作者联系方式见项目主页。",
+  "SQL Visualizer": "SQL Visualizer"
 }

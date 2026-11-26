@@ -276,5 +276,6 @@
   "view.logs.focus.template_prefix": "Template",
   "view.logs.button.community": "Community",
   "view.logs.community.title": "Community",
-  "view.logs.community.guide": "The community group and the author's contact are listed on the project page."
+  "view.logs.community.guide": "The community group and the author's contact are listed on the project page.",
+  "SQL Visualizer": "SQL Visualizer"
 }

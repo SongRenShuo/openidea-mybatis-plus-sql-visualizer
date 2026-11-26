@@ -140,34 +140,42 @@ path = "skills/openidea-ide-acceptance/SKILL.md"
 [[contributes.menus]]
 menu = "projectView.context"
 command = "capture-open-log"
+submenu = "SQL Visualizer"
 
 [[contributes.menus]]
 menu = "projectView.context"
 command = "render-xml"
+submenu = "SQL Visualizer"
 
 [[contributes.menus]]
 menu = "projectView.context"
 command = "check-sql"
+submenu = "SQL Visualizer"
 
 [[contributes.menus]]
 menu = "projectView.context"
 command = "perf-advice"
+submenu = "SQL Visualizer"
 
 [[contributes.menus]]
 menu = "projectView.context"
 command = "generate-crud"
+submenu = "SQL Visualizer"
 
 [[contributes.menus]]
 menu = "projectView.context"
 command = "rollback-plan"
+submenu = "SQL Visualizer"
 
 [[contributes.menus]]
 menu = "projectView.context"
 command = "render-log"
+submenu = "SQL Visualizer"
 
 [[contributes.menus]]
 menu = "projectView.context"
 command = "open-workbench"
+submenu = "SQL Visualizer"
 
 # The single plugin tool window: SQL Logs on the right rail, as the IntelliJ
 # plugin's SQL Logs tool window. Its five tabs carry the workbench too

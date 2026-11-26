@@ -316,7 +316,7 @@ pub static DEFINITIONS: [SettingDef; 45] = [
         title: "Mapper and XML navigation",
         group: "Navigation",
         kind: Kind::Bool,
-        default: DefaultValue::Bool(false),
+        default: DefaultValue::Bool(true),
         needs_restart: true,
     },
     SettingDef {
@@ -332,7 +332,7 @@ pub static DEFINITIONS: [SettingDef; 45] = [
         title: "SQL injection in mapper XML",
         group: "Navigation",
         kind: Kind::Bool,
-        default: DefaultValue::Bool(false),
+        default: DefaultValue::Bool(true),
         needs_restart: true,
     },
     SettingDef {
@@ -348,7 +348,7 @@ pub static DEFINITIONS: [SettingDef; 45] = [
         title: "Inlay hints",
         group: "Navigation",
         kind: Kind::Bool,
-        default: DefaultValue::Bool(false),
+        default: DefaultValue::Bool(true),
         needs_restart: true,
     },
     SettingDef {
@@ -579,24 +579,25 @@ mod tests {
     }
 
     #[test]
-    fn navigation_providers_default_to_off_and_need_a_restart() {
-        for key in [
-            "nav.enabled",
-            "injections.enabled",
-            "inlay.enabled",
-            "diagnostics.enabled",
-        ] {
+    fn navigation_providers_default_on_and_need_a_restart() {
+        // Navigation, XML SQL injection and inlay hints ship enabled: the port's
+        // whole point is seeing SQL where it is written. Diagnostics stay opt-in
+        // (a project without a column source must not get noise).
+        for key in ["nav.enabled", "injections.enabled", "inlay.enabled"] {
             let def = definition(key).expect(key);
             assert_eq!(
                 def.default,
-                DefaultValue::Bool(false),
-                "{key} is off by default"
+                DefaultValue::Bool(true),
+                "{key} is on by default"
             );
             assert!(
                 def.needs_restart,
                 "{key} is read once when providers are built"
             );
         }
+        let diag = definition("diagnostics.enabled").expect("diagnostics.enabled");
+        assert_eq!(diag.default, DefaultValue::Bool(false));
+        assert!(diag.needs_restart);
         assert!(
             !definition("dialect.mode")
                 .expect("dialect.mode")

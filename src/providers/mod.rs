@@ -9,7 +9,7 @@
 //!
 //! | setting | default | effect |
 //! | --- | --- | --- |
-//! | `nav.enabled` | `false` | `definition` and `line_markers` |
+//! | `nav.enabled` | `true` | `definition` and `line_markers` |
 //! | `injections.enabled` | `false` | SQL `Injections` inside mapper XML |
 //! | `sql.dialect` | unset | dialect for quote checks in diagnostics |
 //!
@@ -32,7 +32,8 @@ pub(crate) mod sqltext;
 use openidea_plugin::host;
 use std::sync::{OnceLock, RwLock};
 
-/// Turns `nav.enabled` (and friends) into a boolean; an absent setting is off.
+/// Turns `nav.enabled` (and friends) into a boolean; an absent setting keeps the
+/// schema default (navigation and injection are on, diagnostics is off).
 pub(crate) fn setting_on(key: &str) -> bool {
     host::setting_bool(key).unwrap_or(false)
 }

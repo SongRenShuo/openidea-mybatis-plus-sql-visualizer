@@ -5,7 +5,7 @@
 //! `resultMap="…"`) are never injected, and the range is trimmed to the SQL so
 //! the host colours text, not indentation.
 //!
-//! Off by default (`injections.enabled = false`): the host already injects SQL
+//! On by default (`injections.enabled = true`); turn it off when the host's own
 //! into MyBatis XML (PR #3641). Running both paints every statement twice.
 
 use openidea_plugin::language_features::{Document, Injection, Injections};

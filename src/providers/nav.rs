@@ -6,9 +6,9 @@
 //! come from the document index built by [`crate::indexer`], which the host
 //! resolves from memory.
 //!
-//! Off by default (`nav.enabled = false`): the official MyBatis navigator and
-//! the host's own SQL attributes overlap here, and a user who installed the
-//! plugin for rendering should not get gutters and ⌘B targets unasked.
+//! On by default (`nav.enabled = true`), like the IntelliJ edition: the SQL in
+//! a mapper is only useful if you can jump between its statement, its fragment
+//! and the Java method. Turning it off leaves rendering untouched.
 
 use crate::indexer::scan::{self, Positions};
 use crate::indexer::{index_java, index_xml};
