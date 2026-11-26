@@ -88,6 +88,7 @@ register_plugin!(
     inlay_hints,
     diagnostics,
     language_features,
+    hover,
     mcp
 );
 

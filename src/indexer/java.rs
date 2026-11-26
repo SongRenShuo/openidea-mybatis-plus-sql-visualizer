@@ -128,6 +128,13 @@ const KEYWORDS: [&str; 12] = [
     "assert",
 ];
 
+/// Whether `b` continues a Java identifier. Bytes, not chars: the byte scanner
+/// slices the text by these indices, so a UTF-8 lead byte must never count.
+fn ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+/// The same test on a decoded char, for the char-based helpers.
 fn ident(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '$'
 }
@@ -196,7 +203,7 @@ fn annotations_of(text: &str) -> Vec<Ann> {
             b'@' => {
                 let start = i;
                 let mut j = i + 1;
-                while j < bytes.len() && (ident(bytes[j] as char) || bytes[j] == b'.') {
+                while j < bytes.len() && (ident_byte(bytes[j]) || bytes[j] == b'.') {
                     j += 1;
                 }
                 while j > start + 1 && !text.is_char_boundary(j) {
@@ -276,7 +283,7 @@ fn declaration_of(segment: &str) -> Option<Declaration> {
             b'/' if matches!(bytes.get(i + 1), Some(b'/' | b'*')) => i = skip_comment(bytes, i),
             b'@' => {
                 i += 1;
-                while i < bytes.len() && (ident(bytes[i] as char) || bytes[i] == b'.') {
+                while i < bytes.len() && (ident_byte(bytes[i]) || bytes[i] == b'.') {
                     i += 1;
                 }
                 let k = skip_space(bytes, i);
@@ -345,7 +352,7 @@ fn param_parts(list: &str) -> Vec<(usize, usize)> {
                 round = round.saturating_sub(1);
                 i += 1;
             }
-            b'<' if i > 0 && ident(bytes[i - 1] as char) => {
+            b'<' if i > 0 && ident_byte(bytes[i - 1]) => {
                 angle += 1;
                 i += 1;
             }
@@ -429,9 +436,9 @@ fn string_arg(args: &str, key: &str) -> Option<(String, usize, usize)> {
                 depth = depth.saturating_sub(1);
                 i += 1;
             }
-            b if depth == 0 && (b as char).is_alphabetic() => {
+            b if depth == 0 && b.is_ascii_alphabetic() => {
                 let start = i;
-                while i < bytes.len() && ident(bytes[i] as char) {
+                while i < bytes.len() && ident_byte(bytes[i]) {
                     i += 1;
                 }
                 let word = &args[start..i];
@@ -497,7 +504,7 @@ fn supertype_texts(header: &str, base: usize) -> Vec<(String, usize, usize)> {
             b'@' => {
                 // An annotation on the type (e.g. `@Mapper`) may hold commas.
                 i += 1;
-                while i < bytes.len() && (ident(bytes[i] as char) || bytes[i] == b'.') {
+                while i < bytes.len() && (ident_byte(bytes[i]) || bytes[i] == b'.') {
                     i += 1;
                 }
                 let k = skip_space(bytes, i);
@@ -505,9 +512,9 @@ fn supertype_texts(header: &str, base: usize) -> Vec<(String, usize, usize)> {
                     i = matching(bytes, k).map_or(bytes.len(), |c| c + 1);
                 }
             }
-            b if (b as char).is_alphabetic() => {
+            b if b.is_ascii_alphabetic() => {
                 let start = i;
-                while i < bytes.len() && ident(bytes[i] as char) {
+                while i < bytes.len() && ident_byte(bytes[i]) {
                     i += 1;
                 }
                 let word = &header[start..i];
@@ -532,10 +539,10 @@ fn supertype_texts(header: &str, base: usize) -> Vec<(String, usize, usize)> {
                         b'/' if matches!(bytes.get(j + 1), Some(b'/' | b'*')) => {
                             j = skip_comment(bytes, j)
                         }
-                        b if round == 0 && (b as char).is_alphabetic() => {
+                        b if round == 0 && b.is_ascii_alphabetic() => {
                             let w = j;
                             let mut k = j;
-                            while k < bytes.len() && ident(bytes[k] as char) {
+                            while k < bytes.len() && ident_byte(bytes[k]) {
                                 k += 1;
                             }
                             let next = &header[w..k];
@@ -711,7 +718,7 @@ pub fn index_java(path: &str, text: &str) -> JavaFacts {
             b'@' => {
                 // Annotations are part of the header segment; skip their args.
                 i += 1;
-                while i < bytes.len() && (ident(bytes[i] as char) || bytes[i] == b'.') {
+                while i < bytes.len() && (ident_byte(bytes[i]) || bytes[i] == b'.') {
                     i += 1;
                 }
                 let k = skip_space(bytes, i);
@@ -719,9 +726,9 @@ pub fn index_java(path: &str, text: &str) -> JavaFacts {
                     i = matching(bytes, k).map_or(bytes.len(), |c| c + 1);
                 }
             }
-            b if (b as char).is_alphabetic() => {
+            b if b.is_ascii_alphabetic() => {
                 let word_start = i;
-                while i < bytes.len() && ident(bytes[i] as char) {
+                while i < bytes.len() && ident_byte(bytes[i]) {
                     i += 1;
                 }
                 let word = &text[word_start..i];
@@ -752,7 +759,7 @@ pub fn index_java(path: &str, text: &str) -> JavaFacts {
                         };
                         let name_start = skip_space(bytes, i);
                         let mut name_end = name_start;
-                        while name_end < bytes.len() && ident(bytes[name_end] as char) {
+                        while name_end < bytes.len() && ident_byte(bytes[name_end]) {
                             name_end += 1;
                         }
                         if name_end > name_start {
@@ -965,6 +972,29 @@ pub fn resolve_type(raw: &str, package: &Option<String>, imports: &[(String, Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chinese_comments_do_not_break_the_java_facts() {
+        let source = r#"package com.acme;
+/** 金仓 GoldenDB 方言：中文注释 */
+public interface GoldenDbDeviceMapper extends BaseMapper<GoldenDbDevice> {
+    @Delete("DELETE FROM `gdb_device` ORDER BY `id` DESC LIMIT #{n}")
+    int deleteNewest(@Param("n") int n);
+}
+"#;
+        let facts = index_java("/p/GoldenDbDeviceMapper.java", source);
+        assert_eq!(facts.fqn.as_deref(), Some("com.acme.GoldenDbDeviceMapper"));
+        assert!(facts.is_mapper);
+        assert!(
+            facts.methods.iter().any(|m| m.name.name == "deleteNewest"),
+            "{:?}",
+            facts
+                .methods
+                .iter()
+                .map(|m| &m.name.name)
+                .collect::<Vec<_>>()
+        );
+    }
+
     use super::*;
 
     const JAVA: &str = r#"package com.acme.user;

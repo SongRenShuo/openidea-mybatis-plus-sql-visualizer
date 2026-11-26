@@ -264,6 +264,13 @@ languages = ["xml", "java"]
 kinds = ["gutter-actions"]
 languages = ["xml"]
 
+# Hover card with the rendered SQL on a statement id, a fragment, a result map or
+# a mapper method (L37): the in-place preview the platform can offer instead of a
+# dialog.
+[[contributes.providers]]
+kinds = ["hover"]
+languages = ["xml", "java"]
+
 # SQL highlighting inside mapper XML; off by default (`injections.enabled`).
 [[contributes.providers]]
 kinds = ["injections"]

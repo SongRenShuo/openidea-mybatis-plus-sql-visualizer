@@ -565,9 +565,9 @@ fn package_of(text: &str) -> Option<String> {
         match bytes[i] {
             b'"' | b'\'' => i = skip_literal(bytes, i),
             b'/' if matches!(bytes.get(i + 1), Some(b'/' | b'*')) => i = skip_comment(bytes, i),
-            b if ident_char(b as char) => {
+            b if ident_byte(b) => {
                 let start = i;
-                while i < bytes.len() && ident_char(bytes[i] as char) {
+                while i < bytes.len() && ident_byte(bytes[i]) {
                     i += 1;
                 }
                 if &text[start..i] != "package" {
@@ -602,7 +602,7 @@ fn next_type_decl(text: &str, start: usize, end: usize) -> Option<(TypeKind, usi
             b'/' if matches!(bytes.get(i + 1), Some(b'/' | b'*')) => i = skip_comment(bytes, i),
             b'@' => {
                 i += 1;
-                while i < end && (ident_char(bytes[i] as char) || bytes[i] == b'.') {
+                while i < end && (ident_byte(bytes[i]) || bytes[i] == b'.') {
                     i += 1;
                 }
                 let args = skip_trivia(bytes, i);
@@ -612,9 +612,9 @@ fn next_type_decl(text: &str, start: usize, end: usize) -> Option<(TypeKind, usi
                     i = close + 1;
                 }
             }
-            b if ident_char(b as char) => {
+            b if ident_byte(b) => {
                 let word_start = i;
-                while i < end && ident_char(bytes[i] as char) {
+                while i < end && ident_byte(bytes[i]) {
                     i += 1;
                 }
                 let kind = match &text[word_start..i] {
@@ -631,7 +631,7 @@ fn next_type_decl(text: &str, start: usize, end: usize) -> Option<(TypeKind, usi
                 }
                 let name_start = skip_trivia(bytes, i);
                 let mut name_end = name_start;
-                while name_end < end && ident_char(bytes[name_end] as char) {
+                while name_end < end && ident_byte(bytes[name_end]) {
                     name_end += 1;
                 }
                 if name_end == name_start {
@@ -662,7 +662,7 @@ fn body_open(text: &str, from: usize, end: usize) -> Option<usize> {
             b'(' => i = matching(bytes, i).map_or(end, |close| close + 1),
             b'@' => {
                 i += 1;
-                while i < end && (ident_char(bytes[i] as char) || bytes[i] == b'.') {
+                while i < end && (ident_byte(bytes[i]) || bytes[i] == b'.') {
                     i += 1;
                 }
                 let args = skip_trivia(bytes, i);
@@ -724,7 +724,7 @@ fn method_decl_of(segment: &str) -> Option<MethodDecl> {
             b'/' if matches!(bytes.get(i + 1), Some(b'/' | b'*')) => i = skip_comment(bytes, i),
             b'@' => {
                 i += 1;
-                while i < bytes.len() && (ident_char(bytes[i] as char) || bytes[i] == b'.') {
+                while i < bytes.len() && (ident_byte(bytes[i]) || bytes[i] == b'.') {
                     i += 1;
                 }
                 let args = skip_trivia(bytes, i);
@@ -775,7 +775,7 @@ fn has_top_level_eq(head: &str) -> bool {
             b'/' if matches!(bytes.get(i + 1), Some(b'/' | b'*')) => i = skip_comment(bytes, i),
             b'@' => {
                 i += 1;
-                while i < bytes.len() && (ident_char(bytes[i] as char) || bytes[i] == b'.') {
+                while i < bytes.len() && (ident_byte(bytes[i]) || bytes[i] == b'.') {
                     i += 1;
                 }
                 let args = skip_trivia(bytes, i);
@@ -785,7 +785,7 @@ fn has_top_level_eq(head: &str) -> bool {
                     i = close + 1;
                 }
             }
-            b'<' if i > 0 && ident_char(bytes[i - 1] as char) => {
+            b'<' if i > 0 && ident_byte(bytes[i - 1]) => {
                 angle += 1;
                 i += 1;
             }
@@ -873,7 +873,7 @@ fn param_parts(list: &str) -> Vec<(usize, usize)> {
                 round = round.saturating_sub(1);
                 i += 1;
             }
-            b'<' if i > 0 && ident_char(bytes[i - 1] as char) => {
+            b'<' if i > 0 && ident_byte(bytes[i - 1]) => {
                 angle += 1;
                 i += 1;
             }
@@ -914,6 +914,15 @@ fn last_ident(text: &str) -> Option<(String, usize, usize)> {
     Some((text[s..e + c.len_utf8()].to_owned(), s, e + c.len_utf8()))
 }
 
+/// Whether `b` continues a Java identifier. Bytes, not chars: the scanner walks
+/// bytes and slices the text by those indices, so a UTF-8 lead byte (e.g. 0xE9
+/// of `面`) must never count as an identifier character — that used to advance
+/// the index into the middle of a char and panic on the next slice.
+fn ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+/// The same test on a decoded char, for the char-based helpers below.
 fn ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '$'
 }
@@ -1128,6 +1137,69 @@ record Point(int x, int y) {
         assert_eq!(location.arity, 1);
         assert_eq!(location.line, line_of(MAPPER, "User selectById(Long id);"));
         assert_eq!(location.display_line(), location.line + 1);
+    }
+
+    #[test]
+    fn a_chinese_identifier_and_a_text_block_never_split_a_character() {
+        // 面 is 0xE9 0x9D 0xA2. With the old byte-as-char predicate the lead byte
+        // looked like a letter, the word loop advanced one byte into the char and
+        // `text[word_start..i]` panicked. Chinese identifiers are legal in Java,
+        // and a text block can hold any of it, so both shapes must be scanned
+        // byte-wise (ASCII ident bytes only) without panicking.
+        let source = r#"package com.acme;
+
+public interface 面Mapper {
+    String NOTE = """
+        中文说明：面
+        """;
+    int ping();
+}
+"#;
+        let mut index = JavaMethodIndex::new();
+        // The ASCII-only scanner cannot name `面Mapper`, so it indexes the file
+        // without methods; what matters is that scanning the bytes never panics.
+        let added = index.add_file("/p/MianMapper.java", source);
+        assert_eq!(added, 0);
+        assert_eq!(index.file_count(), 1, "the file itself is still tracked");
+        assert_eq!(index.lookup("MianMapper#ping").len(), 0);
+    }
+
+    #[test]
+    fn chinese_comments_and_strings_never_split_a_character() {
+        // The UTF-8 lead byte of a CJK char (0xE9 for 面) is not an identifier
+        // byte. Treating it as one advanced the byte scanner into the middle of
+        // the char and the next slice panicked (`end byte index … is not a char
+        // boundary`), which killed the plugin while indexing the demo project's
+        // Chinese comments.
+        let source = r#"package com.acme;
+
+/** 金仓 GoldenDB 方言 Mapper：中文注释与中文串 */
+public interface GoldenDbDeviceMapper extends BaseMapper<GoldenDbDevice> {
+    // 多行 VALUES 批量插入（由 @Code DefaultSqlInjector 注入（InsertBatchSomeColumn））
+    int insertBatchSomeColumn(List<GoldenDbDevice> entityList);
+
+    /**
+     * DELETE ... ORDER BY ... LIMIT n：GoldenDB DELETE 文法
+     */
+    @Delete("DELETE FROM `gdb_device` ORDER BY `id` DESC LIMIT #{n}")
+    int deleteNewest(@Param("n") int n);
+}
+"#;
+        let mut index = JavaMethodIndex::new();
+        let added = index.add_file("/p/GoldenDbDeviceMapper.java", source);
+        assert_eq!(added, 2, "both methods are indexed");
+        assert_eq!(
+            index
+                .lookup("GoldenDbDeviceMapper#insertBatchSomeColumn")
+                .len(),
+            1
+        );
+        assert_eq!(index.lookup("GoldenDbDeviceMapper#deleteNewest").len(), 1);
+        assert!(
+            index
+                .lookup_unique("com.acme.GoldenDbDeviceMapper#deleteNewest")
+                .is_some()
+        );
     }
 
     #[test]
