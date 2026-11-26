@@ -116,6 +116,14 @@ id = "preview-sql"
 title = "MyBatis SQL: Preview SQL"
 category = "MyBatis SQL Visualizer"
 
+# The same render, opened in the diff viewer (original vs SQL): its tab has
+# "open in a new window", which is how a plugin gets the preview into its own
+# window without a dialog API.
+[[contributes.commands]]
+id = "preview-sql-diff"
+title = "MyBatis SQL: Preview SQL in Diff"
+category = "MyBatis SQL Visualizer"
+
 # The IntelliJ edition binds Alt+Shift+Q to its preview action; the same key here.
 [[contributes.keymaps]]
 command = "preview-sql"

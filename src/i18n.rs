@@ -815,6 +815,15 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "The current editor cannot be read (editor.read is missing or the document is stale); pass the SQL or a mapper path as the command argument instead.",
         "无法读取当前编辑器（缺少 editor.read 或文档已过期）；请改用命令参数传入 SQL 或 Mapper 路径。",
     ),
+    // Diff-tab preview (the reachable "pop out into a window" path).
+    ("preview.diff.left", "Original", "原文"),
+    ("preview.diff.right", "SQL", "SQL"),
+    ("preview.diff.title", "SQL preview", "SQL 预览"),
+    (
+        "preview.diff.empty_sql",
+        "Nothing to preview: the statement did not render to SQL",
+        "没有可预览的 SQL：该语句没有渲染出 SQL",
+    ),
 ];
 
 /// Localised text for `key` in the IDE's current UI language.

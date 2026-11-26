@@ -63,11 +63,16 @@ pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error>
     }
 }
 
-/// Resolve the input, render it into the workbench model, push the log panel's
-/// state with `selectTab = "preview"` and reveal the tool window.
-fn preview(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
+/// Resolve the input and render it into the workbench model.
+///
+/// Returns the model, a one-line description for the Output channel, and the raw
+/// input the diff view shows on its left side (`preview-sql-diff`).
+pub fn model_for(
+    ctx: &Invocation,
+    arg: Option<&str>,
+) -> Result<(workbench::WorkbenchModel, String, String), CliError> {
     let dialect = dialect_name();
-    let (model, detail) = match resolve(ctx, arg)? {
+    match resolve(ctx, arg)? {
         Input::Mapper {
             path,
             xml,
@@ -81,7 +86,7 @@ fn preview(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
                 model.confidence,
                 model.sql.chars().count()
             );
-            (model, detail)
+            Ok((model, detail, xml))
         }
         Input::Text { text, source } => {
             let mut model = workbench::render_input(&text, "", &dialect);
@@ -103,9 +108,15 @@ fn preview(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
                 },
                 model.sql.chars().count()
             );
-            (model, detail)
+            Ok((model, detail, text))
         }
-    };
+    }
+}
+
+/// Resolve the input, render it into the workbench model, push the log panel's
+/// state with `selectTab = "preview"` and reveal the tool window.
+fn preview(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
+    let (model, detail, _raw) = model_for(ctx, arg)?;
 
     // The same handshake as `open-workbench`: the page asks for the state again
     // with `{op:"ready"}` once its script is ready, so the plugin-side model has
