@@ -85,7 +85,7 @@
     }
     .chip:hover { background: var(--openidea-bg-hover); }
     .chip[aria-expanded="true"] { background: var(--openidea-bg-selected); border-color: var(--openidea-accent); }
-    .chip svg { width: 12px; height: 12px; display: block; color: var(--openidea-fg-muted); }
+    .chip svg { width: 12px; height: 12px; display: block; color: var(--openidea-fg-muted); fill: none; }
     /* Focus / muted chips in the filter row (lane L28). A focus chip is the
        active filter and carries an × that clears it; the muted counter does the
        same for the session's muted methods. Both stay in the left flow. */
@@ -105,11 +105,23 @@
       color: var(--openidea-fg-muted); cursor: pointer; font-size: 12px; line-height: 1;
     }
     .fchip .fclose:hover { background: var(--openidea-bg-hover); color: var(--openidea-fg); }
+    /* Text buttons follow an IDE toolbar button: flat, icon + label, one line.
+       They used to be bordered form buttons, which read as a settings page
+       rather than the reference's action bar. */
     .btn {
-      display: inline-flex; align-items: center; gap: 4px;
-      background: var(--openidea-bg-input); color: var(--openidea-fg);
-      border: 1px solid var(--openidea-border); border-radius: 3px;
-      padding: 2px 8px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+      background: transparent; color: var(--openidea-fg);
+      border: 1px solid transparent; border-radius: 3px;
+      padding: 2px 7px; min-height: 24px; cursor: pointer;
+      font-size: 12px; white-space: nowrap;
+    }
+    .btn svg { width: 14px; height: 14px; flex: 0 0 auto; display: block; fill: none; }
+    /* Icon-only, like the reference's ActionToolbar. The label stays in the DOM
+       for setText but is not drawn; title/aria-label carry it on hover. */
+    .btn [data-btnlabel] { display: none; }
+    select.btn {
+      background: var(--openidea-bg-input); border-color: var(--openidea-border);
+      padding: 2px 4px;
     }
     .btn:hover { background: var(--openidea-bg-hover); }
     .btn.on { background: var(--openidea-bg-selected); border-color: var(--openidea-accent); }
@@ -348,10 +360,10 @@
     #panelLogToSql .editorpane, #panelSqlToJava .editorpane {
       display: flex; flex-direction: column; min-height: 0; overflow: hidden;
     }
-    #panelLogToSql .editorpane.p-top, #panelSqlToJava .editorpane.p-top { flex: 0 0 42%; }
+    #panelLogToSql .editorpane.p-top, #panelSqlToJava .editorpane.p-top { flex: 0 0 50%; }
     #panelLogToSql .editorpane.p-bottom, #panelSqlToJava .editorpane.p-bottom { flex: 1 1 auto; }
     #panelLogToSql .editorbar, #panelSqlToJava .editorbar {
-      display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px 4px;
+      display: flex; align-items: center; gap: 2px; flex-wrap: wrap; padding: 4px 8px 2px;
     }
     #panelLogToSql .tabhint, #panelSqlToJava .tabhint {
       padding: 0 8px 4px; color: var(--openidea-fg-muted); font-size: 11px;
@@ -397,10 +409,28 @@
     #panelPreview .pv-pane {
       display: flex; flex-direction: column; min-height: 0; overflow: hidden;
     }
-    #panelPreview .pv-pane.pv-top { flex: 0 0 40%; }
+    #panelPreview .pv-pane.pv-top { flex: 0 0 34%; }
     #panelPreview .pv-pane.pv-preview { flex: 1 1 auto; }
+    /* The reference puts the meta line and the toolbar on one row (meta left,
+       actions right). Grid keeps that without a wrapper element: meta and the
+       result toolbar share row 1, the banner spans row 2, the columns fill 3. */
+    #panelPreview .pv-preview {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-rows: auto auto minmax(0, 1fr);
+    }
+    #panelPreview .pv-meta { grid-column: 1; grid-row: 1; min-width: 0; }
+    /* One line, like the reference's meta row: the long settings hint shrinks
+       with an ellipsis instead of wrapping into a tall column. */
+    #panelPreview .pv-meta { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; overflow: hidden; }
+    #panelPreview .pv-meta > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #panelPreview .pv-meta .pv-chip { flex: 0 0 auto; }
+    #panelPreview .pv-preview > .pv-toolbar {
+      grid-column: 2; grid-row: 1; justify-content: flex-end; flex-wrap: nowrap;
+    }
+    #panelPreview .pv-banner { grid-column: 1 / -1; grid-row: 2; }
+    #panelPreview .pv-cols { grid-column: 1 / -1; grid-row: 3; }
     #panelPreview .pv-toolbar {
-      display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px;
+      display: flex; align-items: center; gap: 2px; flex-wrap: wrap; padding: 4px 8px;
     }
     /* The reference's "更多" fold (L35b): the low-frequency actions the
        toolbar would otherwise duplicate — Export, Rollback — behind one
@@ -467,14 +497,15 @@
       border-top: 1px solid var(--openidea-border);
     }
     #panelPreview .pv-params {
-      flex: 0 0 30%; display: flex; flex-direction: column;
-      min-width: 0; min-height: 0; border-right: 1px solid var(--openidea-border);
+      flex: 0 0 34%; display: flex; flex-direction: column;
+      min-width: 150px; min-height: 0; border-right: 1px solid var(--openidea-border);
     }
     #panelPreview .pv-pane-title { padding: 4px 8px 2px; font-weight: 600; }
     /* Editable parameter values (lane L27, laid out as two columns in L35b):
        name on the left, value input on the right, top aligned like the
        reference's parameter pane; Rebind / Import sit under the list. */
-    #panelPreview .pv-params-actions { display: flex; align-items: center; gap: 6px; padding: 4px 0 6px; }
+    #panelPreview .pv-params-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 2px 0 4px; }
+    #panelPreview .pv-params .hint { font-size: 10.5px; line-height: 1.45; }
     #panelPreview .pv-param-row {
       display: grid; grid-template-columns: minmax(48px, 38%) minmax(0, 1fr);
       align-items: start; gap: 6px; margin-bottom: 4px;
@@ -706,9 +737,12 @@
   <div class="panel" id="panelLogToSql" hidden>
     <div class="editorpane p-top">
       <div class="editorbar">
-        <button id="l2sConvert" class="btn" type="button"></button>
-        <button id="l2sReadClipboard" class="btn" type="button"></button>
-        <button id="l2sClearInput" class="btn" type="button"></button>
+        <button id="l2sConvert" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
+        <button id="l2sReadClipboard" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M5.5 6C5.22386 6 5 6.22386 5 6.5C5 6.77614 5.22386 7 5.5 7H10.5C10.7761 7 11 6.77614 11 6.5C11 6.22386 10.7761 6 10.5 6H5.5Z" fill="currentColor"/>
+<path d="M5 8.5C5 8.22386 5.22386 8 5.5 8H10.5C10.7761 8 11 8.22386 11 8.5C11 8.77614 10.7761 9 10.5 9H5.5C5.22386 9 5 8.77614 5 8.5Z" fill="currentColor"/>
+<path d="M5.5 10C5.22386 10 5 10.2239 5 10.5C5 10.7761 5.22386 11 5.5 11H10.5C10.7761 11 11 10.7761 11 10.5C11 10.2239 10.7761 10 10.5 10H5.5Z" fill="currentColor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M12 2H10.9146C10.7087 1.4174 10.1531 1 9.5 1H6.5C5.84689 1 5.29127 1.4174 5.08535 2H4C2.89543 2 2 2.89543 2 4V13C2 14.1046 2.89543 15 4 15H12C13.1046 15 14 14.1046 14 13V4C14 2.89543 13.1046 2 12 2ZM4 3H5.08535C5.29127 3.5826 5.84689 4 6.5 4H9.5C10.1531 4 10.7087 3.5826 10.9146 3H12C12.5523 3 13 3.44772 13 4V13C13 13.5523 12.5523 14 12 14H4C3.44772 14 3 13.5523 3 13V4C3 3.44772 3.44772 3 4 3ZM6.5 2C6.22386 2 6 2.22386 6 2.5C6 2.77614 6.22386 3 6.5 3H9.5C9.77614 3 10 2.77614 10 2.5C10 2.22386 9.77614 2 9.5 2H6.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="l2sClearInput" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
       </div>
       <div class="tabhint" id="l2sInputHint"></div>
       <textarea id="l2sInput" class="editorarea" spellcheck="false" autocomplete="off" wrap="off"></textarea>
@@ -717,9 +751,17 @@
          tabindex="0"></div>
     <div class="editorpane p-bottom">
       <div class="editorbar">
-        <button id="l2sCopy" class="btn" type="button"></button>
-        <button id="l2sToggleFormat" class="btn" type="button"></button>
-        <button id="l2sClearResult" class="btn" type="button"></button>
+        <button id="l2sCopy" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="9" height="10" rx="1.5" stroke="currentColor"/>
+<rect x="5" y="6" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="5" y="8" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="5" y="10" width="4" height="1" rx="0.5" fill="currentColor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M11.0017 2H11.5998C12.373 2 12.9998 2.6268 12.9998 3.4V3.91081C13.0011 3.94038 13.0017 3.97011 13.0017 4V11.5482C13.6063 11.1124 13.9998 10.4021 13.9998 9.6V3.4C13.9998 2.07452 12.9253 1 11.5998 1H6.39978C5.59677 1 4.88587 1.39437 4.4502 2H6.39978H11.0017Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="l2sToggleFormat" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="12" width="12" height="1" rx="0.5" fill="currentColor"/>
+<rect x="6" y="6" width="8" height="1" rx="0.5" fill="currentColor"/>
+<rect x="6" y="9" width="8" height="1" rx="0.5" fill="currentColor"/>
+<rect x="2" y="3" width="12" height="1" rx="0.5" fill="currentColor"/>
+<path d="M2.8 6.1C2.64849 5.98637 2.44579 5.96809 2.27639 6.05279C2.107 6.13749 2 6.31062 2 6.5V9.5C2 9.68939 2.107 9.86252 2.27639 9.94722C2.44579 10.0319 2.64849 10.0136 2.8 9.9L4.8 8.4C4.9259 8.30558 5 8.15738 5 8C5 7.84262 4.9259 7.69443 4.8 7.6L2.8 6.1Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="l2sClearResult" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
       </div>
       <div class="tabhint" id="l2sResultHint"></div>
       <textarea id="l2sOutput" class="editorarea" spellcheck="false" autocomplete="off" wrap="off"></textarea>
@@ -733,9 +775,13 @@
   <div class="panel" id="panelSqlToJava" hidden>
     <div class="editorpane p-top">
       <div class="editorbar">
-        <button id="s2jConvert" class="btn" type="button"></button>
-        <button id="s2jFormatSql" class="btn" type="button"></button>
-        <button id="s2jClearInput" class="btn" type="button"></button>
+        <button id="s2jConvert" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
+        <button id="s2jFormatSql" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="12" width="12" height="1" rx="0.5" fill="currentColor"/>
+<rect x="6" y="6" width="8" height="1" rx="0.5" fill="currentColor"/>
+<rect x="6" y="9" width="8" height="1" rx="0.5" fill="currentColor"/>
+<rect x="2" y="3" width="12" height="1" rx="0.5" fill="currentColor"/>
+<path d="M2.8 6.1C2.64849 5.98637 2.44579 5.96809 2.27639 6.05279C2.107 6.13749 2 6.31062 2 6.5V9.5C2 9.68939 2.107 9.86252 2.27639 9.94722C2.44579 10.0319 2.64849 10.0136 2.8 9.9L4.8 8.4C4.9259 8.30558 5 8.15738 5 8C5 7.84262 4.9259 7.69443 4.8 7.6L2.8 6.1Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="s2jClearInput" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
       </div>
       <div class="optionsrow">
         <label id="s2jFormatLabel" for="s2jFormatMode"></label>
@@ -758,8 +804,12 @@
          tabindex="0"></div>
     <div class="editorpane p-bottom">
       <div class="editorbar">
-        <button id="s2jCopy" class="btn" type="button"></button>
-        <button id="s2jClearResult" class="btn" type="button"></button>
+        <button id="s2jCopy" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="9" height="10" rx="1.5" stroke="currentColor"/>
+<rect x="5" y="6" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="5" y="8" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="5" y="10" width="4" height="1" rx="0.5" fill="currentColor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M11.0017 2H11.5998C12.373 2 12.9998 2.6268 12.9998 3.4V3.91081C13.0011 3.94038 13.0017 3.97011 13.0017 4V11.5482C13.6063 11.1124 13.9998 10.4021 13.9998 9.6V3.4C13.9998 2.07452 12.9253 1 11.5998 1H6.39978C5.59677 1 4.88587 1.39437 4.4502 2H6.39978H11.0017Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="s2jClearResult" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
       </div>
       <div class="tabhint" id="s2jResultHint"></div>
       <textarea id="s2jOutput" class="editorarea" spellcheck="false" autocomplete="off" wrap="off"></textarea>
@@ -772,7 +822,8 @@
     <div class="tabbody">
       <div class="tabactions">
         <input id="histKw" class="kw" type="text" autocomplete="off" spellcheck="false">
-        <button id="histSearchBtn" class="btn" type="button"></button>
+        <button id="histSearchBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.5" stroke="currentColor"/>
+<path d="M10.1992 10.2002L13.4992 13.4961" stroke="currentColor" stroke-linecap="round"/></svg><span data-btnlabel></span></button>
       </div>
       <div id="histCount" class="muted"></div>
       <div id="histList" class="histlist"></div>
@@ -791,11 +842,18 @@
     <!-- Input half (lane L27): the reference's standalone page actions. -->
     <div class="pv-pane pv-top" id="pvPaneTop">
       <div class="pv-toolbar">
-        <button id="pvResolve" class="btn" type="button"></button>
-        <button id="pvFormat" class="btn" type="button"></button>
-        <button id="pvLoadFile" class="btn" type="button"></button>
-        <button id="pvClear" class="btn" type="button"></button>
-        <button id="pvOpenDialog" class="btn" type="button" disabled></button>
+        <button id="pvResolve" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
+        <button id="pvFormat" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="12" width="12" height="1" rx="0.5" fill="currentColor"/>
+<rect x="6" y="6" width="8" height="1" rx="0.5" fill="currentColor"/>
+<rect x="6" y="9" width="8" height="1" rx="0.5" fill="currentColor"/>
+<rect x="2" y="3" width="12" height="1" rx="0.5" fill="currentColor"/>
+<path d="M2.8 6.1C2.64849 5.98637 2.44579 5.96809 2.27639 6.05279C2.107 6.13749 2 6.31062 2 6.5V9.5C2 9.68939 2.107 9.86252 2.27639 9.94722C2.44579 10.0319 2.64849 10.0136 2.8 9.9L4.8 8.4C4.9259 8.30558 5 8.15738 5 8C5 7.84262 4.9259 7.69443 4.8 7.6L2.8 6.1Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="pvLoadFile" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.0775 2.44037C10.1656 2.12093 9.97809 1.79054 9.65866 1.70242C9.33922 1.6143 9.00882 1.80182 8.9207 2.12126L5.76529 13.5596C5.67717 13.8791 5.86469 14.2095 6.18412 14.2976C6.50356 14.3857 6.83396 14.1982 6.92208 13.8788L10.0775 2.44037ZM5.41281 4.66699C5.61982 4.92575 5.57786 5.30332 5.31911 5.51033L1.96049 8.19723L5.31911 10.8841C5.57786 11.0911 5.61982 11.4687 5.41281 11.7275C5.20581 11.9862 4.82823 12.0282 4.56947 11.8212L0.625202 8.66575L0.0395508 8.19723L0.625202 7.7287L4.56947 4.57329C4.82823 4.36628 5.20581 4.40823 5.41281 4.66699ZM10.5872 11.7275C10.3802 11.4687 10.4222 11.0911 10.6809 10.8841L14.0395 8.19725L10.6809 5.51035C10.4222 5.30334 10.3802 4.92577 10.5872 4.66701C10.7942 4.40825 11.1718 4.3663 11.4305 4.57331L15.3748 7.72872L15.9605 8.19725L15.3748 8.66577L11.4305 11.8212C11.1718 12.0282 10.7942 11.9862 10.5872 11.7275Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="pvClear" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="pvOpenDialog" class="btn" type="button" disabled><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.00002 3H12C12.5523 3 13 3.44772 13 4V12C13 12.5523 12.5523 13 12 13H7.00002V3ZM6.00002 2H7.00002H12C13.1046 2 14 2.89543 14 4V12C14 13.1046 13.1046 14 12 14H7.00002H6.00002H4C2.89543 14 2 13.1046 2 12V4C2 2.89543 2.89543 2 4 2H6.00002ZM6.00002 13H4C3.44772 13 3 12.5523 3 12V4C3 3.44772 3.44772 3 4 3H6.00002V13Z" fill="currentColor"/>
+<rect x="8" y="5" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="8" y="7.5" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="8" y="10" width="4" height="1" rx="0.5" fill="currentColor"/></svg><span data-btnlabel></span></button>
       </div>
       <div class="hint" id="pvInputHint"></div>
       <textarea id="pvInput" spellcheck="false" autocomplete="off"></textarea>
@@ -816,8 +874,16 @@
       <!-- Toolbar, in the reference order: copy / format / display mode /
            explain (disabled — this plugin never executes SQL) / refresh. -->
       <div class="pv-toolbar">
-        <button id="pvCopy" class="btn" type="button"></button>
-        <button id="pvFormatPreview" class="btn" type="button"></button>
+        <button id="pvCopy" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="9" height="10" rx="1.5" stroke="currentColor"/>
+<rect x="5" y="6" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="5" y="8" width="4" height="1" rx="0.5" fill="currentColor"/>
+<rect x="5" y="10" width="4" height="1" rx="0.5" fill="currentColor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M11.0017 2H11.5998C12.373 2 12.9998 2.6268 12.9998 3.4V3.91081C13.0011 3.94038 13.0017 3.97011 13.0017 4V11.5482C13.6063 11.1124 13.9998 10.4021 13.9998 9.6V3.4C13.9998 2.07452 12.9253 1 11.5998 1H6.39978C5.59677 1 4.88587 1.39437 4.4502 2H6.39978H11.0017Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+        <button id="pvFormatPreview" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="12" width="12" height="1" rx="0.5" fill="currentColor"/>
+<rect x="6" y="6" width="8" height="1" rx="0.5" fill="currentColor"/>
+<rect x="6" y="9" width="8" height="1" rx="0.5" fill="currentColor"/>
+<rect x="2" y="3" width="12" height="1" rx="0.5" fill="currentColor"/>
+<path d="M2.8 6.1C2.64849 5.98637 2.44579 5.96809 2.27639 6.05279C2.107 6.13749 2 6.31062 2 6.5V9.5C2 9.68939 2.107 9.86252 2.27639 9.94722C2.44579 10.0319 2.64849 10.0136 2.8 9.9L4.8 8.4C4.9259 8.30558 5 8.15738 5 8C5 7.84262 4.9259 7.69443 4.8 7.6L2.8 6.1Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
         <label class="muted" id="pvModeLabel" for="pvMode"></label>
         <select id="pvMode" class="btn">
           <option value="normal"></option>
@@ -826,11 +892,14 @@
         <!-- Explain: the reference runs EXPLAIN through the data source; this
              build has no sidecar execution path here, so the button stays
              disabled and explains itself (same wording as Execute). -->
-        <button id="pvExplain" class="btn" type="button" disabled></button>
-        <button id="pvRefresh" class="btn" type="button"></button>
+        <button id="pvExplain" class="btn" type="button" disabled><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
+        <button id="pvRefresh" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9V8C2.5 4.96243 4.96243 2.5 8 2.5C9.10679 2.5 10.1372 2.82692 11 3.38947" stroke="currentColor" stroke-linecap="round"/>
+<path d="M5 12.6105C5.86278 13.1731 6.89321 13.5 8 13.5C11.0376 13.5 13.5 11.0376 13.5 8V7" stroke="currentColor" stroke-linecap="round"/>
+<path d="M0.49997 7.50027L2.5 9.5L4.49998 7.50023" stroke="currentColor" stroke-linecap="round"/>
+<path d="M11.5 8.49982L13.5 6.5L15.5 8.49982" stroke="currentColor" stroke-linecap="round"/></svg><span data-btnlabel></span></button>
         <span class="pv-more-wrap">
           <button id="pvMore" class="btn" type="button" aria-haspopup="true"
-                  aria-expanded="false"></button>
+                  aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="3" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="13" cy="8" r="1.2" fill="currentColor"/></svg><span data-btnlabel></span></button>
           <div class="pv-more-menu" id="pvMoreMenu" role="menu" hidden>
             <button id="pvExport" class="pv-more-item" type="button" role="menuitem"></button>
             <!-- Rollback (L27): the workbench has no table/primary-key
@@ -854,8 +923,11 @@
           <div class="pv-scroll">
             <div id="pvParamsList"></div>
             <div class="pv-params-actions">
-              <button id="pvRebindBtn" class="btn" type="button"></button>
-              <button id="pvImportBtn" class="btn" type="button"></button>
+              <button id="pvRebindBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
+              <button id="pvImportBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M5.5 6C5.22386 6 5 6.22386 5 6.5C5 6.77614 5.22386 7 5.5 7H10.5C10.7761 7 11 6.77614 11 6.5C11 6.22386 10.7761 6 10.5 6H5.5Z" fill="currentColor"/>
+<path d="M5 8.5C5 8.22386 5.22386 8 5.5 8H10.5C10.7761 8 11 8.22386 11 8.5C11 8.77614 10.7761 9 10.5 9H5.5C5.22386 9 5 8.77614 5 8.5Z" fill="currentColor"/>
+<path d="M5.5 10C5.22386 10 5 10.2239 5 10.5C5 10.7761 5.22386 11 5.5 11H10.5C10.7761 11 11 10.7761 11 10.5C11 10.2239 10.7761 10 10.5 10H5.5Z" fill="currentColor"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M12 2H10.9146C10.7087 1.4174 10.1531 1 9.5 1H6.5C5.84689 1 5.29127 1.4174 5.08535 2H4C2.89543 2 2 2.89543 2 4V13C2 14.1046 2.89543 15 4 15H12C13.1046 15 14 14.1046 14 13V4C14 2.89543 13.1046 2 12 2ZM4 3H5.08535C5.29127 3.5826 5.84689 4 6.5 4H9.5C10.1531 4 10.7087 3.5826 10.9146 3H12C12.5523 3 13 3.44772 13 4V13C13 13.5523 12.5523 14 12 14H4C3.44772 14 3 13.5523 3 13V4C3 3.44772 3.44772 3 4 3ZM6.5 2C6.22386 2 6 2.22386 6 2.5C6 2.77614 6.22386 3 6.5 3H9.5C9.77614 3 10 2.77614 10 2.5C10 2.22386 9.77614 2 9.5 2H6.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
             </div>
             <div class="hint" id="pvParamsHint"></div>
           </div>
@@ -958,7 +1030,20 @@
           window.openidea.postMessage(JSON.stringify(message));
         }
       }
-      function setText(node, text) { if (node) { node.textContent = text == null ? '' : text; } }
+      // Text buttons carry an inline icon; only the label span is replaced so
+      // the icon survives every state push.
+      function setText(node, text) {
+        if (!node) { return; }
+        var label = node.querySelector('[data-btnlabel]');
+        if (label) {
+          // Icon-only button: the text becomes the tooltip / accessible name.
+          var value = text == null ? '' : text;
+          label.textContent = value;
+          node.title = value;
+          node.setAttribute('aria-label', value);
+        }
+        else { node.textContent = text == null ? '' : text; }
+      }
       function selectedTokens() {
         var out = [];
         for (var i = 0; i < TYPE_TOKENS.length; i++) {
@@ -1971,9 +2056,9 @@
         }
         // Lane L27: the editable-parameter actions and the rollback entry.
         var rebindBtn = pvNode('pvRebindBtn');
-        if (rebindBtn) { rebindBtn.textContent = labels.rebind || ''; }
+        if (rebindBtn) { setText(rebindBtn, labels.rebind || ''); }
         var importBtn = pvNode('pvImportBtn');
-        if (importBtn) { importBtn.textContent = labels.importClipboard || ''; }
+        if (importBtn) { setText(importBtn, labels.importClipboard || ''); }
         var rollbackBtn = pvNode('pvRollback');
         if (rollbackBtn) {
           rollbackBtn.textContent = labels.rollback || '';
