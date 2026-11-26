@@ -9,8 +9,16 @@ use crate::indexer::StatementKind;
 use openidea_plugin::Range;
 use openidea_plugin::inlay_hints::{Document, InlayHint, InlayHints, InlayKind};
 
+/// Hints in general; on by default.
+pub const SETTING: &str = "inlay.enabled";
+/// The INSERT column list hint on its own, so it can be turned off alone.
+pub const COLUMNS_SETTING: &str = "inlay.insertColumns";
+
 impl InlayHints for crate::Main {
     fn inlay_hints(&mut self, doc: &Document, _range: Range) -> Vec<InlayHint> {
+        if !super::setting_on(SETTING) || !super::setting_on(COLUMNS_SETTING) {
+            return Vec::new();
+        }
         insert_hints(&doc.text, &super::columns_for)
     }
 }

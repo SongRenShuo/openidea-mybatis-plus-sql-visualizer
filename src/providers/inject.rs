@@ -119,10 +119,20 @@ mod tests {
 
     #[test]
     fn the_setting_gates_the_trait_impl() {
+        // Nothing stored: the schema default (`injections.enabled = true`).
+        let _host = MockHost::install();
+        let mut plugin = crate::Main;
+        assert_eq!(Injections::injections(&mut plugin, &doc(XML)).len(), 4);
+
+        // An explicit `false` wins over the default.
         let host = MockHost::install();
+        host.set_setting(SETTING, "false");
         let mut plugin = crate::Main;
         assert!(Injections::injections(&mut plugin, &doc(XML)).is_empty());
+
+        let host = MockHost::install();
         host.set_setting(SETTING, "true");
+        let mut plugin = crate::Main;
         assert_eq!(Injections::injections(&mut plugin, &doc(XML)).len(), 4);
         let java = Document {
             path: "/p/M.java".into(),

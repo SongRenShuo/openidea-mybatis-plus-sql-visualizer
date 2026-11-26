@@ -312,9 +312,13 @@ fn xml_edges(facts: &XmlFacts) -> Edges {
         edges.definitions.push(anchor(stmt, id.range));
         // A statement id names the interface method that runs it; the method
         // may live in another module, and the host matches it by key.
+        //
+        // No `markers` entry here: the gutter icons are the `line-markers`
+        // provider's (providers::nav), which answers from the same indexes plus
+        // this file. Both paths would draw one icon for the same row, and the
+        // provider is the one that honours `nav.showLineMarkers`.
         let as_java = java_key(ns, &id.name);
-        edges.references.push(anchor(as_java.clone(), id.range));
-        edges.markers.push(anchor(as_java, id.range));
+        edges.references.push(anchor(as_java, id.range));
         if let Some(result_map) = &statement.result_map {
             edges.references.push(anchor(
                 scoped_key("rm", ns, &result_map.name),
@@ -398,9 +402,10 @@ fn java_edges(facts: &JavaFacts) -> Edges {
             .definitions
             .push(anchor(java_key(fqn, &name.name), name.range));
         if facts.is_mapper {
+            // Reference only, for the same reason as the XML side: the gutter
+            // icon comes from the `line-markers` provider.
             let stmt = statement_key(fqn, &name.name);
-            edges.references.push(anchor(stmt.clone(), name.range));
-            edges.markers.push(anchor(stmt, name.range));
+            edges.references.push(anchor(stmt, name.range));
         }
         for result_map in &method.result_maps {
             edges.references.push(anchor(

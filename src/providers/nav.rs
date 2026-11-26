@@ -1,14 +1,24 @@
 //! `definition` and `line_markers` for mapper XML and Java (T3-2).
 //!
-//! Both are name-level and same-document: the provider only sees one document
-//! and must answer inside the editing budget, so it never searches the project.
-//! Cross-file jumps (XML statement ↔ Java method, a fragment in another file)
-//! come from the document index built by [`crate::indexer`], which the host
-//! resolves from memory.
+//! A document answers inside the editing budget, so it never searches the
+//! project. Two kinds of answer are on offer:
 //!
-//! On by default (`nav.enabled = true`), like the IntelliJ edition: the SQL in
-//! a mapper is only useful if you can jump between its statement, its fragment
-//! and the Java method. Turning it off leaves rendering untouched.
+//! * **same-document** — `include refid`, `resultMap=`/`extends=` and a Java
+//!   `@ResultMap`, resolved against the document's own text;
+//! * **cross-file** — the statement id of a `<select|insert|update|delete>`
+//!   names the interface method that runs it, and a method name names the
+//!   XML statement that implements it. Those are resolved through the two
+//!   process indexes [`crate::indexer::java_methods`] and
+//!   [`crate::indexer::xml_statements`], which the host fills from this plugin's
+//!   `documentIndexers` feed (project open, then every change). The host keeps
+//!   its own copy of the same graph for its indexed navigation; these
+//!   providers use the in-process one so the answer is also available the
+//!   instant a file is opened.
+//!
+//! On by default (`nav.enabled = true`, `nav.showLineMarkers = true`), like the
+//! IntelliJ edition: the SQL in a mapper is only useful if you can jump between
+//! its statement, its fragment and the Java method. Turning them off leaves
+//! rendering untouched.
 
 use crate::indexer::scan::{self, Positions};
 use crate::indexer::{index_java, index_xml};
@@ -16,6 +26,8 @@ use openidea_plugin::providers::{Document, LineMarker, Providers};
 use openidea_plugin::{Location, Position, Range};
 
 pub const SETTING: &str = "nav.enabled";
+/// The gutter markers have their own switch, on by default like IntelliJ.
+pub const MARKERS_SETTING: &str = "nav.showLineMarkers";
 
 impl Providers for crate::Main {
     fn definition(&mut self, doc: &Document, at: Position) -> Vec<Location> {
@@ -26,14 +38,15 @@ impl Providers for crate::Main {
     }
 
     fn line_markers(&mut self, doc: &Document) -> Vec<LineMarker> {
-        if !super::setting_on(SETTING) {
+        if !super::setting_on(SETTING) || !super::setting_on(MARKERS_SETTING) {
             return Vec::new();
         }
         markers_in(doc)
     }
 }
 
-/// Same-document targets at `at`, whichever mapper language the document is.
+/// Every target the document at `at` has: the same-document references first,
+/// then whatever the in-process indexes know about the counterpart file.
 pub fn definition_in(doc: &Document, at: Position) -> Vec<Location> {
     let Some(offset) = openidea_plugin::text::offset(&doc.text, at) else {
         return Vec::new();
@@ -52,6 +65,37 @@ fn location(doc: &Document, range: Range) -> Location {
         path: doc.path.clone(),
         range,
     }
+}
+
+/// A target inside another file: the index gives a line, not a range, and the
+/// caret is the caller's to place.
+fn other_file(path: &str, line: u32) -> Location {
+    let position = Position::new(line, 0);
+    Location {
+        path: path.into(),
+        range: Range::new(position, position),
+    }
+}
+
+/// The interface methods `namespace.statementId` names, across the project.
+fn method_targets(namespace: Option<&crate::indexer::Named>, id: &str) -> Vec<Location> {
+    let Some(namespace) = namespace else {
+        return Vec::new();
+    };
+    crate::indexer::java_methods()
+        .resolve_statement(&namespace.name, id)
+        .into_iter()
+        .map(|hit| other_file(&hit.file, hit.line))
+        .collect()
+}
+
+/// The statements `namespace.id` names, across the project.
+fn statement_targets(namespace: &str, id: &str) -> Vec<Location> {
+    crate::indexer::xml_statements()
+        .lookup(namespace, id)
+        .into_iter()
+        .map(|hit| other_file(&hit.file, hit.line))
+        .collect()
 }
 
 fn inside(attr: &scan::Attr<'_>, offset: usize) -> bool {
@@ -89,11 +133,21 @@ fn xml_definition(doc: &Document, offset: usize) -> Vec<Location> {
                 }
             }
             other => {
-                if crate::indexer::StatementKind::from_tag(other).is_some()
-                    && let Some(referenced) = value_at(element, "resultMap", offset)
+                let is_statement = crate::indexer::StatementKind::from_tag(other).is_some();
+                if !is_statement {
+                    continue;
+                }
+                if let Some(referenced) = value_at(element, "resultMap", offset)
                     && let Some(result_map) = facts.local_result_map(referenced)
                 {
                     out.push(location(doc, result_map.range));
+                }
+                // `id` names the interface method that runs the statement. The
+                // Java side may live in another module, so the index decides.
+                if let Some(id) = value_at(element, "id", offset) {
+                    for target in method_targets(facts.namespace.as_ref(), id) {
+                        push_target(&mut out, target);
+                    }
                 }
             }
         }
@@ -123,8 +177,27 @@ fn java_definition(doc: &Document, at: Position) -> Vec<Location> {
                 }
             }
         }
+        if contains(&method.name.range, at) {
+            // The method name names the statement it runs, in a mapper XML of
+            // this project.
+            if let Some(fqn) = facts.fqn.as_deref() {
+                for target in statement_targets(fqn, &method.name.name) {
+                    push_target(&mut out, target);
+                }
+            }
+        }
     }
     out
+}
+
+/// Appends `target` unless the same path and range is already answered.
+fn push_target(out: &mut Vec<Location>, target: Location) {
+    let same = out
+        .iter()
+        .any(|known| known.path == target.path && known.range == target.range);
+    if !same {
+        out.push(target);
+    }
 }
 
 fn contains(range: &Range, at: Position) -> bool {
@@ -132,12 +205,22 @@ fn contains(range: &Range, at: Position) -> bool {
 }
 
 /// Gutter markers for the XML document: statement rows that jump to the
-/// fragment or result map they use, and fragment/result-map rows that jump to
-/// the first statement using them — all within this file.
+/// fragment, result map or interface method they use, and fragment/result-map
+/// rows that jump to the first statement using them.
+///
+/// The Java document gets its own set: a mapper method row jumps to the
+/// statement that implements it, when this project has one.
 pub fn markers_in(doc: &Document) -> Vec<LineMarker> {
-    if !super::is_xml(&doc.path) {
-        return Vec::new();
+    if super::is_xml(&doc.path) {
+        xml_markers(doc)
+    } else if super::is_java(&doc.path) {
+        java_markers(doc)
+    } else {
+        Vec::new()
     }
+}
+
+fn xml_markers(doc: &Document) -> Vec<LineMarker> {
     let facts = index_xml(&doc.path, &doc.text);
     let mut out: Vec<LineMarker> = Vec::new();
     let mut lines: Vec<u32> = Vec::new();
@@ -171,6 +254,19 @@ pub fn markers_in(doc: &Document) -> Vec<LineMarker> {
                 tooltip: format!("MyBatis: go to {kind} {}", found.name),
                 target: Some(location(doc, found.range)),
             });
+        } else {
+            // Nothing in this file: the statement's method, if it is indexed.
+            if let Some(target) = method_targets(facts.namespace.as_ref(), &id.name)
+                .into_iter()
+                .next()
+            {
+                push(LineMarker {
+                    line: id.range.start.line,
+                    icon: Some("navigate".to_owned()),
+                    tooltip: format!("MyBatis: go to mapper method {}", id.name),
+                    target: Some(target),
+                });
+            }
         }
     }
 
@@ -215,6 +311,32 @@ pub fn markers_in(doc: &Document) -> Vec<LineMarker> {
     out
 }
 
+fn java_markers(doc: &Document) -> Vec<LineMarker> {
+    let facts = index_java(&doc.path, &doc.text);
+    let Some(fqn) = facts.fqn.as_deref() else {
+        return Vec::new();
+    };
+    let mut out: Vec<LineMarker> = Vec::new();
+    let mut lines: Vec<u32> = Vec::new();
+    for method in &facts.methods {
+        let Some(target) = statement_targets(fqn, &method.name.name).into_iter().next() else {
+            continue;
+        };
+        let line = method.name.range.start.line;
+        if lines.contains(&line) {
+            continue;
+        }
+        lines.push(line);
+        out.push(LineMarker {
+            line,
+            icon: Some("navigate".to_owned()),
+            tooltip: format!("MyBatis: go to statement {}", method.name.name),
+            target: Some(target),
+        });
+    }
+    out
+}
+
 fn refers_to(reference: &str, local: &str, namespace: &Option<crate::indexer::Named>) -> bool {
     match (reference.rsplit_once('.'), namespace) {
         (Some((ns, id)), Some(namespace)) => id == local && ns == namespace.name,
@@ -251,12 +373,36 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_answered_while_the_setting_is_off() {
+    fn the_setting_defaults_to_on_and_an_explicit_false_turns_it_off() {
+        // Nothing is stored: the schema default (`nav.enabled = true`) answers.
         let _host = MockHost::install();
         let mut plugin = crate::Main;
         let document = doc(XML);
-        let refid = at(XML, "cols\"/>");
-        assert!(Providers::definition(&mut plugin, &document, refid).is_empty());
+        assert_eq!(
+            Providers::definition(&mut plugin, &document, at(XML, "cols\"/>")).len(),
+            1,
+            "navigation is on by default"
+        );
+        assert!(
+            !Providers::line_markers(&mut plugin, &document).is_empty(),
+            "markers are on by default too"
+        );
+
+        // An explicit `false` in the settings store wins over the default.
+        let host = MockHost::install();
+        host.set_setting(SETTING, "false");
+        let mut plugin = crate::Main;
+        assert!(Providers::definition(&mut plugin, &document, at(XML, "cols\"/>")).is_empty());
+        assert!(Providers::line_markers(&mut plugin, &document).is_empty());
+
+        // The marker switch alone silences the gutter, not Ctrl+B.
+        let host = MockHost::install();
+        host.set_setting(MARKERS_SETTING, "false");
+        let mut plugin = crate::Main;
+        assert_eq!(
+            Providers::definition(&mut plugin, &document, at(XML, "cols\"/>")).len(),
+            1
+        );
         assert!(Providers::line_markers(&mut plugin, &document).is_empty());
     }
 
