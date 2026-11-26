@@ -756,7 +756,7 @@ mod tests {
 
     #[test]
     fn unsupported_dollar_expression_is_unresolved() {
-        let (_, _, ctx) = render("SELECT ${list.size()}", json!({"list": [1]}));
+        let (_, _, ctx) = render("SELECT ${list.contains(1)}", json!({"list": [1]}));
         let (key, _) = ctx.unresolved.expect("must be unresolved");
         assert_eq!(key, ognl::KEY_UNSUPPORTED);
     }
