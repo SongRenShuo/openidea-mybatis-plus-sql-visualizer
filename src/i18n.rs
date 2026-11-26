@@ -815,6 +815,37 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "The current editor cannot be read (editor.read is missing or the document is stale); pass the SQL or a mapper path as the command argument instead.",
         "无法读取当前编辑器（缺少 editor.read 或文档已过期）；请改用命令参数传入 SQL 或 Mapper 路径。",
     ),
+    // Hover SQL preview (L37): card titles, counts and notices. Core render
+    // reasons stay as `[message_key] detail`, the workbench convention.
+    ("hover.title.sql", "SQL", "SQL"),
+    ("hover.title.fragment", "SQL fragment", "SQL 片段"),
+    ("hover.title.resultmap", "Result map", "结果映射"),
+    ("hover.title.method", "mapper method", "Mapper 方法"),
+    (
+        "hover.fragment.used_prefix",
+        "Included in this file:",
+        "本文件内被 include：",
+    ),
+    ("hover.fragment.used_suffix", "time(s)", "次"),
+    ("hover.resultmap.type_prefix", "Maps to", "映射到"),
+    ("hover.resultmap.extends_prefix", "Extends", "继承自"),
+    (
+        "hover.resultmap.used_prefix",
+        "Used by statements in this file:",
+        "本文件内被语句引用：",
+    ),
+    (
+        "hover.sql.truncated_prefix",
+        "SQL truncated; showing the first",
+        "SQL 已截断，仅显示前",
+    ),
+    ("hover.sql.truncated_suffix", "characters", "个字符"),
+    ("hover.java.ambiguous_prefix", "Found", "找到"),
+    (
+        "hover.java.ambiguous_suffix",
+        "candidate mapper statements; cannot choose one.",
+        "处候选 Mapper 语句，无法确定唯一一条。",
+    ),
 ];
 
 /// Localised text for `key` in the IDE's current UI language.

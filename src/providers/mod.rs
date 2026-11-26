@@ -24,6 +24,7 @@
 
 pub mod diag;
 pub mod gutter;
+pub mod hover;
 pub mod inject;
 pub mod inlay;
 pub mod nav;
