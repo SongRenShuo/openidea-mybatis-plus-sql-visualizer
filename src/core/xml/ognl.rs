@@ -10,12 +10,29 @@
 //! not    := ("not" | "!") not | cmp
 //! cmp    := operand ( ("=="|"!="|">"|">="|"<"|"<="|"eq"|"neq"|"gt"|"gte"|"lt"|"lte") operand )?
 //! operand:= ("-" | "+") operand | chain
-//! chain  := primary ( "." ident | "[" expr "]" )*
+//! chain  := primary ( "." ident ("(" ")")? | "[" expr "]" )*
 //! primary:= number | string | true | false | null | ident | "(" expr ")"
 //! ```
 //!
+//! The only method calls accepted are zero-argument calls from a fixed
+//! whitelist — the ones MyBatis mappers use to guard `foreach` / string checks:
+//!
+//! | form | array | object (Map) | string | null |
+//! | --- | --- | --- | --- | --- |
+//! | `.size()` / `.size` | element count | entry count (a real `size` key wins for the property form) | character count | `null` |
+//! | `.isEmpty()` | `is_empty()` | `is_empty()` | `is_empty()` | `null` |
+//! | `.length()` / `.length` | element count | `length()` errors; the property form returns a real `length` key, else `null` | character count | `null` |
+//!
+//! A `null` receiver yields `null` rather than an error, so a chain on a
+//! missing map key stays falsy instead of failing the whole statement.
+//!
+//! A string answers both spellings: upstream OGNL only defines `length()` on
+//! `String`, but the character count is unambiguous and the `.size` property
+//! was already accepted by this subset, so `.size()` keeps the same answer.
+//!
 //! Deliberately unsupported (parse error, `message_key = ognl.unsupported`):
-//! method calls (`list.size()`), static references (`@java.lang.Math@max`),
+//! method calls outside that whitelist and any call with arguments
+//! (`list.contains(1)`), static references (`@java.lang.Math@max`),
 //! constructors (`new ...`), OGNL variables (`#var`), ternary `?:`, arithmetic
 //! (`+ - * / %` as binary operators), `in` / `not in`, lambdas, assignments.
 //!
@@ -66,7 +83,30 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
     Property(String),
+    /// A zero-argument call from the supported whitelist. Only the parser can
+    /// build one, so an unknown method name never reaches evaluation.
+    Method(Method),
     Index(Box<Expr>),
+}
+
+/// Zero-argument methods the restricted subset understands. They cover the
+/// canonical `ids != null and ids.size() > 0` guard around `<foreach>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Method {
+    Size,
+    IsEmpty,
+    Length,
+}
+
+impl Method {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "size" => Some(Self::Size),
+            "isEmpty" => Some(Self::IsEmpty),
+            "length" => Some(Self::Length),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -394,9 +434,20 @@ impl<'a> Parser<'a> {
                 };
                 self.advance()?;
                 if self.is_sym("(") {
-                    return Err(OgnlError::unsupported(format!(
-                        "method call .{name}() is outside the supported subset"
-                    )));
+                    self.advance()?;
+                    if !self.is_sym(")") {
+                        return Err(OgnlError::unsupported(format!(
+                            "method call .{name}(...) with arguments is outside the supported subset"
+                        )));
+                    }
+                    self.advance()?;
+                    let Some(method) = Method::from_name(&name) else {
+                        return Err(OgnlError::unsupported(format!(
+                            "method call .{name}() is outside the supported subset"
+                        )));
+                    };
+                    steps.push(Step::Method(method));
+                    continue;
                 }
                 steps.push(Step::Property(name));
                 continue;
@@ -611,8 +662,10 @@ fn eval_step(
                 }
             }
             Value::Null => Ok(Value::Null),
-            Value::Array(items) if name == "size" => Ok(Value::Number((items.len() as i64).into())),
-            Value::String(s) if name == "size" => {
+            Value::Array(items) if name == "size" || name == "length" => {
+                Ok(Value::Number((items.len() as i64).into()))
+            }
+            Value::String(s) if name == "size" || name == "length" => {
                 Ok(Value::Number((s.chars().count() as i64).into()))
             }
             other => Err(OgnlError::eval(format!(
@@ -620,6 +673,7 @@ fn eval_step(
                 type_name(&other)
             ))),
         },
+        Step::Method(method) => eval_method(*method, value),
         Step::Index(index) => {
             let index_value = eval(index, bindings)?;
             match value {
@@ -645,6 +699,43 @@ fn eval_step(
                 ))),
             }
         }
+    }
+}
+
+/// Evaluates a whitelisted zero-argument call. A `null` receiver is `null`
+/// (never an error) so a chain over a missing map key stays falsy; a receiver
+/// the method is not defined for is an evaluation error, as in OGNL.
+fn eval_method(method: Method, value: Value) -> Result<Value, OgnlError> {
+    match method {
+        Method::Size => match value {
+            Value::Null => Ok(Value::Null),
+            Value::Array(items) => Ok(Value::Number((items.len() as i64).into())),
+            Value::Object(map) => Ok(Value::Number((map.len() as i64).into())),
+            Value::String(s) => Ok(Value::Number((s.chars().count() as i64).into())),
+            other => Err(OgnlError::eval(format!(
+                "size() is not defined for {}",
+                type_name(&other)
+            ))),
+        },
+        Method::IsEmpty => match value {
+            Value::Null => Ok(Value::Null),
+            Value::Array(items) => Ok(Value::Bool(items.is_empty())),
+            Value::Object(map) => Ok(Value::Bool(map.is_empty())),
+            Value::String(s) => Ok(Value::Bool(s.is_empty())),
+            other => Err(OgnlError::eval(format!(
+                "isEmpty() is not defined for {}",
+                type_name(&other)
+            ))),
+        },
+        Method::Length => match value {
+            Value::Null => Ok(Value::Null),
+            Value::Array(items) => Ok(Value::Number((items.len() as i64).into())),
+            Value::String(s) => Ok(Value::Number((s.chars().count() as i64).into())),
+            other => Err(OgnlError::eval(format!(
+                "length() is not defined for {}",
+                type_name(&other)
+            ))),
+        },
     }
 }
 
@@ -896,13 +987,134 @@ mod tests {
 
     #[test]
     fn method_calls_are_rejected() {
-        for text in ["list.size()", "name.trim()", "user.getName()"] {
+        for text in ["list.contains(1)", "name.trim()", "user.getName()"] {
             assert_eq!(
                 parse(text).unwrap_err().message_key,
                 KEY_UNSUPPORTED,
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn rejected_method_detail_names_the_method() {
+        for (text, name) in [
+            ("list.contains(1)", "contains"),
+            ("name.trim()", "trim"),
+            ("user.getName()", "getName"),
+            ("list.toArray()", "toArray"),
+        ] {
+            let err = parse(text).unwrap_err();
+            assert_eq!(err.message_key, KEY_UNSUPPORTED, "{text}");
+            assert!(err.detail.contains(name), "{text}: {}", err.detail);
+        }
+        // A whitelisted name with arguments is still out of the subset.
+        let err = parse("list.size(1)").unwrap_err();
+        assert_eq!(err.message_key, KEY_UNSUPPORTED);
+        assert!(err.detail.contains("size"), "{}", err.detail);
+    }
+
+    #[test]
+    fn size_method_guards_a_foreach_collection() {
+        // The canonical MyBatis guard: a missing key short-circuits on the left
+        // operand, so `.size()` is never evaluated and nothing fails.
+        assert_eq!(
+            evaluate("ids != null and ids.size() > 0", &bindings()).unwrap(),
+            json!(false)
+        );
+        let mut with_ids = bindings();
+        with_ids.insert("ids".into(), json!([1, 2]));
+        assert_eq!(
+            evaluate("ids != null and ids.size() > 0", &with_ids).unwrap(),
+            json!(true)
+        );
+        with_ids.insert("ids".into(), json!([]));
+        assert_eq!(
+            evaluate("ids != null and ids.size() > 0", &with_ids).unwrap(),
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn size_method_counts_elements_and_characters() {
+        let b = bindings();
+        assert_eq!(evaluate("list.size()", &b).unwrap(), json!(3));
+        assert_eq!(evaluate("map.size()", &b).unwrap(), json!(2));
+        assert_eq!(evaluate("name.size()", &b).unwrap(), json!(3));
+        assert_eq!(evaluate("missing.size()", &b).unwrap(), Value::Null);
+        assert_eq!(evaluate("list.size() > 2", &b).unwrap(), json!(true));
+    }
+
+    #[test]
+    fn is_empty_method_handles_all_collections_and_null() {
+        let b = bindings();
+        assert_eq!(evaluate("list.isEmpty()", &b).unwrap(), json!(false));
+        assert_eq!(evaluate("map.isEmpty()", &b).unwrap(), json!(false));
+        assert_eq!(evaluate("name.isEmpty()", &b).unwrap(), json!(false));
+        assert_eq!(evaluate("empty.isEmpty()", &b).unwrap(), json!(true));
+        assert_eq!(evaluate("missing.isEmpty()", &b).unwrap(), Value::Null);
+        assert!(truth("name != null and name.isEmpty() == false"));
+        assert_eq!(
+            evaluate("ids.isEmpty()", &b).unwrap(),
+            Value::Null,
+            "a missing key is null, not an error"
+        );
+    }
+
+    #[test]
+    fn length_method_and_property_match_ognl_semantics() {
+        let b = bindings();
+        assert_eq!(evaluate("name.length()", &b).unwrap(), json!(3));
+        assert_eq!(evaluate("list.length()", &b).unwrap(), json!(3));
+        assert_eq!(evaluate("missing.length()", &b).unwrap(), Value::Null);
+        assert_eq!(evaluate("name.length", &b).unwrap(), json!(3));
+        assert_eq!(evaluate("list.length", &b).unwrap(), json!(3));
+        assert!(truth("name != null and name.length() > 0"));
+    }
+
+    #[test]
+    fn property_forms_agree_with_the_zero_argument_calls() {
+        let b = bindings();
+        for (property, call) in [
+            ("list.size", "list.size()"),
+            ("map.size", "map.size()"),
+            ("name.size", "name.size()"),
+            ("list.length", "list.length()"),
+            ("name.length", "name.length()"),
+        ] {
+            assert_eq!(
+                evaluate(property, &b).unwrap(),
+                evaluate(call, &b).unwrap(),
+                "{property} vs {call}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_real_size_key_wins_over_the_property_form_only() {
+        let mut b = bindings();
+        b.insert("tagged".into(), json!({"size": "XL", "n": 1}));
+        assert_eq!(evaluate("tagged.size", &b).unwrap(), json!("XL"));
+        assert_eq!(evaluate("tagged.size()", &b).unwrap(), json!(2));
+    }
+
+    #[test]
+    fn search_statement_with_missing_ids_renders_exact_without_the_in_clause() {
+        let xml = r#"<mapper namespace="com.example.UserMapper"><select id="search">
+            SELECT * FROM users WHERE 1 = 1
+            <if test="ids != null and ids.size() &gt; 0">
+                AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+        </select></mapper>"#;
+        let out = crate::core::xml::render_statement(xml, "search", &json!({}));
+        assert_eq!(out.confidence, crate::core::xml::Confidence::Exact);
+        assert!(out.message_keys.is_empty(), "{:?}", out.message_keys);
+        assert!(!out.sql.contains("id IN"), "{}", out.sql);
+
+        let out = crate::core::xml::render_statement(xml, "search", &json!({"ids": [1, 2]}));
+        assert_eq!(out.confidence, crate::core::xml::Confidence::Exact);
+        assert!(out.sql.contains("id IN"), "{}", out.sql);
+        assert_eq!(out.params, vec![json!(1), json!(2)]);
     }
 
     #[test]
