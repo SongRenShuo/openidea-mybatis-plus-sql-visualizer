@@ -28,6 +28,21 @@ use super::state::{
 use super::suppress;
 use super::{VIEW_ID, format_epoch_ms, message_line, push_state};
 
+/// Ticks (500 ms each) of a connected capture with no heartbeat before the
+/// Output channel states it once: the socket answering nothing at all is a
+/// protocol mismatch, not silence from the application.
+const SILENT_TICKS_BEFORE_REPORT: u32 = 20;
+
+thread_local! {
+    /// The health line last written to Output, so a tick that sees the same
+    /// counters stays quiet.
+    static PRINTED_HEALTH: std::cell::Cell<Option<crate::capture::ws::AgentHealth>> =
+        const { std::cell::Cell::new(None) };
+    static HAD_HEARTBEAT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static MISSING_REPORTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static SILENT_TICKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 // ---------------------------------------------------------------------------
 // Row actions: jump / focus / delete / block (lane L28)
 // ---------------------------------------------------------------------------
@@ -476,12 +491,44 @@ pub(super) fn capture_retry(ctx: &Invocation) -> Result<(), Error> {
 pub(super) fn capture_poll() -> Result<(), Error> {
     match crate::capture::bridge::poll(super::now_ms()) {
         Ok(report) => {
+            if let Some(health) = report.health {
+                HAD_HEARTBEAT.with(|latch| latch.set(true));
+                SILENT_TICKS.with(|count| count.set(0));
+                if PRINTED_HEALTH.with(|last| last.get()) != Some(health) {
+                    PRINTED_HEALTH.with(|last| last.set(Some(health)));
+                    // One line per change of the counters: the panel's status row
+                    // is too narrow for them, and "connected with zero rows" has
+                    // to be attributable without running a command.
+                    let _ = common::emit(&format!("-- agent: {}\n", health.summary()));
+                }
+            } else if !HAD_HEARTBEAT.with(|latch| latch.get())
+                && !MISSING_REPORTED.with(|flag| flag.get())
+            {
+                let ticks = SILENT_TICKS.with(|count| {
+                    let next = count.get() + 1;
+                    count.set(next);
+                    next
+                });
+                if ticks >= SILENT_TICKS_BEFORE_REPORT {
+                    MISSING_REPORTED.with(|flag| flag.set(true));
+                    let _ = common::emit(
+                        "-- agent: connected but no heartbeat frame arrived \
+                         (the socket is not speaking the capture protocol)\n",
+                    );
+                }
+            }
             if report.fetched > 0 {
                 let _ = push_state();
             }
         }
-        // A tick every 500 ms must not turn "nothing open" into an error.
-        Err(crate::capture::bridge::BridgeError::NotConnected) => {}
+        // A tick every 500 ms must not turn "nothing open" into an error; a closed
+        // session starts over, so the next capture reports again.
+        Err(crate::capture::bridge::BridgeError::NotConnected) => {
+            PRINTED_HEALTH.with(|last| last.set(None));
+            HAD_HEARTBEAT.with(|latch| latch.set(false));
+            MISSING_REPORTED.with(|flag| flag.set(false));
+            SILENT_TICKS.with(|count| count.set(0));
+        }
         Err(error) => {
             host::log(
                 openidea_plugin::LogLevel::Warn,
