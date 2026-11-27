@@ -101,7 +101,7 @@ const TEMPLATE = `<!-- Input half (lane L27): the reference's standalone page ac
         <!-- Share (lane L44): no share service and no network channel, so the
              entry copies the SQL locally. -->
         <button id="pvShare" class="pv-more-item" type="button" role="menuitem"></button>
-        <!-- Qualify columns (lane L44): rendering `table.column` needs the
+        <!-- Qualify columns (lane L44): rendering table.column needs the
              renderer to know each column's table; neither the core renderer nor
              the engine has that switch, so the item stays disabled with the
              reason in its tooltip. -->

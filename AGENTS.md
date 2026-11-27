@@ -26,7 +26,8 @@
 | --- | --- | --- |
 | 车道内 | 本地 | `cargo fmt --all --check` + 只跑本模块测试（`cargo test <module>`）；不跑 clippy、不跑全量 |
 | 合并点 | 本地 | 一次 `cargo test`（增量）+ 一次 `openidea-plugin build && openidea-plugin check .`（约 5 s，缓存后） |
-| 权威全量 | CI（`.github/workflows/build.yml`） | `fmt` + `clippy -D warnings` + `test` + `build` + `check` + `scripts/verify-engine.sh` + 上传 wasm |
+| **改 `web/**` 时** | 本地 | `node scripts/check-web-syntax.mjs`。Rust 侧从不读 `web/`，`cargo` 全绿证明不了面板能跑：一次 JS 解析失败（例如模板字符串里出现反引号）就让整个工具窗没有页签、没有回调、正文空白 |
+| 权威全量 | CI（`.github/workflows/build.yml`） | `fmt` + `clippy -D warnings` + `test` + `build` + `check` + `scripts/verify-engine.sh` + `check-manifest-api` + `check-web-syntax` + 上传 wasm |
 
 - 合并候选不想动 master 时：`git push github HEAD:refs/heads/ci/gate-<n>`，CI 的 `ci/**` 触发已接好，`gh run watch` 读结论。
 - 子代理与长命令一律**后台**：Agent 默认异步，派完立刻做下一件事；**禁止**阻塞等待（`TaskOutput(block=true)` 长等、`sleep`、空转）。靠 task-notification 继续；要看进度只 `tail` 一次。

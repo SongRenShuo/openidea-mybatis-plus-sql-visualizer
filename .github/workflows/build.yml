@@ -44,6 +44,12 @@ jobs:
       # while the host rejects the whole package once it knows the key.
       - run: bash scripts/check-manifest-api.test.sh
       - run: bash scripts/check-manifest-api.sh
+      # The panel's logic lives in web/*.js and in log-panel.html's inline
+      # module script. A parse error there takes the whole tool window down —
+      # no tab labels, no button handlers — while every cargo gate stays green,
+      # because the Rust side never reads those files. Node ships on the runner.
+      - run: bash scripts/check-web-syntax.test.sh
+      - run: node scripts/check-web-syntax.mjs
       - run: cargo fmt --all --check
       # --all-targets is the superset gate: it also lints the unit tests.
       - run: cargo clippy --all-targets -- -D warnings
