@@ -54,6 +54,8 @@
   "Format SQL": "Format SQL",
   "Indent width": "Indent width",
   "Preview truncation (characters)": "Preview truncation (characters)",
+  "Open preview in": "Open preview in",
+  "Manage SQL Suppression Rules": "Manage SQL Suppression Rules",
   "Export format": "Export format",
   "Mapper and XML navigation": "Mapper and XML navigation",
   "Gutter line markers": "Gutter line markers",
