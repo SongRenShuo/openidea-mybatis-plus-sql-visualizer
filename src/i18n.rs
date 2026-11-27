@@ -230,8 +230,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ("view.logs.settings.title", "Settings", "设置"),
     (
         "view.logs.settings.guide",
-        "Open Settings → Plugins → MyBatis SQL Visualizer to change the dialect and log options.",
-        "请在 Settings → Plugins → MyBatis SQL Visualizer 中修改方言与日志选项。",
+        "Open Settings › Tools › MyBatis SQL Visualizer › SQL Log to change the dialect and log options.",
+        "请在 设置 › 工具 › MyBatis SQL Visualizer › SQL 日志 中修改方言与日志选项。",
     ),
     ("view.logs.button.help", "Help", "帮助"),
     ("view.logs.status.follow_on", "Following latest", "跟随最新"),

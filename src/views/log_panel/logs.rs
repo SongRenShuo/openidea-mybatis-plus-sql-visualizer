@@ -650,19 +650,16 @@ pub(super) fn toggle_group_op(message: &Value) -> Result<(), Error> {
     Ok(())
 }
 
-/// `settings`: the platform has no API to open the settings page, so the button
-/// points the user there through a notification and the Output channel instead
-/// of doing nothing.
+/// `settings`: the page opens its own settings card on the click (lane L2), so
+/// this only leaves a pointer in the Output channel for whoever reads the log
+/// later. It used to raise a notification as well, which repeated the same line
+/// and carried a stale page path (`Settings → Plugins`); the host has no API to
+/// open the settings page, so the path in the card is the actionable one.
 pub(super) fn settings() -> Result<(), Error> {
-    host::notify(
-        NotificationLevel::Info,
-        &t("view.logs.settings.title"),
-        &t("view.logs.settings.guide"),
-    );
     common::emit(&format!(
         "-- {}\n{}\n",
         t("view.logs.settings.title"),
-        t("view.logs.settings.guide")
+        t("view.logs.settings.path_hint")
     ))
 }
 
@@ -1273,11 +1270,14 @@ mod tests {
     fn settings_message_points_at_the_settings_page() {
         let (host, _guard) = test_host();
         handle_panel_message(&host, "{\"op\":\"settings\"}").unwrap();
-        let notes = host.notifications();
-        assert!(!notes.is_empty(), "a notification is published");
-        assert!(notes[0].body.contains("Settings"), "{:?}", notes[0]);
+        // The page renders its own settings card on the click (lane L2); a
+        // second notification only repeated the same line with a stale page
+        // path ("Settings → Plugins"), so the op now leaves the Output pointer
+        // alone and the path there is the one the card shows.
+        assert!(host.notifications().is_empty(), "no duplicate notification");
         let out = &host.output()[common::CHANNEL];
-        assert!(out.contains("Plugins"), "{out}");
+        assert!(out.contains(&t("view.logs.settings.path_hint")), "{out}");
+        assert!(!out.contains("Plugins"), "stale page path: {out}");
     }
 
     #[test]
