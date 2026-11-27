@@ -16,7 +16,7 @@ use crate::indexer;
 
 use super::state::{Filter, SortMode};
 use super::suppress;
-use super::{SQL_DISPLAY_CHARS, format_epoch_ms, format_ms, truncate_chars};
+use super::{format_epoch_ms, format_ms};
 
 // ---------------------------------------------------------------------------
 // Model
@@ -197,12 +197,6 @@ impl PanelRow {
             Some(ms) => format_ms(ms),
             None => "-".to_string(),
         }
-    }
-
-    /// SQL truncated for the list; error rows have no SQL here (see
-    /// [`PanelRow::error_text`]).
-    pub fn display_sql(&self) -> String {
-        truncate_chars(&self.sql, SQL_DISPLAY_CHARS)
     }
 
     /// The original line shown under an error row (empty for non-error rows).
