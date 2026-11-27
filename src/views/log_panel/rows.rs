@@ -737,7 +737,7 @@ pub(super) fn xml_target(
 
 #[cfg(test)]
 mod tests {
-    use super::super::state::{Focus, FocusKind};
+    use super::super::state::{Focus, FocusKind, TypeFilter};
     use super::*;
     use crate::views::log_panel::test_support::{MIXED_LOG, analysis_of, rows_of, test_host};
     use std::collections::BTreeSet;
