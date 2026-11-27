@@ -5,12 +5,16 @@
 //! preview pane below, a parameter column beside the SQL column, and the tabs
 //! SQL / 原文 / 列信息. In the IntelliJ edition that panel is the fifth
 //! (closable) tab of the SQL Log tool window, not a tool window of its own, so
-//! this build renders it inside `web/log-panel.html` (`#panelPreview`).
+//! this build mounts it on that panel's fifth tab (lane L42: the page is the
+//! module `web/preview.js`, injected into `#panelPreview`; the same module is
+//! the whole page of `web/preview.html`, the shell the API 1.18 dialog will
+//! load).
 //!
 //! This module therefore owns the model and the op handling only; it posts no
-//! view message any more. The log panel carries [`preview_tab`] in its state
-//! (`tabs.preview`) and routes `preview-*` messages here, so both tabs share
-//! one push channel and one page.
+//! view message of its own. The log panel carries [`preview_tab`] in its state
+//! (`tabs.preview`) and routes `preview-*` messages here, so both halves share
+//! one push channel and one page — and [`preview_target`] names the channel
+//! when a second mount point exists.
 //!
 //! Two facts of the OpenIDEA platform shape this panel:
 //!
