@@ -1,18 +1,474 @@
-<!doctype html>
-<!--
-  Placeholder for the "Manage SQL Suppression Rules" dialog (lane E).
-
-  The manifest declares this page so the package stays loadable while the
-  dialog is being built: a declared `web` file that does not exist makes the
-  linked plugin fail to prepare. Lane E replaces this file with the real
-  manager; until the command that opens the dialog lands, nothing can reach it.
--->
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Manage SQL Suppression Rules</title>
-  </head>
-  <body>
-    <p>This dialog is not wired up yet.</p>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manage SQL Suppress Rules</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      font: var(--openidea-font-size, 13px)/1.4 var(--openidea-font-ui, sans-serif);
+      color: var(--openidea-fg);
+      background: var(--openidea-bg);
+      overflow: hidden;
+    }
+    .split {
+      display: flex;
+      flex: 1 1 auto;
+      min-height: 0;
+      border: 1px solid var(--openidea-border);
+      border-radius: 4px;
+      margin: 10px 10px 0;
+      overflow: hidden;
+    }
+    /* Left: the rule list, the reference's 38% split. */
+    .left {
+      flex: 0 0 38%;
+      min-width: 220px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-right: 1px solid var(--openidea-border);
+    }
+    .listhead {
+      flex: 0 0 auto;
+      padding: 5px 8px;
+      font-size: 11px;
+      color: var(--openidea-fg-muted);
+      border-bottom: 1px solid var(--openidea-border);
+    }
+    .list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+    .rule {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--openidea-border);
+      cursor: pointer;
+      outline: none;
+    }
+    .rule:hover { background: var(--openidea-bg-hover); }
+    .rule.selected { background: var(--openidea-bg-selected); }
+    .rule:focus-visible { box-shadow: inset 0 0 0 1px var(--openidea-accent); }
+    .rule .summary {
+      font-family: var(--openidea-font-mono, monospace);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rule .meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--openidea-fg-muted);
+    }
+    .rule .badge { color: var(--openidea-fg-strong); font-weight: 600; }
+    .empty {
+      padding: 12px 10px;
+      color: var(--openidea-fg-muted);
+      font-size: 12px;
+    }
+    /* Right: the selected statement in full, or the add pane. */
+    .right {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 8px;
+      gap: 6px;
+    }
+    .sql {
+      flex: 1 1 auto;
+      min-height: 0;
+      margin: 0;
+      overflow: auto;
+      padding: 6px 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--openidea-font-mono, monospace);
+      font-size: 12px;
+      background: var(--openidea-bg-input);
+      border: 1px solid var(--openidea-border);
+      border-radius: 3px;
+      color: var(--openidea-fg);
+    }
+    .addinput {
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
+      resize: none;
+      padding: 6px 8px;
+      font-family: var(--openidea-font-mono, monospace);
+      font-size: 12px;
+      line-height: 1.4;
+      background: var(--openidea-bg-input);
+      border: 1px solid var(--openidea-accent);
+      border-radius: 3px;
+      color: var(--openidea-fg);
+    }
+    .status { flex: 0 0 auto; min-height: 18px; font-size: 12px; color: var(--openidea-fg-muted); }
+    .status.error { color: var(--openidea-danger); }
+    .note {
+      flex: 0 0 auto;
+      font-size: 11px;
+      color: var(--openidea-fg-muted);
+      border-top: 1px solid var(--openidea-border);
+      padding-top: 6px;
+    }
+    /* Bottom action row: flat buttons, the check box after the actions and
+       Close at the far right, like the reference's button row. */
+    .actions {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 8px 10px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 10px;
+      background: transparent;
+      color: var(--openidea-fg);
+      border: 1px solid var(--openidea-border);
+      border-radius: 3px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--openidea-bg-hover); }
+    .btn:focus-visible { border-color: var(--openidea-accent); outline: none; }
+    .btn[disabled] { color: var(--openidea-fg-muted); opacity: 0.5; cursor: default; }
+    .btn[disabled]:hover { background: transparent; }
+    .btn.primary { margin-left: auto; }
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: var(--openidea-fg);
+      cursor: pointer;
+      user-select: none;
+    }
+    .check input { margin: 0; }
+    .check[aria-disabled="true"] { color: var(--openidea-fg-muted); cursor: default; }
+    .confirmbar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px 8px;
+      font-size: 12px;
+      color: var(--openidea-danger);
+    }
+    .confirmbar .btn { border-color: var(--openidea-danger); color: var(--openidea-danger); }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="split">
+    <div class="left">
+      <div class="listhead" id="listTitle"></div>
+      <div class="list" id="ruleList" role="listbox"></div>
+      <div class="empty" id="emptyState" hidden></div>
+    </div>
+    <div class="right">
+      <pre class="sql" id="sqlView"></pre>
+      <textarea class="addinput" id="addInput" spellcheck="false" hidden></textarea>
+      <div class="status" id="statusLine"></div>
+      <div class="note" id="noteText"></div>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" id="addBtn" type="button"></button>
+    <button class="btn" id="cancelAddBtn" type="button" hidden></button>
+    <button class="btn" id="deleteBtn" type="button"></button>
+    <button class="btn" id="clearBtn" type="button"></button>
+    <button class="btn" id="structureBtn" type="button"></button>
+    <label class="check" id="structureAllWrap">
+      <input type="checkbox" id="structureAll">
+      <span id="structureAllText"></span>
+    </label>
+    <button class="btn primary" id="closeBtn" type="button"></button>
+  </div>
+  <div class="confirmbar" id="confirmBar" hidden>
+    <span id="confirmText"></span>
+    <button class="btn" id="confirmYes" type="button"></button>
+    <button class="btn" id="confirmNo" type="button"></button>
+  </div>
+
+  <script type="module">
+    (function () {
+      var L = {};
+      var state = { rules: [] };
+      var selectedId = null;
+      var adding = false;
+      var addPending = false;
+      var pendingClear = false;
+
+      function $(id) { return document.getElementById(id); }
+      function setText(node, text) { if (node) { node.textContent = text == null ? '' : text; } }
+      function post(message) {
+        if (window.openidea && window.openidea.postMessage) {
+          window.openidea.postMessage(JSON.stringify(message));
+        }
+      }
+
+      function rules() { return state.rules || []; }
+      function count() { return rules().length; }
+
+      function selectedRule() {
+        var all = rules();
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].id === selectedId) { return all[i]; }
+        }
+        return null;
+      }
+
+      function applyLabels() {
+        setText($('listTitle'), L.listTitle || 'Rules');
+        setText($('addBtn'), adding ? (L.addConfirm || 'Confirm Add') : (L.add || 'Add'));
+        setText($('cancelAddBtn'), L.cancelAdd || 'Cancel');
+        setText($('deleteBtn'), L.delete || 'Delete');
+        setText($('clearBtn'), L.clear || 'Clear All');
+        setText($('closeBtn'), L.close || 'Close');
+        setText($('structureAllText'), L.structureAll || 'Structure-match all');
+        setText($('emptyState'), L.empty || 'No suppress rules yet');
+        setText($('noteText'), L.note || '');
+        setText($('confirmText'), L.clearConfirm || '');
+        setText($('confirmYes'), L.clearYes || 'Delete All');
+        setText($('confirmNo'), L.clearNo || 'Cancel');
+        var rule = selectedRule();
+        setText(
+          $('structureBtn'),
+          rule && rule.structure
+            ? (L.structureOn || 'Disable structure match')
+            : (L.structureOff || 'Enable structure match')
+        );
+      }
+
+      function renderList() {
+        var list = $('ruleList');
+        while (list.firstChild) { list.removeChild(list.firstChild); }
+        var all = rules();
+        $('emptyState').hidden = all.length !== 0;
+        for (var i = 0; i < all.length; i++) {
+          var rule = all[i];
+          var row = document.createElement('div');
+          row.className = 'rule' + (rule.id === selectedId ? ' selected' : '');
+          row.setAttribute('role', 'option');
+          row.setAttribute('aria-selected', rule.id === selectedId ? 'true' : 'false');
+          row.setAttribute('data-id', rule.id);
+          row.tabIndex = 0;
+
+          var summary = document.createElement('div');
+          summary.className = 'summary';
+          summary.textContent = rule.summary || '';
+          row.appendChild(summary);
+
+          var meta = document.createElement('div');
+          meta.className = 'meta';
+          if (rule.createdText) {
+            var time = document.createElement('span');
+            time.textContent = rule.createdText;
+            meta.appendChild(time);
+            var dot = document.createElement('span');
+            dot.textContent = '·';
+            meta.appendChild(dot);
+          }
+          var hits = document.createElement('span');
+          hits.textContent = rule.hitsText || '';
+          meta.appendChild(hits);
+          if (rule.structure) {
+            var badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = L.structureBadge || 'structure match';
+            meta.appendChild(badge);
+          }
+          row.appendChild(meta);
+
+          row.addEventListener('click', function (event) {
+            if (adding) { return; }
+            selectedId = event.currentTarget.getAttribute('data-id');
+            render();
+          });
+          row.addEventListener('keydown', function (event) {
+            if (event.key !== 'Enter' && event.key !== ' ') { return; }
+            event.preventDefault();
+            if (adding) { return; }
+            selectedId = event.currentTarget.getAttribute('data-id');
+            render();
+          });
+          list.appendChild(row);
+        }
+      }
+
+      function renderButtons() {
+        var rule = selectedRule();
+        var total = count();
+        $('addBtn').disabled = false;
+        $('cancelAddBtn').hidden = !adding;
+        $('deleteBtn').disabled = adding || !rule;
+        $('clearBtn').disabled = adding || total === 0;
+        $('structureBtn').disabled = adding || !rule;
+        var allBox = $('structureAll');
+        allBox.disabled = adding || total === 0;
+        allBox.checked = !!(state.allStructure && total > 0);
+        $('structureAllWrap').setAttribute('aria-disabled', allBox.disabled ? 'true' : 'false');
+      }
+
+      function renderRight() {
+        var rule = selectedRule();
+        $('addInput').hidden = !adding;
+        $('sqlView').hidden = adding;
+        if (adding) {
+          $('sqlView').textContent = '';
+        } else {
+          $('sqlView').textContent = rule ? (rule.sql || '') : '';
+        }
+        var status = state.status;
+        var line = $('statusLine');
+        if (adding) {
+          if (status && status.kind === 'error') {
+            line.className = 'status error';
+            line.textContent = status.text || '';
+          } else {
+            line.className = 'status';
+            line.textContent = L.addHint || '';
+          }
+          return;
+        }
+        if (status) {
+          line.className = 'status' + (status.kind === 'error' ? ' error' : '');
+          line.textContent = status.text || '';
+        } else if (!rule && count() > 0) {
+          line.className = 'status';
+          line.textContent = L.selectedHint || '';
+        } else {
+          line.className = 'status';
+          line.textContent = '';
+        }
+      }
+
+      function render() {
+        applyLabels();
+        renderList();
+        renderButtons();
+        renderRight();
+        $('confirmBar').hidden = !pendingClear;
+      }
+
+      function applyState(next) {
+        state = next || { rules: [] };
+        L = state.labels || L;
+        if (state.select) { selectedId = state.select; }
+        var stillThere = false;
+        var all = rules();
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].id === selectedId) { stillThere = true; }
+        }
+        if (!stillThere) { selectedId = all.length > 0 ? all[0].id : null; }
+        if (addPending) {
+          addPending = false;
+          if (!state.keepAdd) {
+            adding = false;
+            $('addInput').value = '';
+          }
+        }
+        if (!adding) { $('addInput').value = ''; }
+        render();
+      }
+
+      function addMode(on) {
+        adding = on;
+        pendingClear = false;
+        if (on) {
+          selectedId = null;
+          $('addInput').value = '';
+          render();
+          $('addInput').focus();
+          return;
+        }
+        $('addInput').value = '';
+        if (!selectedRule() && count() > 0) { selectedId = rules()[0].id; }
+        render();
+      }
+
+      $('addBtn').addEventListener('click', function () {
+        if (!adding) { addMode(true); return; }
+        addPending = true;
+        post({ op: 'add', sql: $('addInput').value });
+      });
+      $('cancelAddBtn').addEventListener('click', function () { addMode(false); });
+      $('deleteBtn').addEventListener('click', function () {
+        var rule = selectedRule();
+        if (rule) { post({ op: 'delete', id: rule.id }); }
+      });
+      $('clearBtn').addEventListener('click', function () {
+        if (count() === 0) { return; }
+        pendingClear = true;
+        render();
+      });
+      $('confirmYes').addEventListener('click', function () {
+        pendingClear = false;
+        post({ op: 'clear' });
+        render();
+      });
+      $('confirmNo').addEventListener('click', function () {
+        pendingClear = false;
+        render();
+      });
+      $('structureBtn').addEventListener('click', function () {
+        var rule = selectedRule();
+        if (!rule) { return; }
+        post({ op: 'structure', id: rule.id, enabled: !rule.structure });
+      });
+      $('structureAll').addEventListener('change', function () {
+        post({ op: 'structure-all', enabled: $('structureAll').checked });
+      });
+      $('closeBtn').addEventListener('click', function () {
+        if (window.openidea && window.openidea.dialog && window.openidea.dialog.close) {
+          window.openidea.dialog.close();
+        }
+      });
+
+      document.addEventListener('keydown', function (event) {
+        if (event.key !== 'Escape') { return; }
+        if (pendingClear) {
+          event.preventDefault();
+          pendingClear = false;
+          render();
+          return;
+        }
+        if (adding) {
+          event.preventDefault();
+          addMode(false);
+        }
+        // Otherwise the platform closes the dialog, which sends `closed`.
+      });
+
+      if (window.openidea && window.openidea.onMessage) {
+        window.openidea.onMessage(function (raw) {
+          try {
+            var message = JSON.parse(raw);
+            if (message.op === 'state') { applyState(message); }
+          } catch (error) { /* ignore malformed */ }
+        });
+      }
+
+      render();
+      post({ op: 'ready' });
+    })();
+  </script>
+</body>
 </html>
