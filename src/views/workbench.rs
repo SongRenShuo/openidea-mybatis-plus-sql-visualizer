@@ -1941,6 +1941,12 @@ mod tests {
             module.contains("on('pvMode', function () { setMode(modeTarget()); });"),
             "the mode button toggles"
         );
+        // Format in the result toolbar is the reference's display-mode switch,
+        // not a rewrite of the source text on the input half.
+        assert!(
+            module.contains("on('pvFormatPreview', function () { setMode('formatted'); });"),
+            "result Format switches the display mode"
+        );
         // Explain is disabled and explains itself; the fold holds Export and
         // the (disabled) Rollback.
         assert!(

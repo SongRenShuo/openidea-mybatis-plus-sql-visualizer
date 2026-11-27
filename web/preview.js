@@ -1040,13 +1040,11 @@ export function mountPreview(root, deps) {
   // over the diff tab the host opens.
   on('pvDiff', function () { closeMore(); post({ op: 'preview-diff' }); });
   on('pvShare', function () { closeMore(); post({ op: 'preview-share' }); });
-  // Format (L35b): the reference formats the SQL the result pane shows
-  // (`formatSql`), not the input box on the other half of the splitter; the
-  // display-mode select below stays the separate view switch.
-  on('pvFormatPreview', function () {
-    const shown = tabs().sql || '';
-    post({ op: 'preview-format', text: shown || inputText() });
-  });
+  // Format (lane C): in the reference `formatSql()` sets the result pane's
+  // FORMAT display mode; it never rewrites the source text on the other half
+  // of the splitter. This button does the same (the input toolbar's Format
+  // still formats what the user typed).
+  on('pvFormatPreview', function () { setMode('formatted'); });
   // Refresh (L35b): the reference re-runs the render on the pane's current
   // input; the host re-parses it (and falls back to the model's own text when
   // the box is empty), so a stale render is one click away from fresh.
