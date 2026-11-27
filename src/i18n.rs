@@ -1078,6 +1078,190 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "Stopped waiting for the target application",
         "已停止等待目标应用",
     ),
+    // Lane F: the three sources that had a renderer but no entry — statement
+    // annotations, iBatis 2 `<sqlMap>` and MyBatis-Plus wrappers. These keys
+    // were already produced by `core::annotation`, `core::ibatis` and
+    // `analyze::wrapper`; until the wiring they could not reach a reader.
+    (
+        "preview.error.annotation_class_unknown",
+        "No Java class of that name is in the project index",
+        "项目索引里没有找到该名称的 Java 类",
+    ),
+    (
+        "annotation.not_found",
+        "No @Select / @Insert / @Update / @Delete with a string value",
+        "没有找到带字符串值的 @Select / @Insert / @Update / @Delete",
+    ),
+    (
+        "annotation.method.not_found",
+        "That method carries no statement annotation",
+        "该方法上没有可渲染的语句注解",
+    ),
+    (
+        "annotation.method.required",
+        "Several annotated statements; name the method or put the caret in one",
+        "有多个注解语句，请指定方法名或把光标放进其中一个",
+    ),
+    (
+        "annotation.method.ambiguous",
+        "The annotated overloads cannot be told apart by name",
+        "同名重载都带注解，仅凭方法名无法区分",
+    ),
+    (
+        "ibatis.statement.required",
+        "This sqlMap holds several statements; name the one to render",
+        "该 sqlMap 含有多个语句，请指定要渲染的语句 id",
+    ),
+    (
+        "ibatis.root_invalid",
+        "Root element is not <sqlMap>",
+        "根元素不是 <sqlMap>",
+    ),
+    (
+        "ibatis.parse.failed",
+        "The sqlMap document could not be parsed",
+        "sqlMap 文档解析失败",
+    ),
+    (
+        "ibatis.statement.not_found",
+        "No statement with that id in the sqlMap",
+        "sqlMap 中没有该 id 的语句",
+    ),
+    (
+        "ibatis.statement.duplicate",
+        "Two statements share one id; the later one is kept",
+        "两个语句用了同一个 id，保留后出现的那个",
+    ),
+    (
+        "ibatis.include.not_found",
+        "The sql fragment referenced by <include> is not in the document",
+        "<include> 引用的 sql 片段不在文档里",
+    ),
+    (
+        "ibatis.include.cycle",
+        "The sql fragments include each other in a cycle",
+        "sql 片段之间循环引用",
+    ),
+    (
+        "ibatis.include.too_deep",
+        "The sql fragments nest deeper than the renderer follows",
+        "sql 片段嵌套层数超过渲染器上限",
+    ),
+    (
+        "ibatis.unknown_tag",
+        "Unknown iBatis tag; its content is kept as text",
+        "未知的 iBatis 标签，内容按文本保留",
+    ),
+    (
+        "ibatis.iterate.not_collection",
+        "<iterate> needs a collection property",
+        "<iterate> 的 property 需要是集合",
+    ),
+    (
+        "ibatis.condition.no_compare_target",
+        "This condition tag has no property to compare",
+        "该条件标签没有可比对的 property",
+    ),
+    (
+        "ibatis.dollar.unclosed",
+        "A # or $ placeholder is not closed",
+        "# 或 $ 占位符没有闭合",
+    ),
+    (
+        "ibatis.inline.malformed",
+        "An inline parameter is malformed; it is kept verbatim",
+        "内联参数格式有误，已按原文保留",
+    ),
+    (
+        "ibatis.parameter_map.missing_id",
+        "A <parameterMap> has no id",
+        "<parameterMap> 缺少 id",
+    ),
+    (
+        "ibatis.parameter_map.not_found",
+        "The parameterMap named by the statement is not in the document",
+        "语句引用的 parameterMap 不在文档里",
+    ),
+    (
+        "ibatis.render.degraded",
+        "The statement was rendered with a degradation",
+        "语句渲染有降级项",
+    ),
+    (
+        "wrapper.not_a_wrapper",
+        "No wrapper class or method call found in the text",
+        "文本里没有包装器类或链式方法调用",
+    ),
+    (
+        "wrapper.table_unknown",
+        "The entity table is unknown",
+        "实体的表名未知",
+    ),
+    (
+        "wrapper.update_fragment_only",
+        "An update wrapper renders only its condition fragment",
+        "update 包装器只渲染条件片段",
+    ),
+    (
+        "wrapper.unknown_field",
+        "A field is not mapped to a column",
+        "有字段没有映射到列",
+    ),
+    (
+        "wrapper.unsupported_method",
+        "A wrapper method is not rendered",
+        "有包装器方法未参与渲染",
+    ),
+    (
+        "wrapper.between_arity",
+        "between() needs exactly two values",
+        "between() 需要两个值",
+    ),
+    (
+        "wrapper.empty_in",
+        "in()/notIn() got no values",
+        "in()/notIn() 没有取值",
+    ),
+    (
+        "wrapper.limit_not_literal",
+        "limit() argument is not a literal",
+        "limit() 的参数不是字面量",
+    ),
+    (
+        "wrapper.last_not_literal",
+        "last() argument is not a literal",
+        "last() 的参数不是字面量",
+    ),
+    (
+        "wrapper.param_value",
+        "A value is a runtime variable; it renders as ?",
+        "有取值是运行期变量，按 ? 渲染",
+    ),
+    (
+        "wrapper.receiver_mismatch",
+        "The chain is called on a different wrapper than the one detected",
+        "链路调用的接收者与识别到的包装器不一致",
+    ),
+    (
+        "wrapper.entity.not_found",
+        "The entity class is not in the project; no column mapping",
+        "项目里找不到该实体类，没有字段到列的映射",
+    ),
+    (
+        "wrapper.column.derived",
+        "The table or some columns follow MyBatis-Plus defaults",
+        "表名或部分列名按 MyBatis-Plus 默认规则推导",
+    ),
+    (
+        "wrapper.render.note",
+        "Wrapper render note",
+        "包装器渲染说明",
+    ),
+    (
+        "wrapper.empty_fragment",
+        "Nothing to render: the wrapper has no condition",
+        "没有可渲染的内容：包装器没有条件",
+    ),
 ];
 
 /// Localised text for `key` in the IDE's current UI language.

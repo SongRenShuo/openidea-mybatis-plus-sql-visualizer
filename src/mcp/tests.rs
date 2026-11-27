@@ -788,3 +788,94 @@ fn explain_formats_a_supplied_result() {
     assert!(text.contains("Nested Loop"), "{text}");
     assert!(text.contains("  Seq Scan on user"), "{text}");
 }
+
+// ---------------------------------------------------------------------------
+// Lane F: the three wired sources, through the tool surface
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_sql_kind_reaches_the_annotation_source() {
+    let java = r#"public interface UserMapper {
+        @Select("SELECT id FROM users WHERE id = #{id}")
+        User findById(@Param("id") Long id);
+    }"#;
+    let response = call(
+        "sqlv_render_sql",
+        json!({ "kind": "annotation", "text": java, "method": "findById", "params": { "id": 7 } }),
+    );
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["confidence"], "exact");
+    assert_eq!(response["data"]["sql"], "SELECT id FROM users WHERE id = ?");
+    assert_eq!(response["data"]["params"], json!([7]));
+    assert_eq!(response["method"], "findById");
+}
+
+#[test]
+fn render_sql_kind_reaches_the_ibatis_source() {
+    let sqlmap = r#"<sqlMap namespace="User">
+        <select id="selectById">SELECT id FROM users WHERE id = #id#</select>
+    </sqlMap>"#;
+    let response = call(
+        "sqlv_render_sql",
+        json!({ "kind": "ibatis", "xml": sqlmap, "statement_id": "selectById", "params": { "id": 3 } }),
+    );
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["confidence"], "exact");
+    assert_eq!(response["data"]["sql"], "SELECT id FROM users WHERE id = ?");
+}
+
+#[test]
+fn render_sql_kind_reaches_the_wrapper_source() {
+    let response = call(
+        "sqlv_render_sql",
+        json!({
+            "kind": "wrapper",
+            "text": "new LambdaQueryWrapper<User>().eq(User::getStatus, \"A\")",
+            "entity": {
+                "class": "User",
+                "table": "sys_user",
+                "columns": { "status": "status" }
+            }
+        }),
+    );
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["confidence"], "exact");
+    assert_eq!(
+        response["data"]["sql"],
+        "SELECT * FROM sys_user WHERE status = 'A'"
+    );
+}
+
+#[test]
+fn render_sql_kind_unresolved_never_carries_sql() {
+    // Several annotated statements and no method: the caller must choose.
+    let java = r#"interface M {
+        @Select("SELECT 1") int a();
+        @Select("SELECT 2") int b();
+    }"#;
+    let ambiguous = call(
+        "sqlv_render_sql",
+        json!({ "kind": "annotation", "text": java }),
+    );
+    assert_eq!(ambiguous["confidence"], "unresolved");
+    assert_eq!(ambiguous["data"]["sql"], "");
+    assert_eq!(
+        ambiguous["data"]["message_keys"],
+        json!(["annotation.method.required"])
+    );
+
+    // A wrapper without its entity mapping: no table, no SQL.
+    let no_entity = call(
+        "sqlv_render_sql",
+        json!({
+            "kind": "wrapper",
+            "text": "new LambdaQueryWrapper<User>().eq(User::getStatus, \"A\")"
+        }),
+    );
+    assert_eq!(no_entity["confidence"], "unresolved");
+    assert_eq!(no_entity["data"]["sql"], "");
+    assert_eq!(
+        no_entity["data"]["message_keys"],
+        json!(["wrapper.entity.not_found"])
+    );
+}

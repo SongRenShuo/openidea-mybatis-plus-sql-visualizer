@@ -1,20 +1,25 @@
 {
   "title": "sqlv_render_sql",
   "type": "object",
-  "description": "Render one MyBatis mapper statement to SQL with ? placeholders and bound parameters.",
+  "description": "Render one statement to SQL with ? placeholders and bound parameters. kind selects the source: mapper XML (default), statement annotations, an iBatis 2 sqlMap, or a MyBatis-Plus wrapper chain.",
   "additionalProperties": false,
   "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["mapper", "annotation", "ibatis", "wrapper"],
+      "description": "Statement source: mapper XML (default), a @Select/@Insert/@Update/@Delete annotation, an iBatis 2 <sqlMap>, or a wrapper chain."
+    },
     "statement_id": {
       "type": "string",
-      "description": "Statement id: bare (findById) or namespace-qualified (com.example.UserMapper.findById)."
+      "description": "Statement id for kind=mapper or kind=ibatis: bare (findById) or namespace-qualified (com.example.UserMapper.findById)."
     },
     "xml": {
       "type": "string",
-      "description": "One mapper XML document. Use documents instead when cross-namespace includes are involved."
+      "description": "One mapper XML document (kind=mapper) or one <sqlMap> document (kind=ibatis). Use documents instead when mapper includes cross namespaces."
     },
     "documents": {
       "type": "array",
-      "description": "Several mapper documents (path + text) so namespace-qualified includes resolve across files.",
+      "description": "Several mapper documents (path + text) so namespace-qualified includes resolve across files; kind=mapper only.",
       "minItems": 1,
       "items": {
         "type": "object",
@@ -35,21 +40,88 @@
     "params": {
       "type": ["object", "array", "null"],
       "description": "Parameter values bound to #{...} and ${...}; a JSON object keyed by mapper variable name, or an array for scalar parameters."
+    },
+    "text": {
+      "type": "string",
+      "description": "Java source text for kind=annotation, or the LambdaQueryWrapper/QueryWrapper chain for kind=wrapper."
+    },
+    "method": {
+      "type": "string",
+      "description": "kind=annotation: the annotated method to render (findById or Class#findById). Required when the source has more than one annotated statement."
+    },
+    "entity": {
+      "type": "object",
+      "description": "kind=wrapper: the entity projection. Without it the wrapper cannot be rendered and the result is unresolved, never a guessed table.",
+      "additionalProperties": false,
+      "properties": {
+        "class": {
+          "type": "string",
+          "description": "Entity class name, for diagnostics only."
+        },
+        "table": {
+          "type": "string",
+          "description": "The table the SELECT reads (sys_user)."
+        },
+        "columns": {
+          "type": "object",
+          "description": "Java field name to column name (userName to user_name). Every field the chain uses must be present.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["table", "columns"]
+    },
+    "dialect": {
+      "type": "string",
+      "description": "kind=wrapper: dialect deciding pagination and identifier quoting; mysql when absent."
     }
   },
-  "required": ["statement_id"],
-  "oneOf": [
+  "allOf": [
     {
-      "required": ["xml"],
-      "not": {
-        "required": ["documents"]
+      "if": {
+        "anyOf": [
+          { "not": { "required": ["kind"] } },
+          {
+            "properties": { "kind": { "const": "mapper" } },
+            "required": ["kind"]
+          }
+        ]
+      },
+      "then": {
+        "required": ["statement_id"],
+        "oneOf": [
+          {
+            "required": ["xml"],
+            "not": { "required": ["documents"] }
+          },
+          {
+            "required": ["documents"],
+            "not": { "required": ["xml"] }
+          }
+        ]
       }
     },
     {
-      "required": ["documents"],
-      "not": {
-        "required": ["xml"]
-      }
+      "if": {
+        "properties": { "kind": { "const": "annotation" } },
+        "required": ["kind"]
+      },
+      "then": { "required": ["text"] }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "const": "ibatis" } },
+        "required": ["kind"]
+      },
+      "then": { "required": ["statement_id", "xml"] }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "const": "wrapper" } },
+        "required": ["kind"]
+      },
+      "then": { "required": ["text"] }
     }
   ]
 }
