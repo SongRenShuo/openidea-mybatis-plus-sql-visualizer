@@ -1034,6 +1034,69 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "The community group and the author's contact are listed on the project page.",
         "交流群与作者联系方式见项目主页。",
     ),
+    // In-panel sheets (L2): the settings gear, the community entry and the
+    // help entry open an overlay inside the log panel instead of only writing
+    // to the Output channel. The settings sheet lists the current values; the
+    // guide line points at the settings page because the platform exposes no
+    // API to open it.
+    ("view.logs.sheet.close", "Close", "关闭"),
+    (
+        "view.logs.settings.display_mode",
+        "SQL display mode",
+        "SQL 显示模式",
+    ),
+    (
+        "view.logs.settings.show_duration",
+        "Show execution duration",
+        "显示执行耗时",
+    ),
+    (
+        "view.logs.settings.slow_threshold",
+        "Slow query threshold",
+        "慢查询阈值",
+    ),
+    (
+        "view.logs.settings.crud_style",
+        "Type colour marker",
+        "类型颜色标记",
+    ),
+    (
+        "view.logs.settings.path_hint",
+        "Change these in Settings \u{203a} Tools \u{203a} MyBatis SQL Visualizer \u{203a} SQL Logs.",
+        "在 IDE 设置 \u{203a} 工具 \u{203a} MyBatis SQL Visualizer \u{203a} SQL 日志 中修改。",
+    ),
+    ("view.logs.settings.on", "On", "开"),
+    ("view.logs.settings.off", "Off", "关"),
+    ("view.logs.display_mode.single", "Single line", "单行摘要"),
+    (
+        "view.logs.display_mode.keyword_wrap",
+        "Keyword wrap",
+        "关键字换行",
+    ),
+    (
+        "view.logs.display_mode.formatted",
+        "Formatted",
+        "完整格式化",
+    ),
+    ("view.logs.crud.bar", "Left bar", "左侧色条"),
+    ("view.logs.crud.background", "Row background", "整行淡背景"),
+    ("view.logs.crud.off", "Off", "关闭"),
+    (
+        "view.logs.community.qr_placeholder",
+        "QR code placeholder \u{2014} the group QR is published on the project page.",
+        "二维码占位 \u{2014} 交流群二维码见项目主页。",
+    ),
+    // List badges (L2): the reference prints `×N 同结构 N 条` and `疑似 N+1`.
+    (
+        "view.logs.badge.group",
+        "{n} same structure",
+        "同结构 {n} 条",
+    ),
+    (
+        "view.logs.badge.n_plus_one_suspect",
+        "Suspected N+1",
+        "疑似 N+1",
+    ),
     // SQL preview entry (L35a): the gutter button and the command's editor path.
     ("preview.gutter.tooltip", "Preview SQL", "预览 SQL"),
     (
