@@ -3987,9 +3987,7 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         }
         // The sort entry is a popup opener (the reference's `sortModeAction`
         // shows a radio menu), so it is a menu anchor with its own menu node.
-        for id in ["sortMenu"] {
-            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
-        }
+        assert!(page.contains("id=\"sortMenu\""), "missing sortMenu");
         assert!(page.contains("openSortMenu($('sortMenu').hidden)"));
         // The right edge, in the reference order (`SqlLogPanel.kt`): the slow
         // count, then the SQL-type selector, then the dedupe box.
