@@ -37,10 +37,28 @@ use serde_json::Value;
 pub const MAX_CONNECTIONS: usize = 8;
 /// Frames the consumer may stage before it starts rejecting.
 pub const MAX_QUEUED_FRAMES: usize = 256;
+/// Most frames one `host::WebSocket::drain` may ask for.
+///
+/// The host refuses a larger request instead of clamping it: `drain()` answers
+/// `invalid drain limit` for `limit == 0 || limit > DRAIN_BATCH`, and
+/// `DRAIN_BATCH` is **32** (`crates/ide-host/src/plugins/websocket.rs`). Asking
+/// for our own larger queue size therefore failed **every** drain, which left
+/// the panel showing a healthy connection and zero rows forever — the failure
+/// only became visible once the drain error was reported to the Output channel.
+pub const HOST_DRAIN_LIMIT: usize = 32;
+/// Rounds of `drain` one poll may make, so a backlog catches up without
+/// holding the plugin for more than a few host calls.
+pub const MAX_DRAIN_ROUNDS: usize = 8;
 /// Bytes the consumer may stage (frames + payloads) before it starts rejecting.
 pub const MAX_QUEUE_BYTES: usize = 8 * 1024 * 1024;
 /// Largest single frame accepted. A larger frame is rejected, not truncated.
 pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+
+/// The `limit` to hand `host::WebSocket::drain`: its own batch cap, never our
+/// queue size.
+fn drain_request(limit: u32) -> u32 {
+    limit.clamp(1, HOST_DRAIN_LIMIT as u32)
+}
 
 /// `cmd` values shared with the agent's `EventBus`.
 pub const CMD_EVENT: i64 = 1;
@@ -767,14 +785,25 @@ impl WsConsumer {
     /// `decode_limit` staged frames. Rejections are counted, never dropped
     /// silently.
     pub fn poll(&mut self, drain_limit: u32, decode_limit: usize) -> Result<PollOutcome, WsError> {
-        let batch = self
-            .socket
-            .drain(drain_limit.clamp(1, MAX_QUEUED_FRAMES as u32))?;
-        for message in batch.messages {
-            let _ = self.queue.push(message);
-        }
-        if batch.closed {
-            self.closed = true;
+        // The host rejects anything above its own `DRAIN_BATCH` (32) instead of
+        // clamping — it answered `invalid drain limit` for our old request of 256
+        // on every single poll, so no frame was ever read. Ask for what it
+        // accepts, and keep asking while it hands back a full batch, so a backlog
+        // still catches up inside one tick.
+        let per_drain = drain_request(drain_limit);
+        for _ in 0..MAX_DRAIN_ROUNDS {
+            let batch = self.socket.drain(per_drain)?;
+            let full = batch.messages.len() as u32 >= per_drain;
+            for message in batch.messages {
+                let _ = self.queue.push(message);
+            }
+            if batch.closed {
+                self.closed = true;
+                break;
+            }
+            if !full || self.queue.len() >= MAX_QUEUED_FRAMES {
+                break;
+            }
         }
 
         let mut outcome = PollOutcome::default();
@@ -963,6 +992,23 @@ mod tests {
         );
         assert!(health.summary().contains("woven=41"));
         assert!(health.summary().contains("gate=1"));
+    }
+
+    /// The host rejects a drain request above its own `DRAIN_BATCH` (32) instead
+    /// of clamping it, so asking for our 256-frame queue made **every** poll
+    /// fail with `invalid drain limit`: the panel showed a connected socket and
+    /// zero rows for the whole session.
+    #[test]
+    fn a_drain_request_never_exceeds_the_hosts_batch_limit() {
+        assert_eq!(drain_request(MAX_QUEUED_FRAMES as u32), 32);
+        assert_eq!(drain_request(1), 1);
+        assert_eq!(drain_request(0), 1, "0 is refused by the host too");
+        assert_eq!(HOST_DRAIN_LIMIT, 32, "host DRAIN_BATCH");
+        assert!(
+            HOST_DRAIN_LIMIT <= MAX_QUEUED_FRAMES,
+            "the local queue must be able to hold what one drain returns"
+        );
+        assert!(MAX_DRAIN_ROUNDS >= 1);
     }
 
     #[test]

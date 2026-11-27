@@ -68,7 +68,8 @@ fn start(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
             );
             let _ = writeln!(
                 out,
-                "-- limits: {MAX_QUEUED_FRAMES} frames queued per poll, 8 connections per plugin"
+                "-- limits: {} frames per drain, {MAX_QUEUED_FRAMES} staged, 8 connections per plugin",
+                crate::capture::ws::HOST_DRAIN_LIMIT
             );
             let _ = writeln!(
                 out,
