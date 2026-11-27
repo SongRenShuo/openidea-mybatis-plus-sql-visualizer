@@ -214,6 +214,17 @@ icon = "icons/sqlLog.svg"
 location = "right"
 web = "web/log-panel.html"
 
+# The reference's "管理 SQL 屏蔽规则" is a modal `DialogWrapper`; API 1.18 gives a
+# plugin web page the same shell (title bar, Escape, a resize grip, a remembered
+# size). Opening it is `views::reveal("sqlv-suppress")` from a command or an
+# event; the page closes itself with `openidea.dialog.close()`.
+[[contributes.dialogs]]
+id = "sqlv-suppress"
+title = "Manage SQL Suppression Rules"
+web = "web/suppress.html"
+width = 760
+height = 520
+
 # Settings: one node named after the plugin, split into pages like the IntelliJ
 # edition's `Tools › SQL Visualizer` (UI and Actions / SQL Preview / SQL Log /
 # Engine). Keys are unchanged; only the page they live on moved.
