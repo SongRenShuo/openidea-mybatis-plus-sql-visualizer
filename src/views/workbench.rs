@@ -848,14 +848,55 @@ fn advice_text(sql: &str, dialect_name: &str) -> String {
 // Model store
 // ---------------------------------------------------------------------------
 
-/// The preview's two display switches (lane L45). Pure presentation: the page
-/// shapes the text it paints, the model's SQL is never rewritten.
+/// The four display modes the preview paints (the reference's Format /
+/// keyword-wrap / vertical buttons and the raw text).
+///
+/// Pure presentation: the page shapes the text it paints; the model's SQL,
+/// the Copy / Export paths and the input box are never rewritten.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DisplayMode {
+    /// The executable SQL, verbatim.
+    #[default]
+    Normal,
+    /// The dialect formatter's output (`tabs.formatted`).
+    Formatted,
+    /// A line break before each top-level keyword.
+    KeywordWrap,
+    /// One top-level comma-separated item per line.
+    Vertical,
+}
+
+impl DisplayMode {
+    /// The wire name (`tabs.preview.display.mode`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Formatted => "formatted",
+            Self::KeywordWrap => "keyword_wrap",
+            Self::Vertical => "vertical",
+        }
+    }
+
+    /// Parses a wire name; anything unknown is `normal`, never an error (a
+    /// page from another build must not leave the preview unpaintable).
+    pub fn parse(text: &str) -> Self {
+        match text {
+            "formatted" => Self::Formatted,
+            "keyword_wrap" => Self::KeywordWrap,
+            "vertical" => Self::Vertical,
+            _ => Self::Normal,
+        }
+    }
+}
+
+/// The preview's display state: the mode plus the compact (single-line)
+/// switch. Page state that rides every push, so a remount restores what the
+/// reader chose. Host memory only — no setting key.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DisplayPrefs {
-    /// Break the shown SQL before each top-level keyword.
-    pub keyword_wrap: bool,
-    /// Put each top-level comma-separated item on its own line.
-    pub vertical: bool,
+    pub mode: DisplayMode,
+    /// Collapse whitespace runs to one space (the reference's 压缩).
+    pub compact: bool,
 }
 
 /// What the preview tab keeps between state pushes.
@@ -881,11 +922,9 @@ struct PreviewStore {
     /// page can switch statements by id without shipping the file back. `None`
     /// for inline SQL and log rows, which have nothing to switch.
     mapper_xml: Option<String>,
-    /// The two display switches (lane L45): break before top-level keywords, and
-    /// one comma-separated item per line. Page state that rides the `state`
-    /// push, so a remount (or the standalone page reloading) restores what the
-    /// reader chose. Host memory only — no setting key, and the SQL itself is
-    /// never touched.
+    /// The display state (lane L45, four modes + compact): the page paints the
+    /// shaped text, the host only remembers the choice so a remount (or the
+    /// standalone page reloading) restores it. The SQL itself is never touched.
     display: DisplayPrefs,
     /// The condition switches the reader set (C07): condition id → truth. Empty
     /// means "the statement's defaults" (see `core::xml::render::
@@ -932,7 +971,8 @@ pub fn mapper_source() -> Option<String> {
     preview_store().mapper_xml.clone()
 }
 
-/// The two display switches as the page last set them (lane L45).
+/// The display state as the page last set it (lane L45): the four modes plus
+/// the compact switch.
 pub fn display_prefs() -> DisplayPrefs {
     preview_store().display
 }
@@ -1107,11 +1147,14 @@ pub fn preview_tab() -> Value {
         },
         "labels": labels(&current.confidence),
         "status": { "text": status },
-        // Lane L45: the two display switches ride every push, so a remount or
-        // the standalone page restores them without a settings key.
+        // Lane L45: the display state rides every push, so a remount or the
+        // standalone page restores it without a settings key. The two legacy
+        // booleans stay derived from the mode for an older page.
         "display": {
-            "keywordWrap": display.keyword_wrap,
-            "vertical": display.vertical,
+            "mode": display.mode.as_str(),
+            "compact": display.compact,
+            "keywordWrap": display.mode == DisplayMode::KeywordWrap,
+            "vertical": display.mode == DisplayMode::Vertical,
         },
     })
 }
@@ -1438,22 +1481,41 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
         // not an edit) and the parameter values the reader typed are re-derived
         // from the new render, exactly like the reference's panel.
         "conditions" => apply_conditions(message),
-        // Display switches (lane L45): the page reports the two toggles, the
-        // host only remembers them so the next `state` push (and a page that
-        // remounts) carries them back. Pure presentation — the model, its SQL
-        // and the input box are untouched.
+        // Display state (lane L45, four modes + compact): the page reports the
+        // mode and the switch, the host only remembers them so the next `state`
+        // push (and a page that remounts) carries them back. Pure presentation
+        // — the model, its SQL and the input box are untouched. A message that
+        // carries only the two legacy booleans (an older page) still maps onto
+        // the mode.
         "display" => {
             let mut store = preview_store();
-            store.display = DisplayPrefs {
-                keyword_wrap: message
-                    .get("keywordWrap")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(store.display.keyword_wrap),
-                vertical: message
-                    .get("vertical")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(store.display.vertical),
-            };
+            let mut next = store.display;
+            if let Some(mode) = message.get("mode").and_then(Value::as_str) {
+                next.mode = DisplayMode::parse(mode);
+            } else {
+                if let Some(keyword) = message.get("keywordWrap").and_then(Value::as_bool) {
+                    next.mode = if keyword {
+                        DisplayMode::KeywordWrap
+                    } else if next.mode == DisplayMode::KeywordWrap {
+                        DisplayMode::Normal
+                    } else {
+                        next.mode
+                    };
+                }
+                if let Some(vertical) = message.get("vertical").and_then(Value::as_bool) {
+                    next.mode = if vertical {
+                        DisplayMode::Vertical
+                    } else if next.mode == DisplayMode::Vertical {
+                        DisplayMode::Normal
+                    } else {
+                        next.mode
+                    };
+                }
+            }
+            if let Some(compact) = message.get("compact").and_then(Value::as_bool) {
+                next.compact = compact;
+            }
+            store.display = next;
         }
         "clear" => {
             clear();
@@ -3278,21 +3340,22 @@ mod tests {
 
     #[test]
     fn the_statement_op_keeps_the_display_state_alone() {
-        // A statement switch must not touch the two display switches, and the
-        // switches must survive the push that follows it.
+        // A statement switch must not touch the display state, and the state
+        // must survive the push that follows it.
         let (_host, _guard) = test_host();
-        send(json!({ "op": "preview-display", "keywordWrap": true, "vertical": false }));
+        send(json!({ "op": "preview-display", "mode": "keyword_wrap", "compact": true }));
         send(json!({ "op": "preview-render", "text": TWO_STATEMENTS, "kind": "xml" }));
         let before = display_prefs();
         send(json!({ "op": "preview-statement", "id": "touch" }));
         assert_eq!(display_prefs(), before);
         let state = tab();
+        assert_eq!(state["display"]["mode"], "keyword_wrap");
+        assert_eq!(state["display"]["compact"], true);
         assert_eq!(state["display"]["keywordWrap"], true);
-        assert_eq!(state["display"]["vertical"], false);
     }
 
     #[test]
-    fn the_display_op_remembers_both_switches_and_never_touches_the_sql() {
+    fn the_display_op_remembers_the_four_modes_and_never_touches_the_sql() {
         let (_host, _guard) = test_host();
         set_model(WorkbenchModel::new(
             "select a, b from t",
@@ -3301,28 +3364,44 @@ mod tests {
         ));
         let sql = model().sql;
 
-        send(json!({ "op": "preview-display", "keywordWrap": true }));
+        send(json!({ "op": "preview-display", "mode": "keyword_wrap" }));
         assert_eq!(
             display_prefs(),
             DisplayPrefs {
-                keyword_wrap: true,
-                vertical: false
+                mode: DisplayMode::KeywordWrap,
+                compact: false,
             }
         );
-        send(json!({ "op": "preview-display", "vertical": true }));
+        send(json!({ "op": "preview-display", "mode": "vertical", "compact": true }));
         assert_eq!(
             display_prefs(),
             DisplayPrefs {
-                keyword_wrap: true,
-                vertical: true
+                mode: DisplayMode::Vertical,
+                compact: true,
             }
         );
         // A partial message keeps the field it does not carry.
-        send(json!({ "op": "preview-display", "vertical": false }));
-        assert!(display_prefs().keyword_wrap);
+        send(json!({ "op": "preview-display", "compact": false }));
+        assert_eq!(
+            display_prefs(),
+            DisplayPrefs {
+                mode: DisplayMode::Vertical,
+                compact: false,
+            }
+        );
+        // An unknown mode is normal, never an error.
+        send(json!({ "op": "preview-display", "mode": "bogus" }));
+        assert_eq!(display_prefs().mode, DisplayMode::Normal);
+        // The pre-mode page's two booleans still map onto the mode.
+        send(json!({ "op": "preview-display", "keywordWrap": true }));
+        assert_eq!(display_prefs().mode, DisplayMode::KeywordWrap);
+        send(json!({ "op": "preview-display", "keywordWrap": false }));
+        assert_eq!(display_prefs().mode, DisplayMode::Normal);
 
         let state = tab();
-        assert_eq!(state["display"]["keywordWrap"], true);
+        assert_eq!(state["display"]["mode"], "normal");
+        assert_eq!(state["display"]["compact"], false);
+        assert_eq!(state["display"]["keywordWrap"], false);
         assert_eq!(state["display"]["vertical"], false);
         // Presentation only: the model's SQL is byte-identical, and the push
         // does not ask for the input box to be rewritten.
@@ -3332,10 +3411,12 @@ mod tests {
     }
 
     #[test]
-    fn the_display_state_defaults_to_off() {
+    fn the_display_state_defaults_to_normal_and_not_compact() {
         let (_host, _guard) = test_host();
         set_model(sample());
         let state = tab();
+        assert_eq!(state["display"]["mode"], "normal");
+        assert_eq!(state["display"]["compact"], false);
         assert_eq!(state["display"]["keywordWrap"], false);
         assert_eq!(state["display"]["vertical"], false);
         assert_eq!(display_prefs(), DisplayPrefs::default());
