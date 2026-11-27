@@ -736,31 +736,11 @@ fn inferred_type(value: &Value) -> &'static str {
 
 /// Parse options matching the panel's (`log.*` settings), so `capture-open-log`
 /// analyses a file exactly as the panel would.
+/// The derivation lives in [`crate::settings::log_parse_options`] so the bridge,
+/// the panel and `render-log` cannot drift apart; this stays as the bridge's
+/// name for it.
 pub fn parse_options() -> ParseOptions {
-    let window = settings::get_i64("log.dedupeWindowMs", 0);
-    ParseOptions {
-        slow_threshold_ms: settings::get_i64("log.slowThresholdMs", 1000).max(0) as f64,
-        n_plus_one_threshold: settings::get_i64("log.nPlusOneThreshold", 5).max(2) as usize,
-        ignore_params_in_dedupe: settings::get_bool("log.ignoreParamsInDedupe", false),
-        dedupe_window_ms: (window > 0).then_some(window),
-        max_sql_len: settings::get_i64("log.maxSqlLength", 20_000).max(256) as usize,
-        timestamp_offset_minutes: settings::get_i64("log.timestampOffsetMinutes", 0) as i32,
-        sql_prefix: settings::string_setting("log.prefix"),
-        param_prefix: settings::string_setting("log.paramPrefix"),
-        mixed_prefix: settings::bool_setting("log.mixedPrefix"),
-        filter_keywords: settings::string_setting("log.filterKeywords")
-            .split(';')
-            .map(str::trim)
-            .filter(|keyword| !keyword.is_empty())
-            .map(str::to_string)
-            .collect(),
-        time_prefix: settings::string_setting("log.timePrefix"),
-        hibernate_enabled: settings::bool_setting("log.hibernateEnabled"),
-        hibernate_sql_prefix: settings::string_setting("log.hibernateSqlPrefix"),
-        hibernate_param_prefix: settings::string_setting("log.hibernateParamPrefix"),
-        jdbc_enabled: settings::bool_setting("log.jdbcEnabled"),
-        ..ParseOptions::default()
-    }
+    settings::log_parse_options()
 }
 
 /// `logs.pageSize`, clamped to the same range `render-log` uses.

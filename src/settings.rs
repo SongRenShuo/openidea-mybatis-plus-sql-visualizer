@@ -136,7 +136,7 @@ pub struct SettingDef {
 ///   `log.autoOpenOnCapture`, `log.autoOpenYield`, `log.stopOnWindowClose`,
 ///   `log.timestampEnabled`, `log.timestampFormat`, `log.timestampSource`,
 ///   `log.formatRestored`, `log.showMethodName`, `log.dataSourceBadgeDetail`,
-/// `logs.crud.style`, `logs.crud.select/insert/update/delete`,
+///   `logs.crud.style`, `logs.crud.select/insert/update/delete`,
 ///   `log.shardingSphereEnabled`, `log.autoSaveEnabled/Path/FileNamePattern/
 ///   MaxFiles`, `log.stackMaxFrames` (no call-stack collection),
 ///   `log.sourceFrameSkipPrefixes`, `log.sourceFrameBizJarPrefixes`,
@@ -1404,6 +1404,40 @@ pub fn integer_setting(key: &str) -> i64 {
         _ => 0,
     };
     get_i64(key, default)
+}
+
+/// The log parser options the panel, the capture bridge and `render-log` share,
+/// derived from the SQL Log page.
+///
+/// One function for all three paths: they used to carry two copies (the bridge's
+/// full set and the panel's older subset), and a settings change that reached
+/// one but not the other made the panel and the command disagree about the same
+/// file. The bridge and the panel now delegate here.
+pub fn log_parse_options() -> crate::core::log::ParseOptions {
+    let window = get_i64("log.dedupeWindowMs", 0);
+    crate::core::log::ParseOptions {
+        slow_threshold_ms: get_i64("log.slowThresholdMs", 1000).max(0) as f64,
+        n_plus_one_threshold: get_i64("log.nPlusOneThreshold", 5).max(2) as usize,
+        ignore_params_in_dedupe: get_bool("log.ignoreParamsInDedupe", false),
+        dedupe_window_ms: (window > 0).then_some(window),
+        max_sql_len: get_i64("log.maxSqlLength", 20_000).max(256) as usize,
+        timestamp_offset_minutes: get_i64("log.timestampOffsetMinutes", 0) as i32,
+        sql_prefix: string_setting("log.prefix"),
+        param_prefix: string_setting("log.paramPrefix"),
+        mixed_prefix: bool_setting("log.mixedPrefix"),
+        filter_keywords: string_setting("log.filterKeywords")
+            .split(';')
+            .map(str::trim)
+            .filter(|keyword| !keyword.is_empty())
+            .map(str::to_string)
+            .collect(),
+        time_prefix: string_setting("log.timePrefix"),
+        hibernate_enabled: bool_setting("log.hibernateEnabled"),
+        hibernate_sql_prefix: string_setting("log.hibernateSqlPrefix"),
+        hibernate_param_prefix: string_setting("log.hibernateParamPrefix"),
+        jdbc_enabled: bool_setting("log.jdbcEnabled"),
+        ..crate::core::log::ParseOptions::default()
+    }
 }
 
 #[cfg(test)]

@@ -448,16 +448,10 @@ pub(super) fn ensure_parsed(state: &mut Store) {
 }
 
 pub(super) fn parse_options() -> ParseOptions {
-    let window = settings::get_i64("log.dedupeWindowMs", 0);
-    ParseOptions {
-        slow_threshold_ms: settings::get_i64("log.slowThresholdMs", 1000).max(0) as f64,
-        n_plus_one_threshold: settings::get_i64("log.nPlusOneThreshold", 5).max(2) as usize,
-        ignore_params_in_dedupe: settings::get_bool("log.ignoreParamsInDedupe", false),
-        dedupe_window_ms: (window > 0).then_some(window),
-        max_sql_len: settings::get_i64("log.maxSqlLength", 20_000).max(256) as usize,
-        timestamp_offset_minutes: settings::get_i64("log.timestampOffsetMinutes", 0) as i32,
-        ..ParseOptions::default()
-    }
+    // Same derivation as the capture bridge and `render-log`
+    // (`settings::log_parse_options`); the panel used to keep an older subset
+    // that silently ignored the prefix/filter/time settings.
+    settings::log_parse_options()
 }
 
 pub(super) fn slow_threshold() -> f64 {

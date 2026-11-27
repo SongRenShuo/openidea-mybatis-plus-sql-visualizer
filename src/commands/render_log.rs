@@ -48,7 +48,7 @@ fn render(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     }
     let text = common::read_file(ctx, path)?;
     let started = Instant::now();
-    let analysis = parse(&text, &crate::capture::bridge::parse_options());
+    let analysis = parse(&text, &crate::settings::log_parse_options());
     let page_size = page_size();
     let shown = analysis.entries.len().min(page_size);
 

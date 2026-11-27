@@ -47,6 +47,12 @@ mod commands {
 }
 #[path = "../src/core/mod.rs"]
 mod core;
+// The log parser options come from `settings::log_parse_options`, which
+// `render_log` now shares with the panel and the bridge; the settings module
+// only reaches `host::setting_*`, so it compiles into this binary without
+// dragging the view layer in.
+#[path = "../src/settings.rs"]
+mod settings;
 
 use openidea_plugin::mock::MockHost;
 
