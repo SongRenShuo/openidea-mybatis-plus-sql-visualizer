@@ -61,7 +61,15 @@
 下面这些不是平台做不到，而是本版刻意缩小了口径；每条都写清替代做法，避免把「能做」误读成「全做」。
 1. **渲染不读选区**：`render-xml` 的输入是工程内 mapper 文件路径（可带 `#namespace.id`），
    不申请 `editor.read`，所以不读光标位置或选区；需要预览某条语句时用路径 + 语句 id。
-2. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
+2. **MPJ 联表（`MPJLambdaWrapper` / `JoinWrappers`）不渲染**：`leftJoin`/`innerJoin`/
+   `rightJoin`/`fullJoin` 与 `selectAll`/`selectAs`/`selectCollection` 这类**决定行
+   形状与列清单**的方法超出本版单表能力。这类链的渲染结果是 `unresolved`：**不输出
+   SQL**，只列原因（`wrapper.structural_method`）。这一点与「条件方法不支持」分档
+   不同——`.apply(...)` 只是少一个过滤条件，仍是 `partial` 并给出 SQL；丢掉 JOIN 则
+   会让 `SELECT * FROM 主表` 变成一条根本不是原查询的语句，宁可不出。
+   需要联表 SQL 时请用日志/历史里的真实语句（`sqlv_render_logs`、`sqlv_history_search`），
+   或把等价 SQL 直接粘到预览输入框。
+3. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
    `LambdaQueryWrapper` 文本→链由 `src/analyze` 解析（无 PSI 的类型推断），
    `unresolved` 时只给原因，不出 Java 代码。
    Java 源码左侧的预览图标覆盖两族：Wrapper 链根（变量声明行 / 内联 `new …Wrapper`）
@@ -73,34 +81,34 @@
    即使没有光标也取它，多个链则只在光标指明时取，不猜。实体类不在工程索引里时渲染为
    `unresolved`（无可用的字段→列投影）。页面输入框里手贴的 Wrapper 链仍按原文 SQL 处理
    （输入框是无工程上下文的纯文本通道），Wrapper 预览请走命令 / gutter 入口。
-3. **EXPLAIN 只在引擎侧真执行**：平台 `database` 不执行 SQL，所以执行面只有 sidecar 的 JVM。
+4. **EXPLAIN 只在引擎侧真执行**：平台 `database` 不执行 SQL，所以执行面只有 sidecar 的 JVM。
    引擎 jar 现在自带 **PostgreSQL JDBC 42.7.1（BSD-2）** 与 **mssql-jdbc 12.4.2（MIT）**，
    支持对 PostgreSQL / SQL Server 跑**只读** `EXPLAIN`（PG 返回 JSON、SQL Server 返回 ShowPlan XML）；
    写语句、DDL、多语句一律结构化拒绝，连接只读 + 查询超时。MySQL/MariaDB 仍不执行：
    Connector/J 是 GPLv2+FOSS、H2 是 MPL/EPL，均不在许可白名单内。schema 自省仍不做，
    `sqlv_schema_context` 只格式化调用方给的结构；`sqlv_explain` 缺结果时返回 `unresolved`。
-4. **schema 由调用方提供**：`sqlv_schema_context` 格式化入参里的表/列/索引，不做数据库自省；
+5. **schema 由调用方提供**：`sqlv_schema_context` 格式化入参里的表/列/索引，不做数据库自省；
    诊断与 inlay 在没有列清单时一律不出结果（宁可不报，也不误报）。
-5. **MCP `sqlv_history_search` 只搜入参文本**：UI 的「SQL 历史」页会把快照按项目存进插件 storage
+6. **MCP `sqlv_history_search` 只搜入参文本**：UI 的「SQL 历史」页会把快照按项目存进插件 storage
    （每个项目最多 10 个、单文件 512 KB，打开/捕获日志时自动保存），但 MCP 工具不读这份存储，
    只对本次调用传入的日志文本做字面量搜索；平台也没有供插件跨工具读取历史记录的统一 API。
-6. **捕获只覆盖三类运行配置**：`[[contributes.javaAgents]]` 只注入 Application / Spring Boot /
+7. **捕获只覆盖三类运行配置**：`[[contributes.javaAgents]]` 只注入 Application / Spring Boot /
    JAR Application（Run 与 Debug）；JUnit、Maven/Gradle goal、应用服务器、远程目标不注入。
    没有 agent 时用 `capture-open-log` 读工程内导出的日志文件；项目外路径需要额外文件授权。
-7. **捕获端口是固定的**：manifest 的 agent `args` 是静态串，装不下运行期协商的临时端口；
+8. **捕获端口是固定的**：manifest 的 agent `args` 是静态串，装不下运行期协商的临时端口；
    本版用 `port=<固定端口>`，`capture-start` 显式传端口。端口冲突时换端口并重启目标应用。
    另注：宿主的 WebSocket 是**纯二进制通道**（`crates/ide-host/src/plugins/websocket.rs` 把
    `websocket.send(bytes)` 一律封成 `Message::Binary`，且只把收到的 `Message::Binary` 转给插件），
    而 agent 的 WS 编解码原本只认 RFC 6455 文本帧。两边都不报错、只静默丢帧，症状是「连上了但
    一条数据都没有」，JVM 控制台 15 秒后打一条 CONFIG 看门狗报停采。agent 侧已改成入站 TEXT/BINARY
    同等接受、出站镜像对端 opcode，`WsSenderLoopEndToEndTest` 的二进制客户端用例钉住这条。
-8. **引擎 jar 不入库**：仓库只钉 `engine/ENGINE_VERSION` 与 sha256；安装态首次使用需要
+9. **引擎 jar 不入库**：仓库只钉 `engine/ENGINE_VERSION` 与 sha256；安装态首次使用需要
    `engine.downloadUrl`（默认空）。留空即不联网，直接用本地/仓库 jar，缺失时降级为纯文本模式。
-9. **SQL 历史的存储位置不同**：原版把日志自动保存成 `.idea` 下的日志文件，历史页读那个目录；
+10. **SQL 历史的存储位置不同**：原版把日志自动保存成 `.idea` 下的日志文件，历史页读那个目录；
    本版把快照按项目写进插件 `storage`（每项目最多 10 个、单文件 512 KB），因此历史文件不会出现在
    项目树里、不能被外部编辑器打开，也不跨机器同步。交互（文件列表 / 语句列表 / 返回 / 刷新 /
    滚动到底 / 快速预览 / 复制 / 跳转）按原版对齐。
-10. **预览「更多」里的「含表列名」只占位、不可用**：把每列渲染成 `表名.列名` 需要渲染器知道
+11. **预览「更多」里的「含表列名」只占位、不可用**：把每列渲染成 `表名.列名` 需要渲染器知道
    每个列来自哪张表，这属于引擎职责，本仓不做 SQL 改写。查过两处，都没有这个开关：
    `grep -rn -i "qualif|tablePrefix|table_prefix|withTable|includeColumns|include_columns"`
    在 `src/core/` 只命中 6 处无关位置（`format.rs` 的 `JOIN_QUALIFIERS` 是格式化时识别
@@ -110,35 +118,35 @@
    `kind`/`source`/`dialect`/`params`/`entity_tables` 五个字段。因此菜单项存在但禁用，
    tooltip 说明需要引擎支持；等引擎侧加上该开关后，本仓只加一个 `preview-qualify` 的转发
    即可，不在平台侧拼 SQL。
-11. **预览「更多」不提供「切换数据源」**：预览工作在纯文本模型上（原文 / SQL / 列信息），
+12. **预览「更多」不提供「切换数据源」**：预览工作在纯文本模型上（原文 / SQL / 列信息），
    本仓没有数据源 API，也不连接数据库（`sqlv_schema_context` 只格式化调用方给的结构）；
    切换数据源只在原版的「执行 + EXPLAIN」链里有意义，本版执行面走 sidecar 的只读 EXPLAIN，
    预览页不持有数据源，因此不设该入口。用 EXPLAIN 时请用 `sqlv_explain` 并给出连接参数。
-12. **预览「更多」不提供「AI 上下文」**：本仓与 AI 的通道只有平台标准 MCP 工具（`sqlv_*`，供 AI 客户端
+13. **预览「更多」不提供「AI 上下文」**：本仓与 AI 的通道只有平台标准 MCP 工具（`sqlv_*`，供 AI 客户端
    主动调用），没有「把当前预览整理成脱敏上下文块」的出口——既没有脱敏器（原版会遮蔽敏感字面量），
    也没有宿主侧 AI 会话接口。要用 AI 就调 MCP 工具；要把当前 SQL 交给外部服务请用「分享（复制）」，
    复制的是**未脱敏**的可执行 SQL，粘贴前请自行确认内容。
-13. **预览「更多」的「分享」退化为本地复制**：没有分享服务；联网能力只有 `net:127.0.0.1`
+14. **预览「更多」的「分享」退化为本地复制**：没有分享服务；联网能力只有 `net:127.0.0.1`
    （连本机 agent 的采集端口，出不了本机），没有对外 HTTP 客户端，所以该入口不联网、
    不写文件、不上传，只把渲染出的 SQL 放进剪贴板，由用户自行发送。
    需要成文报告时用「更多」→「导出」写进 Output 面板再自行保存。
-14. **屏蔽规则是「显示时过滤」，不是入队即丢**：原版在 SQL 进缓冲时就把命中行丢掉，本版在
+15. **屏蔽规则是「显示时过滤」，不是入队即丢**：原版在 SQL 进缓冲时就把命中行丢掉，本版在
    展示层过滤——命中行仍在缓冲文本与 SQL 历史快照里。删掉规则当场恢复显示，但「屏蔽期间
    新产生的 SQL」在历史快照里依然存在，不会凭空消失。规则按**当前项目**存（原版是应用级、
    跨项目共享），拦截次数随规则持久化（原版只在会话内计数），上限 500 条，超限拒新增而不淘汰。
-15. **读取剪贴板要单独授权**：`clipboard.read` 是可选能力，宿主没授予时「从剪贴板读取」与
+16. **读取剪贴板要单独授权**：`clipboard.read` 是可选能力，宿主没授予时「从剪贴板读取」与
    SQL→Java 的「从剪贴板导入」都不可用，界面会写明原因而不是静默失败。此时可手输或粘贴；
    写入剪贴板（复制）不受影响。需要在宿主侧为该插件授予 `clipboard.read` 后才能用。
-16. **日志面板的「设置」按钮不打开 IDE 设置页**：原版点齿轮会定位到
+17. **日志面板的「设置」按钮不打开 IDE 设置页**：原版点齿轮会定位到
    `Tools > SQL Visualizer > SQL 日志`；插件 API 1.18 没有「打开设置页」的调用，也没有写设置
    的 API（只有 `host::setting_bool/string/number` 读）。本版点齿轮在当前面板弹一层设置摘要：
    列出 SQL 日志相关项的当前值与「在 IDE 设置 › 工具 › MyBatis SQL Visualizer › SQL 日志 中修改」
    的路径；改设置仍需去 IDE 设置页。原版设置页里的「修改快捷键」录制器同理做不到——快捷键页
    只列出默认键位并指向 IDE Keymap。
-17. **没有项目级设置页**：原版 `SQL Visualizer（当前项目）` 按项目覆盖方言、参数替换、格式化、
+18. **没有项目级设置页**：原版 `SQL Visualizer（当前项目）` 按项目覆盖方言、参数替换、格式化、
    逻辑删除等 10 项；插件清单目前只能声明应用级设置页，本仓不造项目级覆盖。需要按项目不同的
    取值时，在 IDE 里切换全局值。
-18. **颜色项是文本，不是取色器**：设置的 schema 只有 `boolean / integer / string / enum` 四种
+19. **颜色项是文本，不是取色器**：设置的 schema 只有 `boolean / integer / string / enum` 四种
    控件，CRUD 四色因此是 `#RRGGBB` 文本框（带校验与默认值），没有原版的颜色选择器。
-19. **预览 SQL 区是只读展示**：原版预览编辑器可直接改 SQL；本版 web 编辑器做行号 + 高亮 + 复制，
+20. **预览 SQL 区是只读展示**：原版预览编辑器可直接改 SQL；本版 web 编辑器做行号 + 高亮 + 复制，
    编辑走输入区（页签模式下）或重新从源码发起预览，保证复制与渲染始终对应同一份产物。

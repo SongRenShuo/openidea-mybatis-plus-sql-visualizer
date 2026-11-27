@@ -385,6 +385,38 @@ struct Ctx<'a> {
     unresolved: bool,
 }
 
+/// The methods whose effect cannot be left out of the SQL: dropping them
+/// changes which rows and which columns the statement returns.
+///
+/// `.apply("...")` merely narrows a condition the renderer did not understand —
+/// the statement still means "these rows, with one filter missing", which
+/// `Partial` says honestly. A dropped `leftJoin` or `selectAll` is different in
+/// kind: `selectList(new MPJLambdaWrapper<User>().selectAll().leftJoin(...))`
+/// narrows nothing, it *builds the row shape*, and rendering
+/// `SELECT * FROM user` for it hands the reader a statement the query does not
+/// produce and that may well select from the wrong rows.
+///
+/// So this set is "loses structure", not "unsupported": such a chain is
+/// [`Confidence::Unresolved`] and ships no SQL, exactly like an unmapped field.
+const STRUCTURAL_METHODS: [&str; 16] = [
+    "selectAll",
+    "selectAs",
+    "selectAsClass",
+    "select",
+    "selectIgnore",
+    "selectFunc",
+    "selectMax",
+    "selectMin",
+    "selectSum",
+    "selectCount",
+    "selectAvg",
+    "selectCollection",
+    "selectAssociation",
+    "leftJoin",
+    "innerJoin",
+    "rightJoin",
+];
+
 fn push_key(ctx: &mut Ctx, key: &str) {
     if !ctx.message_keys.iter().any(|k| k == key) {
         ctx.message_keys.push(key.to_string());
@@ -627,6 +659,17 @@ fn parse_calls(
                         LeafOutcome::Skip => {}
                         LeafOutcome::Failed => {}
                     }
+                } else if STRUCTURAL_METHODS.contains(&name) {
+                    // Dropping this changes which rows or columns come back, so
+                    // the chain cannot be rendered as `SELECT * FROM <table>`:
+                    // that statement answers a different question. Same rule as
+                    // an unmapped field — no SQL, reason instead.
+                    ctx.unresolved = true;
+                    push_key(ctx, "wrapper.structural_method");
+                    ctx.notes.push(format!(
+                        "`.{name}` builds the statement's structure (join or select list); it is not rendered by this version, so no SQL is emitted"
+                    ));
+                    chain.unsupported.push(name.to_string());
                 } else {
                     ctx.partial = true;
                     push_key(ctx, "wrapper.unsupported_method");
@@ -1352,6 +1395,82 @@ mod tests {
                 .contains(&"wrapper.unsupported_method".to_string())
         );
         assert!(out.chain.unsupported.contains(&"apply".to_string()));
+    }
+
+    // Structure a render cannot reproduce --------------------------------
+
+    #[test]
+    fn a_dropped_join_or_select_list_is_unresolved_not_partial() {
+        // The reported shape: an MPJ chain whose joins and select list this
+        // renderer does not build. Emitting `SELECT * FROM car_device_info
+        // WHERE id = 1` for it would state a query nobody wrote — the joins are
+        // what decides which rows come back. So: no SQL, reason instead.
+        let out = render(
+            r#"new MPJLambdaWrapper<CarDeviceInfo>()
+                .selectAll(CarDeviceInfo.class)
+                .leftJoin(Car.class, Car::getDeviceId, CarDeviceInfo::getId)
+                .leftJoin(Driver.class, Driver::getCarId, Car::getId)
+                .eq(CarDeviceInfo::getId, 1)"#,
+            &cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Unresolved);
+        assert_eq!(out.sql, None, "{:?}", out.sql);
+        assert!(
+            out.message_keys
+                .contains(&"wrapper.structural_method".to_string()),
+            "{:?}",
+            out.message_keys
+        );
+        assert!(out.chain.unsupported.contains(&"selectAll".to_string()));
+        assert!(out.chain.unsupported.contains(&"leftJoin".to_string()));
+    }
+
+    #[test]
+    fn every_join_family_loses_structure() {
+        for method in ["leftJoin", "innerJoin", "rightJoin"] {
+            let text = format!(
+                "new MPJLambdaWrapper<User>().{method}(Dept.class, Dept::getId, User::getId).eq(User::getId, 1)"
+            );
+            let out = render(&text, &cols(), mysql());
+            assert_eq!(
+                out.confidence,
+                Confidence::Unresolved,
+                "{method} must not render a single-table statement"
+            );
+            assert_eq!(out.sql, None, "{method}");
+        }
+    }
+
+    #[test]
+    fn a_select_list_alone_also_blocks_the_sql() {
+        // Without `selectAll` the column list is the chain's own: rendering `*`
+        // would name columns the query does not return.
+        let out = render(
+            r#"new MPJLambdaWrapper<User>().selectAs(User::getName, "n").eq(User::getId, 1)"#,
+            &cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Unresolved);
+        assert_eq!(out.sql, None);
+    }
+
+    #[test]
+    fn a_condition_only_unsupported_method_stays_partial() {
+        // The line this rule must not cross: `.apply(...)` widens what the
+        // renderer understands, it does not change the row shape, so the
+        // statement is still the reader's query minus one filter.
+        for method in ["apply", "exists", "notExists", "having"] {
+            let text =
+                format!(r#"new LambdaQueryWrapper<User>().{method}("x").eq(User::getId, 1)"#);
+            let out = render(&text, &cols(), mysql());
+            assert_eq!(
+                out.confidence,
+                Confidence::Partial,
+                "{method} narrows a filter; it does not lose structure"
+            );
+            assert!(out.sql.is_some(), "{method}");
+        }
     }
 
     #[test]

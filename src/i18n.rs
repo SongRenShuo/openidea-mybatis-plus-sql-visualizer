@@ -1429,6 +1429,11 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "有包装器方法未参与渲染",
     ),
     (
+        "wrapper.structural_method",
+        "The chain builds its joins or select list with a method this version does not render, so no SQL is emitted",
+        "该链用本版不渲染的方法构造联表或查询列，因此不输出 SQL",
+    ),
+    (
         "wrapper.between_arity",
         "between() needs exactly two values",
         "between() 需要两个值",
