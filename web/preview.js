@@ -1,18 +1,24 @@
 /*
- * The SQL preview workbench (lane L23), as one ES module with two mount points:
+ * The SQL preview workbench, as one ES module with two mount points:
  *
  * - `web/log-panel.html` imports it and mounts it on the fifth tab
  *   (`#panelPreview`), so the preview lives inside the log panel exactly as the
  *   IntelliJ edition's "SQL 预览" tab lives inside the SQL Log tool window;
- * - `web/preview.html` mounts it as a page of its own, the shell the API 1.18
- *   dialog will load.
+ * - `web/preview.html` mounts it as a page of its own, the page the API 1.18
+ *   dialog (`sqlv-preview`) loads.
+ *
+ * The layout follows the IntelliJ edition's `SqlPreviewPanel` / `SqlPreviewDialog`:
+ * a meta row (dialect / type / table / source) with the text toolbar on its
+ * right, the performance-advice line under it, the parameter column beside the
+ * SQL editor, and a status line. The dialog adds the reference's bottom action
+ * row (Execute / Copy / Copy-and-close / Cancel). The input half is the tab
+ * mount's own affordance and is hidden in the dialog, where the reference shows
+ * only the rendered statement.
  *
  * `mountPreview(root, deps)` builds the workbench inside `root`, wires every
  * control, and returns an object with `applyTab(tab)` — the render entry the
- * host's state push drives. Nothing here talks to the page's other tabs: the
- * session's log-panel specifics stay in `web/log-panel.html`, the workbench
- * state stays here. All selectors are scoped to `root`, so a future page could
- * mount two instances without the ids colliding.
+ * host's state push drives. All selectors are scoped to `root`, so a future page
+ * could mount two instances without the ids colliding.
  *
  * The module is strict (modules always are) and touches no storage and no
  * network: the packaged page runs in an `<iframe sandbox="allow-scripts">` with
@@ -25,24 +31,17 @@
    standalone page show exactly the same DOM. Parsed with `DOMParser` and
    imported node by node — the markup never goes through an HTML-string sink,
    so nothing here can become a script or a markup-injection channel. */
-const TEMPLATE = `<!-- Input half (lane L27): the reference's standalone page actions. -->
+const TEMPLATE = `<!-- Input half (tab mount only): the standalone page actions. -->
 <div class="pv-pane pv-top" id="pvPaneTop">
-  <div class="pv-toolbar">
+  <div class="pv-toolbar pv-input-toolbar">
     <button id="pvResolve" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
-    <button id="pvFormat" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="12" width="12" height="1" rx="0.5" fill="currentColor"/>
-<rect x="6" y="6" width="8" height="1" rx="0.5" fill="currentColor"/>
-<rect x="6" y="9" width="8" height="1" rx="0.5" fill="currentColor"/>
-<rect x="2" y="3" width="12" height="1" rx="0.5" fill="currentColor"/>
-<path d="M2.8 6.1C2.64849 5.98637 2.44579 5.96809 2.27639 6.05279C2.107 6.13749 2 6.31062 2 6.5V9.5C2 9.68939 2.107 9.86252 2.27639 9.94722C2.44579 10.0319 2.64849 10.0136 2.8 9.9L4.8 8.4C4.9259 8.30558 5 8.15738 5 8C5 7.84262 4.9259 7.69443 4.8 7.6L2.8 6.1Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+    <button id="pvFormat" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="12" width="12" height="1" rx="0.5" fill="currentColor"/><rect x="6" y="6" width="8" height="1" rx="0.5" fill="currentColor"/><rect x="6" y="9" width="8" height="1" rx="0.5" fill="currentColor"/><rect x="2" y="3" width="12" height="1" rx="0.5" fill="currentColor"/><path d="M2.8 6.1C2.64849 5.98637 2.44579 5.96809 2.27639 6.05279C2.107 6.13749 2 6.31062 2 6.5V9.5C2 9.68939 2.107 9.86252 2.27639 9.94722C2.44579 10.0319 2.64849 10.0136 2.8 9.9L4.8 8.4C4.9259 8.30558 5 8.15738 5 8C5 7.84262 4.9259 7.69443 4.8 7.6L2.8 6.1Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
     <button id="pvLoadFile" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.0775 2.44037C10.1656 2.12093 9.97809 1.79054 9.65866 1.70242C9.33922 1.6143 9.00882 1.80182 8.9207 2.12126L5.76529 13.5596C5.67717 13.8791 5.86469 14.2095 6.18412 14.2976C6.50356 14.3857 6.83396 14.1982 6.92208 13.8788L10.0775 2.44037ZM5.41281 4.66699C5.61982 4.92575 5.57786 5.30332 5.31911 5.51033L1.96049 8.19723L5.31911 10.8841C5.57786 11.0911 5.61982 11.4687 5.41281 11.7275C5.20581 11.9862 4.82823 12.0282 4.56947 11.8212L0.625202 8.66575L0.0395508 8.19723L0.625202 7.7287L4.56947 4.57329C4.82823 4.36628 5.20581 4.40823 5.41281 4.66699ZM10.5872 11.7275C10.3802 11.4687 10.4222 11.0911 10.6809 10.8841L14.0395 8.19725L10.6809 5.51035C10.4222 5.30334 10.3802 4.92577 10.5872 4.66701C10.7942 4.40825 11.1718 4.3663 11.4305 4.57331L15.3748 7.72872L15.9605 8.19725L15.3748 8.66577L11.4305 11.8212C11.1718 12.0282 10.7942 11.9862 10.5872 11.7275Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
     <button id="pvClear" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
-    <button id="pvOpenDialog" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.00002 3H12C12.5523 3 13 3.44772 13 4V12C13 12.5523 12.5523 13 12 13H7.00002V3ZM6.00002 2H7.00002H12C13.1046 2 14 2.89543 14 4V12C14 13.1046 13.1046 14 12 14H7.00002H6.00002H4C2.89543 14 2 13.1046 2 12V4C2 2.89543 2.89543 2 4 2H6.00002ZM6.00002 13H4C3.44772 13 3 12.5523 3 12V4C3 3.44772 3.44772 3 4 3H6.00002V13Z" fill="currentColor"/>
-<rect x="8" y="5" width="4" height="1" rx="0.5" fill="currentColor"/>
-<rect x="8" y="7.5" width="4" height="1" rx="0.5" fill="currentColor"/>
-<rect x="8" y="10" width="4" height="1" rx="0.5" fill="currentColor"/></svg><span data-btnlabel></span></button>
+    <button id="pvCopy" class="btn pv-btn-text" type="button"><span data-btnlabel></span></button>
+    <button id="pvOpenDialog" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.00002 3H12C12.5523 3 13 3.44772 13 4V12C13 12.5523 12.5523 13 12 13H7.00002V3ZM6.00002 2H7.00002H12C13.1046 2 14 2.89543 14 4V12C14 13.1046 13.1046 14 12 14H7.00002H6.00002H4C2.89543 14 2 13.1046 2 12V4C2 2.89543 2.89543 2 4 2H6.00002ZM6.00002 13H4C3.44772 13 3 12.5523 3 12V4C3 3.44772 3.44772 3 4 3H6.00002V13Z" fill="currentColor"/><rect x="8" y="5" width="4" height="1" rx="0.5" fill="currentColor"/><rect x="8" y="7.5" width="4" height="1" rx="0.5" fill="currentColor"/><rect x="8" y="10" width="4" height="1" rx="0.5" fill="currentColor"/></svg><span data-btnlabel></span></button>
     <!-- Lane L48: shown only in the dialog page, where the host offers the
-         dialog object; the tab mount leaves it hidden (the dialog's own title
-         bar carries the real close button there). -->
+         dialog object; the tab mount leaves it hidden. -->
     <button id="pvClose" class="btn pv-btn-text" type="button" hidden><span data-btnlabel></span></button>
   </div>
   <div class="hint" id="pvInputHint"></div>
@@ -53,132 +52,270 @@ const TEMPLATE = `<!-- Input half (lane L27): the reference's standalone page ac
      tabindex="0"></div>
 
 <div class="pv-pane pv-preview">
-  <!-- Meta row: the dialect chip carries the capability matrix in its
-       tooltip (the reference's dialect-capability section). -->
-  <div class="pv-meta">
-    <span class="pv-chip" id="pvDialectChip"></span>
-    <span class="muted" id="pvDialectHint"></span>
-    <!-- Statement picker (lane L45): only a mapper render offers it. Hidden
-         when there is no statement list (inline SQL, a log row), disabled when
-         the mapper holds a single statement. -->
-    <span class="pv-statement-wrap" id="pvStatementWrap" hidden>
-      <label class="muted" id="pvStatementLabel" for="pvStatement"></label>
-      <select id="pvStatement" class="btn"></select>
-    </span>
-    <span class="pv-badge" id="pvConfidence" hidden></span>
-    <span class="pv-source muted" id="pvSource" hidden></span>
+  <!-- The reference's meta row and toolbar share one line: meta left, nine
+       text actions right. -->
+  <div class="pv-toprow">
+    <div class="pv-meta">
+      <span class="pv-chip" id="pvDialectChip"></span>
+      <span class="pv-meta-item" id="pvKindWrap"><span class="pv-meta-label" id="pvKindLabel"></span><span id="pvKindValue"></span></span>
+      <!-- The reference names the table; this render has no table metadata, so
+           the segment stays hidden rather than guessing one from the SQL. -->
+      <span class="pv-meta-item" id="pvTableWrap" hidden><span class="pv-meta-label" id="pvTableLabel"></span><span id="pvTableValue"></span></span>
+      <!-- Statement picker (lane L45): only a mapper render offers it. -->
+      <span class="pv-statement-wrap" id="pvStatementWrap" hidden>
+        <label class="muted" id="pvStatementLabel" for="pvStatement"></label>
+        <select id="pvStatement" class="btn"></select>
+      </span>
+      <span class="pv-badge" id="pvConfidence" hidden></span>
+      <span class="pv-source muted" id="pvSource" hidden></span>
+    </div>
+    <div class="pv-toolbar" id="pvToolbar">
+      <!-- Statement type (the reference shows it only when more than one
+           consumption form exists); kept hidden when there is nothing to
+           switch, never faked. -->
+      <button id="pvStmtType" class="btn" type="button" hidden><span data-btnlabel></span></button>
+      <!-- Error text (the reference shows it only for a render with an error). -->
+      <button id="pvCopyError" class="btn" type="button" hidden><span data-btnlabel></span></button>
+      <!-- Compact / multi-line: one toggle whose label names the mode a click
+           switches to (the reference's modeButton). -->
+      <button id="pvMode" class="btn pv-btn-text" type="button" aria-pressed="false"><span data-btnlabel></span></button>
+      <button id="pvFormatPreview" class="btn pv-btn-text" type="button"><span data-btnlabel></span></button>
+      <button id="pvKeywordWrap" class="btn pv-btn-text" type="button" aria-pressed="false"><span data-btnlabel></span></button>
+      <button id="pvVertical" class="btn pv-btn-text" type="button" aria-pressed="false"><span data-btnlabel></span></button>
+      <!-- Explain: the reference runs EXPLAIN through the data source; this
+           build has no sidecar execution path here, so the button stays
+           disabled and explains itself. -->
+      <button id="pvExplain" class="btn" type="button" disabled><span data-btnlabel></span></button>
+      <button id="pvRefresh" class="btn" type="button"><span data-btnlabel></span></button>
+      <span class="pv-more-wrap">
+        <button id="pvMore" class="btn" type="button" aria-haspopup="true"
+                aria-expanded="false"><span data-btnlabel></span></button>
+        <div class="pv-more-menu" id="pvMoreMenu" role="menu" hidden>
+          <!-- Ten low-frequency actions in the reference's order. Entries this
+               build cannot honour stay disabled with the reason in their
+               tooltip/accessible name; none of them pretends to succeed. -->
+          <button id="pvRollback" class="pv-more-item" type="button" role="menuitem"
+                  disabled></button>
+          <button id="pvSwitchDataSource" class="pv-more-item" type="button" role="menuitem"
+                  disabled></button>
+          <button id="pvImportParams" class="pv-more-item" type="button" role="menuitem"></button>
+          <button id="pvDiff" class="pv-more-item" type="button" role="menuitem"></button>
+          <button id="pvShare" class="pv-more-item" type="button" role="menuitem"></button>
+          <button id="pvExport" class="pv-more-item" type="button" role="menuitem"></button>
+          <button id="pvReplayExport" class="pv-more-item" type="button" role="menuitem"
+                  disabled></button>
+          <button id="pvAiContext" class="pv-more-item" type="button" role="menuitem"
+                  disabled></button>
+          <button id="pvAiContextIds" class="pv-more-item" type="button" role="menuitem"
+                  disabled></button>
+          <button id="pvDmlImpact" class="pv-more-item" type="button" role="menuitem"
+                  disabled></button>
+          <button id="pvQualify" class="pv-more-item" type="button" role="menuitem"
+                disabled hidden></button>
+        </div>
+      </span>
+    </div>
   </div>
-  <!-- Performance suggestions get their own line under the meta row, the way
-       the reference puts its perf row under the meta row: the advice is long
-       and must not squeeze the meta text on a narrow panel. -->
+  <!-- Performance suggestions: one 11 px line under the meta row. -->
   <div class="pv-perf" id="pvPerfRow" hidden><span id="pvAdvice"></span></div>
-  <!-- Toolbar, in the reference order: copy / format / display mode /
-       keyword wrap / vertical / explain (disabled — this plugin never
-       executes SQL) / refresh / more. -->
-  <div class="pv-toolbar">
-    <button id="pvCopy" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="9" height="10" rx="1.5" stroke="currentColor"/>
-<rect x="5" y="6" width="4" height="1" rx="0.5" fill="currentColor"/>
-<rect x="5" y="8" width="4" height="1" rx="0.5" fill="currentColor"/>
-<rect x="5" y="10" width="4" height="1" rx="0.5" fill="currentColor"/>
-<path fill-rule="evenodd" clip-rule="evenodd" d="M11.0017 2H11.5998C12.373 2 12.9998 2.6268 12.9998 3.4V3.91081C13.0011 3.94038 13.0017 3.97011 13.0017 4V11.5482C13.6063 11.1124 13.9998 10.4021 13.9998 9.6V3.4C13.9998 2.07452 12.9253 1 11.5998 1H6.39978C5.59677 1 4.88587 1.39437 4.4502 2H6.39978H11.0017Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
-    <button id="pvFormatPreview" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="12" width="12" height="1" rx="0.5" fill="currentColor"/>
-<rect x="6" y="6" width="8" height="1" rx="0.5" fill="currentColor"/>
-<rect x="6" y="9" width="8" height="1" rx="0.5" fill="currentColor"/>
-<rect x="2" y="3" width="12" height="1" rx="0.5" fill="currentColor"/>
-<path d="M2.8 6.1C2.64849 5.98637 2.44579 5.96809 2.27639 6.05279C2.107 6.13749 2 6.31062 2 6.5V9.5C2 9.68939 2.107 9.86252 2.27639 9.94722C2.44579 10.0319 2.64849 10.0136 2.8 9.9L4.8 8.4C4.9259 8.30558 5 8.15738 5 8C5 7.84262 4.9259 7.69443 4.8 7.6L2.8 6.1Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
-    <!-- Display mode (the reference's mode button): a toggle whose label names
-         the mode it switches to, instead of a dropdown that hides the choice. -->
-    <button id="pvMode" class="btn pv-btn-text" type="button" aria-pressed="false"><span data-btnlabel></span></button>
-    <!-- Keyword wrap / vertical: the reference keeps both in the toolbar (next
-         to Format). They shape only the painted SQL; copy / export keep the
-         executable text. -->
-    <button id="pvKeywordWrap" class="btn pv-btn-text" type="button" aria-pressed="false"><span data-btnlabel></span></button>
-    <button id="pvVertical" class="btn pv-btn-text" type="button" aria-pressed="false"><span data-btnlabel></span></button>
-    <!-- Explain: the reference runs EXPLAIN through the data source; this
-         build has no sidecar execution path here, so the button stays
-         disabled and explains itself (same wording as Execute). -->
-    <button id="pvExplain" class="btn" type="button" disabled><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
-    <button id="pvRefresh" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.5 9V8C2.5 4.96243 4.96243 2.5 8 2.5C9.10679 2.5 10.1372 2.82692 11 3.38947" stroke="currentColor" stroke-linecap="round"/>
-<path d="M5 12.6105C5.86278 13.1731 6.89321 13.5 8 13.5C11.0376 13.5 13.5 11.0376 13.5 8V7" stroke="currentColor" stroke-linecap="round"/>
-<path d="M0.49997 7.50027L2.5 9.5L4.49998 7.50023" stroke="currentColor" stroke-linecap="round"/>
-<path d="M11.5 8.49982L13.5 6.5L15.5 8.49982" stroke="currentColor" stroke-linecap="round"/></svg><span data-btnlabel></span></button>
-    <span class="pv-more-wrap">
-      <button id="pvMore" class="btn" type="button" aria-haspopup="true"
-              aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="3" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="13" cy="8" r="1.2" fill="currentColor"/></svg><span data-btnlabel></span></button>
-      <div class="pv-more-menu" id="pvMoreMenu" role="menu" hidden>
-        <!-- Rollback (L27): the workbench has no table/primary-key
-             metadata, so the item stays disabled with the reason in its
-             tooltip. First in the fold, as in the reference (most used). -->
-        <button id="pvRollback" class="pv-more-item" type="button" role="menuitem"
-                disabled></button>
-        <!-- Diff (lane L44): the original on the left, the rendered SQL on the
-             right, in the platform diff viewer. -->
-        <button id="pvDiff" class="pv-more-item" type="button" role="menuitem"></button>
-        <!-- Share (lane L44): no share service and no network channel, so the
-             entry copies the SQL locally. -->
-        <button id="pvShare" class="pv-more-item" type="button" role="menuitem"></button>
-        <button id="pvExport" class="pv-more-item" type="button" role="menuitem"></button>
-        <!-- Qualify columns (lane L44): rendering table.column needs the
-             renderer to know each column's table; neither the core renderer nor
-             the engine has that switch, so the item stays disabled with the
-             reason in its tooltip. -->
-        <button id="pvQualify" class="pv-more-item" type="button" role="menuitem"
-                disabled></button>
-      </div>
-    </span>
-  </div>
-  <!-- Degradation banner (L35b): the reference's honesty strip. Shown
-       while the render is unresolved; the reasons carry their message
-       keys, and the reader can dismiss it until the next render. -->
+  <!-- Degradation banner: the reference's honesty strip. -->
   <div class="pv-banner" id="pvBanner" role="status" hidden>
     <span class="pv-banner-text" id="pvBannerText"></span>
     <button class="pv-banner-close" id="pvBannerClose" type="button"></button>
   </div>
   <div class="pv-cols">
     <div class="pv-params">
-      <div class="pv-pane-title" id="pvParamsTitle"></div>
       <div class="pv-scroll">
-        <!-- Dynamic conditions (C07): one checkbox per "if" / "when" node of
-             the statement. Ticking a box includes that branch in the next
-             render; the host re-renders and pushes the result. -->
-        <div class="pv-conditions" id="pvConditions" hidden>
-          <div class="pv-pane-subtitle" id="pvConditionsTitle"></div>
-          <div class="pv-conditions-actions">
-            <button id="pvConditionsAll" class="pv-mini" type="button"><span data-btnlabel></span></button>
-            <button id="pvConditionsNone" class="pv-mini" type="button"><span data-btnlabel></span></button>
+        <!-- Preset fold (the reference's HideableTitledPanel): collapsed by
+             default. There is no preset store in this build, so the controls
+             are disabled with the reason visible on hover. -->
+        <details class="pv-preset" id="pvPresetBlock">
+          <summary id="pvPresetSummary"></summary>
+          <div class="pv-preset-row">
+            <select id="pvPresetSelect" class="pv-select"><option id="pvPresetDefault"></option></select>
+            <button id="pvPresetManage" class="pv-mini" type="button" disabled><span data-btnlabel></span></button>
+          </div>
+        </details>
+        <!-- Dynamic conditions (C07): one checkbox per "if" / "when" node. -->
+        <div class="pv-section" id="pvConditions" hidden>
+          <div class="pv-section-head">
+            <span class="pv-section-title" id="pvConditionsTitle"></span>
+            <span class="pv-section-actions">
+              <button id="pvConditionsAll" class="pv-mini" type="button"><span data-btnlabel></span></button>
+              <button id="pvConditionsClear" class="pv-mini" type="button"><span data-btnlabel></span></button>
+            </span>
           </div>
           <div id="pvConditionsList"></div>
           <div class="hint" id="pvConditionsHint"></div>
         </div>
-        <div id="pvParamsList"></div>
+        <div class="pv-section" id="pvParamsSection">
+          <!-- "参数" header appears only when a condition section precedes it,
+               exactly as the reference's sectionHeaderRow does. -->
+          <div class="pv-section-head" id="pvParamsHead" hidden>
+            <span class="pv-section-title" id="pvParamsTitle"></span>
+          </div>
+          <div id="pvParamsList"></div>
+        </div>
         <div class="pv-params-actions">
           <button id="pvRebindBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
-          <button id="pvImportBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M5.5 6C5.22386 6 5 6.22386 5 6.5C5 6.77614 5.22386 7 5.5 7H10.5C10.7761 7 11 6.77614 11 6.5C11 6.22386 10.7761 6 10.5 6H5.5Z" fill="currentColor"/>
-<path d="M5 8.5C5 8.22386 5.22386 8 5.5 8H10.5C10.7761 8 11 8.22386 11 8.5C11 8.77614 10.7761 9 10.5 9H5.5C5.22386 9 5 8.77614 5 8.5Z" fill="currentColor"/>
-<path d="M5.5 10C5.22386 10 5 10.2239 5 10.5C5 10.7761 5.22386 11 5.5 11H10.5C10.7761 11 11 10.7761 11 10.5C11 10.2239 10.7761 10 10.5 10H5.5Z" fill="currentColor"/>
-<path fill-rule="evenodd" clip-rule="evenodd" d="M12 2H10.9146C10.7087 1.4174 10.1531 1 9.5 1H6.5C5.84689 1 5.29127 1.4174 5.08535 2H4C2.89543 2 2 2.89543 2 4V13C2 14.1046 2.89543 15 4 15H12C13.1046 15 14 14.1046 14 13V4C14 2.89543 13.1046 2 12 2ZM4 3H5.08535C5.29127 3.5826 5.84689 4 6.5 4H9.5C10.1531 4 10.7087 3.5826 10.9146 3H12C12.5523 3 13 3.44772 13 4V13C13 13.5523 12.5523 14 12 14H4C3.44772 14 3 13.5523 3 13V4C3 3.44772 3.44772 3 4 3ZM6.5 2C6.22386 2 6 2.22386 6 2.5C6 2.77614 6.22386 3 6.5 3H9.5C9.77614 3 10 2.77614 10 2.5C10 2.22386 9.77614 2 9.5 2H6.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
+          <button id="pvImportBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M5.5 6C5.22386 6 5 6.22386 5 6.5C5 6.77614 5.22386 7 5.5 7H10.5C10.7761 7 11 6.77614 11 6.5C11 6.22386 10.7761 6 10.5 6H5.5Z" fill="currentColor"/><path d="M5 8.5C5 8.22386 5.22386 8 5.5 8H10.5C10.7761 8 11 8.22386 11 8.5C11 8.77614 10.7761 9 10.5 9H5.5C5.22386 9 5 8.77614 5 8.5Z" fill="currentColor"/><path d="M5.5 10C5.22386 10 5 10.2239 5 10.5C5 10.7761 5.22386 11 5.5 11H10.5C10.7761 11 11 10.7761 11 10.5C11 10.2239 10.7761 10 10.5 10H5.5Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2H10.9146C10.7087 1.4174 10.1531 1 9.5 1H6.5C5.84689 1 5.29127 1.4174 5.08535 2H4C2.89543 2 2 2.89543 2 4V13C2 14.1046 2.89543 15 4 15H12C13.1046 15 14 14.1046 14 13V4C14 2.89543 13.1046 2 12 2ZM4 3H5.08535C5.29127 3.5826 5.84689 4 6.5 4H9.5C10.1531 4 10.7087 3.5826 10.9146 3H12C12.5523 3 13 3.44772 13 4V13C13 13.5523 12.5523 14 12 14H4C3.44772 14 3 13.5523 3 13V4C3 3.44772 3.44772 3 4 3ZM6.5 2C6.22386 2 6 2.22386 6 2.5C6 2.77614 6.22386 3 6.5 3H9.5C9.77614 3 10 2.77614 10 2.5C10 2.22386 9.77614 2 9.5 2H6.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
         </div>
         <div class="hint" id="pvParamsHint"></div>
       </div>
     </div>
-    <!-- Draggable split between the parameter column and the result tabs, the
+    <!-- Draggable split between the parameter column and the SQL editor, the
          reference's horizontal OnePixelSplitter (default 0.3). -->
     <div class="pv-hsplitter" id="pvHSplitter" role="separator"
          aria-orientation="vertical" tabindex="0"></div>
     <div class="pv-sqlside">
-      <div class="pv-tabs" role="tablist">
+      <!-- Conditional tabs: SQL always; 原文 for a render whose source differs
+           (mapper XML / HQL); 列信息 when the render carried columns. With only
+           SQL the strip hides, as in the reference. -->
+      <div class="pv-tabs" id="pvTabs" role="tablist" hidden>
         <button class="pv-tab" type="button" role="tab" data-pvtab="sql" aria-selected="true"></button>
         <button class="pv-tab" type="button" role="tab" data-pvtab="raw" aria-selected="false"></button>
         <button class="pv-tab" type="button" role="tab" data-pvtab="columns" aria-selected="false"></button>
       </div>
-      <pre class="code pv-tabbody" id="pvTabBody" role="tabpanel"></pre>
+      <div class="pv-code" id="pvCode">
+        <div class="pv-gutter" id="pvGutter" aria-hidden="true" hidden></div>
+        <pre class="pv-tabbody" id="pvTabBody" role="tabpanel"></pre>
+      </div>
     </div>
   </div>
-  <!-- Status line only: the reference's resultPanel SOUTH. -->
-  <div class="pv-footer">
+  <!-- Status line, plus the dialog's fixed action row (hidden in the tab). -->
+  <div class="pv-footer" id="pvFooter" hidden>
     <span id="pvStatus" class="muted"></span>
+    <span class="pv-dialog-actions" id="pvDialogActions" hidden>
+      <button id="pvExecute" class="btn" type="button" disabled><span data-btnlabel></span></button>
+      <button id="pvCopySql" class="btn" type="button"><span data-btnlabel></span></button>
+      <button id="pvCopyClose" class="btn pv-primary" type="button"><span data-btnlabel></span></button>
+      <button id="pvCancel" class="btn" type="button"><span data-btnlabel></span></button>
+    </span>
   </div>
 </div>`;
+
+/* ---- Text this module owns ------------------------------------------
+ *
+ * The host localises every label it knows (`tabs.preview.labels`); the labels
+ * this page introduces — the reference's nine toolbar entries, the ten "more"
+ * actions, the dialog row and the parameter-panel chrome — live here in both
+ * languages, so the page reads correctly before the host tables catch up and
+ * never hard-codes one language. `pickLang` follows the host: a localised label
+ * containing CJK means the IDE is running in Chinese.
+ */
+const PV_TEXT = {
+  zh: {
+    dialect: '方言:',
+    kind: '类型:',
+    table: '表:',
+    kindSql: 'SQL',
+    kindXml: 'Mapper XML',
+    stmtType: '语句: {0}',
+    copyError: '复制错误信息',
+    copyErrorEmpty: '本次渲染没有可复制的错误信息',
+    copyErrorCopied: '错误信息已复制',
+    explain: '执行计划',
+    refresh: '刷新',
+    compact: '压缩',
+    multiline: '多行',
+    moreRollback: '回滚 SQL',
+    moreSwitchDataSource: '切换数据源',
+    moreImportParams: '导入参数',
+    moreDiff: '差异对比',
+    moreShare: '分享',
+    morePortableExport: '导出可移植 SQL',
+    moreReplayExport: '导出回放脚本',
+    moreAiContext: '复制为 AI 上下文',
+    moreAiContextIds: '复制为 AI 上下文（含表列名）',
+    moreDmlImpact: '预估影响行数',
+    rollbackNote: '本构建不持有表/主键元数据，无法生成回滚计划',
+    switchDataSourceNote: '预览页没有数据源绑定后端，无法切换数据源',
+    portableExportNote: '按当前方言导出格式化 SQL 与来源头注释；本构建不做可移植形态标注',
+    replayExportNote: '本构建没有执行通道，无法导出回放脚本',
+    aiContextNote: '本构建没有脱敏与 AI 上下文通道',
+    dmlImpactNote: '预估影响行数需要执行 COUNT 查询；本插件从不执行 SQL',
+    explainNote: '本插件从不执行用户 SQL，执行计划不可用',
+    executeNote: '本插件从不执行用户 SQL；请复制到数据库控制台执行',
+    preset: '预设:',
+    presetDefault: '默认预设',
+    presetManage: '管理预设…',
+    presetManageNote: '本构建没有预设存储后端',
+    conditions: '动态条件',
+    paramsSection: '参数',
+    selectAll: '全选',
+    selectNone: '全不选',
+    clear: '清除',
+    clearNote: '清空全部参数值（不改变分支勾选）',
+    paramNumber: '数字，如 42',
+    paramTemporal: '日期，如 2026-01-01 12:00:00',
+    paramCollection: '[1, 2, 3]',
+    paramObject: '{"id": 1}',
+    paramsEmpty: '无未解析参数',
+    copySql: '复制 SQL',
+    copySqlAndClose: '复制 SQL 并关闭',
+    cancel: '取消',
+    copyCloseNote: '复制当前 SQL 并关闭预览',
+  },
+  en: {
+    dialect: 'Dialect:',
+    kind: 'Type:',
+    table: 'Table:',
+    kindSql: 'SQL',
+    kindXml: 'Mapper XML',
+    stmtType: 'Statement: {0}',
+    copyError: 'Copy error',
+    copyErrorEmpty: 'This render carries no error text',
+    copyErrorCopied: 'Error text copied',
+    explain: 'Explain',
+    refresh: 'Refresh',
+    compact: 'Compact',
+    multiline: 'Multi-line',
+    moreRollback: 'Rollback SQL',
+    moreSwitchDataSource: 'Switch data source',
+    moreImportParams: 'Import parameters',
+    moreDiff: 'Compare',
+    moreShare: 'Share',
+    morePortableExport: 'Export portable SQL',
+    moreReplayExport: 'Export replay script',
+    moreAiContext: 'Copy as AI context',
+    moreAiContextIds: 'Copy as AI context (with table and column names)',
+    moreDmlImpact: 'Estimate affected rows',
+    rollbackNote: 'This build holds no table/primary-key metadata, so no rollback plan can be built',
+    switchDataSourceNote: 'The preview has no data-source backend, so it cannot switch sources',
+    portableExportNote: 'Exports the formatted SQL with a source header for the current dialect; this build does not annotate portable shapes',
+    replayExportNote: 'This build has no execution channel, so no replay script can be produced',
+    aiContextNote: 'This build has no redaction or AI-context channel',
+    dmlImpactNote: 'Estimating rows needs a COUNT query; this plugin never executes SQL',
+    explainNote: 'This plugin never executes user SQL, so EXPLAIN is unavailable',
+    executeNote: 'This plugin never executes user SQL; copy the statement into a database console',
+    preset: 'Preset:',
+    presetDefault: 'Default preset',
+    presetManage: 'Manage presets…',
+    presetManageNote: 'This build has no preset store',
+    conditions: 'Dynamic conditions',
+    paramsSection: 'Parameters',
+    selectAll: 'Select all',
+    selectNone: 'Select none',
+    clear: 'Clear',
+    clearNote: 'Clear every parameter value (branch switches unchanged)',
+    paramNumber: 'Number, e.g. 42',
+    paramTemporal: 'Date, e.g. 2026-01-01 12:00:00',
+    paramCollection: '[1, 2, 3]',
+    paramObject: '{"id": 1}',
+    paramsEmpty: 'No unresolved parameter',
+    copySql: 'Copy SQL',
+    copySqlAndClose: 'Copy SQL and close',
+    cancel: 'Cancel',
+    copyCloseNote: 'Copy the current SQL and close the preview',
+  },
+};
+
+const PV_PLACEHOLDER_KEYS = {
+  number: 'paramNumber',
+  temporal: 'paramTemporal',
+  collection: 'paramCollection',
+  object: 'paramObject',
+};
 
 /** Text buttons carry an inline icon; only the label span is replaced so the
  * icon survives every state push (same rule as the panel page's `setText`). */
@@ -207,19 +344,18 @@ const PV_LABEL_KEYS = {
   pvResolve: 'resolve', pvFormat: 'format', pvLoadFile: 'loadFile',
   pvClear: 'clear', pvOpenDialog: 'openDialog', pvClose: 'close',
   pvCopy: 'copySql',
-  pvFormatPreview: 'format', pvExport: 'export', pvExplain: 'explain',
+  pvFormatPreview: 'format', pvExplain: 'explain',
   pvRefresh: 'refresh', pvMore: 'more',
-  // C07: the condition list's header actions.
-  pvConditionsAll: 'conditionsAll', pvConditionsNone: 'conditionsNone',
 };
 const PV_TAB_KEYS = { sql: 'tabSql', raw: 'tabRaw', columns: 'tabColumns' };
 const PV_TAB_ORDER = ['sql', 'raw', 'columns'];
+const PV_MODES = ['normal', 'formatted', 'keyword_wrap', 'vertical'];
 
 /* ---- Display-only SQL shaping (lane L45) --------------------------------
  *
  * Both helpers take the SQL the preview shows and return the text to paint.
  * They never run on the model: the executable SQL the host holds, the Copy /
- * Export paths and the formatted tab are untouched — these two switches are
+ * Export paths and the formatted tab are untouched — these switches are
  * presentation, nothing else. Called on every render, so they stay linear and
  * allocate little.
  */
@@ -246,7 +382,7 @@ function isWordChar(ch) { return /[A-Za-z0-9_$]/.test(ch); }
 /**
  * Walks `text` and hands each plain (unquoted, uncommented) character to
  * `visit`; quoted spans, line comments and block comments arrive as one opaque
- * chunk so no rule can fire inside them. Shared by both display shapers.
+ * chunk so no rule can fire inside them. Shared by the display shapers.
  */
 function walkSql(text, visit) {
   let i = 0;
@@ -404,87 +540,31 @@ export function verticalItems(sql) {
 }
 
 /**
- * The text the SQL tab paints: the chosen display shaping, or the raw text.
- * `options` carries the two toggles; both off returns the input unchanged.
+ * The text the SQL tab paints: the chosen display shaping plus the compact
+ * switch. `options` is `{ mode, compact }`; `normal` with compact off returns
+ * the input unchanged. Pure.
  */
 export function shapeForDisplay(sql, options) {
   const opts = options || {};
   let text = String(sql == null ? '' : sql);
-  if (opts.vertical) { text = verticalItems(text); }
-  if (opts.keywordWrap) { text = wrapKeywords(text); }
+  if (opts.mode === 'keyword_wrap') { text = wrapKeywords(text); }
+  if (opts.mode === 'vertical') { text = verticalItems(text); }
+  if (opts.compact) { text = compactSql(text); }
   return text;
 }
 
-/* ---- SQL syntax colouring (lane C) --------------------------------------
- *
- * The reference's SQL tab is an IDE editor, so keywords, strings, numbers and
- * comments are coloured. This build renders read-only text, so the colouring is
- * done here: a linear tokenizer, then one span per coloured run. Nothing is
- * rewritten — concatenating the tokens returns the input exactly — so
- * selection, copy-from-the-page and the placeholder text all stay correct.
- */
-
-/* Keywords get the accent colour. Superset of the wrap list, plus the common
-   DDL / predicate / type words a SELECT- or mapper-shaped preview can carry. */
-const PV_SQL_KEYWORDS = new Set([
-  'ADD', 'ALL', 'ALTER', 'AND', 'ANY', 'AS', 'ASC', 'BETWEEN', 'BY', 'CASE',
-  'CAST', 'CREATE', 'CROSS', 'DELETE', 'DESC', 'DISTINCT', 'DROP', 'ELSE',
-  'END', 'EXISTS', 'FALSE', 'FETCH', 'FIRST', 'FOR', 'FROM', 'FULL', 'GROUP',
-  'HAVING', 'IF', 'IFNULL', 'IGNORE', 'IN', 'INDEX', 'INNER', 'INSERT',
-  'INTERVAL', 'INTO', 'IS', 'JOIN', 'KEY', 'LAST', 'LEFT', 'LIKE', 'LIMIT',
-  'LOCK', 'MERGE', 'NATURAL', 'NOT', 'NOWAIT', 'NULL', 'NULLS', 'OFFSET',
-  'ON', 'OR', 'ORDER', 'OUTER', 'OVER', 'PARTITION', 'PRIMARY', 'REPLACE',
-  'RIGHT', 'ROW', 'ROWS', 'SELECT', 'SET', 'SHARE', 'TABLE', 'THEN', 'TRUE',
-  'TRUNCATE', 'UNION', 'UNIQUE', 'UPDATE', 'USE', 'USING', 'VALUES', 'WHEN',
-  'WHERE', 'WITH',
-]);
-
-/* Above this length the colouring is skipped: one span per token on a huge
-   statement costs more than the colour is worth, and the panel must stay
-   responsive (the input accepts up to 100,000 characters). */
-const PV_HIGHLIGHT_MAX_CHARS = 20000;
-
-function nextNonSpace(text, from) {
-  let i = from;
-  while (i < text.length && /\s/.test(text[i])) { i += 1; }
-  return i < text.length ? text[i] : '';
-}
-
 /**
- * Splits SQL into coloured runs. Pure: the token texts concatenated are the
- * input, character for character. Kinds: `kw` (keyword), `fn` (word before an
- * open parenthesis), `str` (string / quoted identifier), `num`, `com`
- * (comment), `plain` (everything else).
+ * Collapses runs of whitespace to one space, except inside quoted spans and
+ * comments and never across a line-comment terminator (dropping that newline
+ * would swallow the statement that follows into the comment). Pure.
  */
-export function tokenizeSql(sql) {
+export function compactSql(sql) {
   const text = String(sql == null ? '' : sql);
-  const tokens = [];
-  function push(kind, value) {
-    if (!value) { return; }
-    const last = tokens[tokens.length - 1];
-    if (kind === 'plain' && last && last.kind === 'plain') {
-      last.text += value;
-      return;
-    }
-    tokens.push({ kind: kind, text: value });
-  }
+  if (!text) { return text; }
+  let out = '';
   let i = 0;
   while (i < text.length) {
     const ch = text[i];
-    if (ch === '-' && text[i + 1] === '-') {
-      const end = text.indexOf('\n', i);
-      const stop = end < 0 ? text.length : end;
-      push('com', text.slice(i, stop));
-      i = stop;
-      continue;
-    }
-    if (ch === '/' && text[i + 1] === '*') {
-      const end = text.indexOf('*/', i + 2);
-      const stop = end < 0 ? text.length : end + 2;
-      push('com', text.slice(i, stop));
-      i = stop;
-      continue;
-    }
     if (isQuote(ch)) {
       let j = i + 1;
       while (j < text.length) {
@@ -495,44 +575,37 @@ export function tokenizeSql(sql) {
         j += 1;
       }
       const stop = Math.min(j + 1, text.length);
-      push('str', text.slice(i, stop));
+      out += text.slice(i, stop);
       i = stop;
       continue;
     }
-    if (/[0-9]/.test(ch)) {
-      let j = i;
-      while (j < text.length && /[0-9.]/.test(text[j])) { j += 1; }
-      push('num', text.slice(i, j));
+    if (ch === '-' && text[i + 1] === '-') {
+      const end = text.indexOf('\n', i);
+      const stop = end < 0 ? text.length : end + 1;
+      // Keep the terminating newline; the next line is not a comment.
+      out += text.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      out += text.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j])
+             && !(text[j] === '-' && text[j + 1] === '-')) { j += 1; }
+      out += ' ';
       i = j;
       continue;
     }
-    if (isWordStart(ch)) {
-      let j = i;
-      while (j < text.length && isWordChar(text[j])) { j += 1; }
-      const word = text.slice(i, j);
-      if (PV_SQL_KEYWORDS.has(word.toUpperCase())) {
-        push('kw', word);
-      } else if (nextNonSpace(text, j) === '(') {
-        push('fn', word);
-      } else {
-        push('plain', word);
-      }
-      i = j;
-      continue;
-    }
-    // Punctuation / whitespace: one plain run up to the next token start.
-    let j = i + 1;
-    while (j < text.length) {
-      const next = text[j];
-      if (isWordStart(next) || /[0-9]/.test(next) || isQuote(next)) { break; }
-      if ((next === '-' && text[j + 1] === '-')
-          || (next === '/' && text[j + 1] === '*')) { break; }
-      j += 1;
-    }
-    push('plain', text.slice(i, j));
-    i = j;
+    out += ch;
+    i += 1;
   }
-  return tokens;
+  return out.trim();
 }
 
 /**
@@ -560,6 +633,10 @@ export function mountPreview(root, deps) {
   // The tab is a flex child of the panel page, exactly as before; the class
   // carries the workbench's own CSS (web/preview.css) instead of the id.
   if (!root.classList.contains('pv-root')) { root.classList.add('pv-root'); }
+  // The dialog hides the input half and shows the fixed bottom action row;
+  // the tab does the opposite. One class drives both, so no element is created
+  // conditionally.
+  root.classList.toggle('pv-dialog-mode', !!dialogBridge);
   const parsed = new DOMParser().parseFromString(TEMPLATE, 'text/html');
   // The template has three top-level children (input half, splitter, preview
   // half): import all of them, in order, or the splitter and the whole result
@@ -573,14 +650,16 @@ export function mountPreview(root, deps) {
 
   const preview = {
     model: {}, labels: {}, dialect: {}, tab: 'sql', mode: 'normal',
-    // Lane L45: the two display switches. Seeded from the state push and
-    // seeded back to the host when the reader toggles them, so the next
-    // remount — or the panel page reloading — shows the same text.
-    display: { keywordWrap: false, vertical: false },
+    compact: false,
+    // The display state in the host's shape: the mode (`normal` / `formatted`
+    // / `keyword_wrap` / `vertical`) and the compact switch. It rides every
+    // push so a remount restores what the reader chose.
+    display: { mode: 'normal', compact: false },
   };
   if (deps.labels) { preview.labels = deps.labels; }
-  // Signature of what the tab body shows: a state push that changes none of it
-  // must not re-render (the reader keeps their scroll position).
+  let pvLang = 'zh';
+  // A push that changes none of the painted text must not re-render (the
+  // reader keeps their scroll position).
   let pvSig = null;
   // Params (lane L27): signature of the parameter list (so an unrelated push
   // does not clobber what the user typed) and whether a clipboard read was
@@ -596,6 +675,20 @@ export function mountPreview(root, deps) {
 
   /** One node of this workbench, by id. */
   function node(id) { return root.querySelector('#' + id); }
+
+  /** The module-owned text, in the host's language. */
+  function L(key) {
+    const table = PV_TEXT[pvLang] || PV_TEXT.zh;
+    return table[key] != null ? table[key] : (PV_TEXT.zh[key] || key);
+  }
+
+  /** A host label when it exists, else this module's own text. */
+  function labelOf(key, fallbackKey) {
+    const labels = preview.labels || {};
+    if (labels[key]) { return labels[key]; }
+    return L(fallbackKey || key);
+  }
+
   function tabs() { return preview.model.tabs || {}; }
   function tabButtons() { return root.querySelectorAll('.pv-tab'); }
   function paramInputs() { return root.querySelectorAll('.pv-param-input'); }
@@ -604,15 +697,12 @@ export function mountPreview(root, deps) {
     const m = preview.model || {};
     const t = tabs();
     const l = preview.labels || {};
-    const d = preview.display || {};
     return [
       m.sql, m.reason, m.confidence, (m.params || []).join(','),
-      m.advice, m.source,
+      m.advice, m.source, m.kind,
       t.formatted, t.raw, t.columns, preview.tab, preview.mode,
-      l.empty, l.columnsEmpty, l.reasonTitle,
-      // The display switches change the painted text, so a toggle must
-      // re-render even when the model is unchanged (lane L45).
-      d.keywordWrap ? 'kw' : '', d.vertical ? 'v' : '',
+      preview.compact ? 'c' : '',
+      l.empty, l.columnsEmpty, l.reasonTitle, pvLang,
     ].join('\u0001');
   }
 
@@ -630,24 +720,36 @@ export function mountPreview(root, deps) {
     hint.hidden = editor.value.trim() !== '';
   }
 
-  /** Paints one SQL text as coloured runs (lane C). The token texts are the
-   *  exact input, so selecting or copying the rendered page yields the SQL. */
-  function paintSql(body, text) {
-    const tokens = tokenizeSql(text);
-    const fragment = doc.createDocumentFragment();
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
-      if (token.kind === 'plain') {
-        fragment.appendChild(doc.createTextNode(token.text));
-      } else {
-        const span = doc.createElement('span');
-        span.className = 'pv-tok-' + token.kind;
-        span.textContent = token.text;
-        fragment.appendChild(span);
-      }
+  /** The footer is the status line plus the dialog's action row; with an empty
+   *  status and no dialog row it takes no height at all. */
+  function updateFooter() {
+    const status = node('pvStatus');
+    const actions = node('pvDialogActions');
+    const footer = node('pvFooter');
+    if (actions) { actions.hidden = !dialogBridge; }
+    if (footer) {
+      const hasStatus = !!(status && status.textContent.trim());
+      footer.hidden = !hasStatus && !dialogBridge;
     }
-    body.textContent = '';
-    body.appendChild(fragment);
+  }
+
+  /** Paints one SQL text as coloured runs. The token texts are the exact input,
+   *  so selecting or copying the rendered page yields the SQL. */
+  function paintSql(body, text) {
+    body.textContent = text;
+  }
+
+  /** Line numbers, one per painted line. The code pane never wraps, so the
+   *  counts always agree. */
+  function paintGutter(text) {
+    const gutter = node('pvGutter');
+    if (!gutter) { return; }
+    const lines = text ? text.split('\n') : [];
+    let out = '';
+    for (let i = 0; i < lines.length; i++) {
+      out += (i > 0 ? '\n' : '') + String(i + 1);
+    }
+    gutter.textContent = out;
   }
 
   function renderTab() {
@@ -665,13 +767,9 @@ export function mountPreview(root, deps) {
         placeholder = true;
       } else {
         const source = tabs();
-        text = preview.mode === 'formatted'
+        text = preview.display.mode === 'formatted'
           ? (source.formatted || source.sql || '')
           : (source.sql || '');
-        // Lane L45: the two display switches shape what the tab paints. The
-        // model, the Copy / Export paths and the input box keep the original
-        // text — this is presentation only. The 原文 and 列信息 tabs stay
-        // verbatim on purpose.
         text = shapeForDisplay(text, preview.display);
         if (m.reason) {
           // A partial render keeps its SQL and explains itself below it the
@@ -693,59 +791,88 @@ export function mountPreview(root, deps) {
         placeholder = true;
       }
     }
-    body.className = placeholder ? 'code pv-tabbody muted' : 'code pv-tabbody';
-    // Only the SQL tab of a real render is coloured: the 原文 / 列信息 tabs stay
-    // verbatim, and a placeholder or an unresolved reason is plain prose.
-    const highlight = preview.tab === 'sql' && !!m.sql && !placeholder
-      && text.length <= PV_HIGHLIGHT_MAX_CHARS;
-    if (highlight) {
-      paintSql(body, text);
-    } else {
-      body.textContent = text;
-    }
+    body.className = placeholder ? 'pv-tabbody pv-placeholder' : 'pv-tabbody';
+    paintSql(body, text);
+    paintGutter(placeholder ? '' : text);
     body.scrollTop = 0;
     pvSig = signature();
   }
 
   function selectTab(key) {
     if (PV_TAB_ORDER.indexOf(key) < 0) { return; }
-    preview.tab = key;
     const buttons = tabButtons();
+    let available = false;
     for (let i = 0; i < buttons.length; i++) {
-      const on = buttons[i].getAttribute('data-pvtab') === key;
+      const tab = buttons[i].getAttribute('data-pvtab');
+      if (tab === key && !buttons[i].hidden) { available = true; }
+    }
+    preview.tab = available ? key : 'sql';
+    for (let i = 0; i < buttons.length; i++) {
+      const on = buttons[i].getAttribute('data-pvtab') === preview.tab;
       buttons[i].setAttribute('aria-selected', on ? 'true' : 'false');
     }
     renderTab();
   }
 
-  // Display mode (the reference's `modeButton`): the button names the mode a
-  // click switches to, and the `formatted` state is the one that differs from
-  // the executable SQL the host holds.
-  function modeTarget() { return preview.mode === 'formatted' ? 'normal' : 'formatted'; }
-  function updateModeControl() {
+  // Compact / multi-line (the reference's `modeButton`): the button names the
+  // mode a click switches to.
+  function updateCompactControl() {
     const button = node('pvMode');
     if (!button) { return; }
-    const labels = preview.labels || {};
-    const target = modeTarget();
-    const text = target === 'formatted'
-      ? (labels.modeFormatted || '')
-      : (labels.modeNormal || '');
-    setText(button, text);
-    button.title = labels.mode || '';
-    button.setAttribute('aria-pressed', preview.mode === 'formatted' ? 'true' : 'false');
-    button.classList.toggle('on', preview.mode === 'formatted');
+    setText(button, preview.compact ? L('multiline') : L('compact'));
+    button.setAttribute('aria-pressed', preview.compact ? 'true' : 'false');
+    button.classList.toggle('on', preview.compact);
+  }
+
+  function toggleCompact() {
+    preview.compact = !preview.compact;
+    preview.display.compact = preview.compact;
+    updateCompactControl();
+    renderTab();
+    postDisplay();
+  }
+
+  // The four display modes (normal / formatted / keyword_wrap / vertical).
+  function modeOf(state) {
+    return PV_MODES.indexOf(state) >= 0 ? state : 'normal';
+  }
+
+  function updateModeControls() {
+    const pairs = [
+      ['pvFormatPreview', 'formatted'],
+      ['pvKeywordWrap', 'keyword_wrap'],
+      ['pvVertical', 'vertical'],
+    ];
+    for (let i = 0; i < pairs.length; i++) {
+      const button = node(pairs[i][0]);
+      if (!button) { continue; }
+      const on = preview.mode === pairs[i][1];
+      button.setAttribute('aria-pressed', on ? 'true' : 'false');
+      button.classList.toggle('on', on);
+    }
   }
 
   function setMode(mode) {
-    preview.mode = mode === 'formatted' ? 'formatted' : 'normal';
-    updateModeControl();
+    preview.mode = modeOf(mode);
+    preview.display.mode = preview.mode;
+    updateModeControls();
     renderTab();
+    postDisplay();
+  }
+
+  function postDisplay() {
+    post({
+      op: 'preview-display',
+      mode: preview.mode,
+      compact: preview.compact,
+      // The pre-mode host keys, kept so a host that only knows the two
+      // switches still remembers what the reader chose.
+      keywordWrap: preview.mode === 'keyword_wrap',
+      vertical: preview.mode === 'vertical',
+    });
   }
 
   // Statement picker (lane L45) -----------------------------------------
-  // The model lists the ids this render can switch between, and which one it
-  // shows. No list (inline SQL, a log row) hides the control; a single entry
-  // disables it, so the reader never picks a statement that cannot change.
   function applyStatementPicker() {
     const wrap = node('pvStatementWrap');
     const select = node('pvStatement');
@@ -780,41 +907,9 @@ export function mountPreview(root, deps) {
       : (labels.statementNote || '');
   }
 
-  // Display switches (lane L45) ----------------------------------------
-  // Two menu toggles; both are presentation, and both report their new state
-  // to the host so the next push carries it back.
-  function applyDisplaySwitches() {
-    const labels = preview.labels || {};
-    const display = preview.display || {};
-    const pairs = [['pvKeywordWrap', 'keywordWrap', 'keywordWrapNote'],
-      ['pvVertical', 'vertical', 'verticalNote']];
-    for (let i = 0; i < pairs.length; i++) {
-      const button = node(pairs[i][0]);
-      if (!button) { continue; }
-      const on = !!display[pairs[i][1]];
-      button.setAttribute('aria-pressed', on ? 'true' : 'false');
-      button.classList.toggle('on', on);
-      setText(button, (labels[pairs[i][1]] || '') + (on ? ' \u2713' : ''));
-      button.title = labels[pairs[i][2]] || '';
-    }
-  }
-
-  function toggleDisplay(key) {
-    const display = preview.display || {};
-    display[key] = !display[key];
-    preview.display = display;
-    applyDisplaySwitches();
-    renderTab();
-    // Tell the host, so a later push (a filter, a tab switch) keeps the state.
-    post({
-      op: 'preview-display',
-      keywordWrap: !!display.keywordWrap,
-      vertical: !!display.vertical,
-    });
-  }
-
   function applyLabels() {
     const labels = preview.labels || {};
+    pvLang = pickLang(labels);
     const ids = Object.keys(PV_LABEL_KEYS);
     for (let index = 0; index < ids.length; index++) {
       setText(node(ids[index]), labels[PV_LABEL_KEYS[ids[index]]]);
@@ -829,19 +924,98 @@ export function mountPreview(root, deps) {
     }
     const closeDialog = node('pvClose');
     if (closeDialog) {
-      closeDialog.hidden = !dialogBridge;
+      closeDialog.hidden = true;
       closeDialog.title = labels.dialogNote || '';
     }
-    // Explain stays disabled: this plugin never executes user SQL (the
-    // reference runs EXPLAIN through the data source); the tooltip says so
-    // and points at the engine side.
+    // The nine button labels (the host knows none of them; `PV_TEXT` does).
+    setText(node('pvMode'), preview.compact ? L('multiline') : L('compact'));
+    setText(node('pvStmtType'), L('stmtType').replace('{0}', ''));
+    setText(node('pvCopyError'), L('copyError'));
+    setText(node('pvExplain'), labels.explain || L('explain'));
+    setText(node('pvRefresh'), labels.refresh || L('refresh'));
     const explainButton = node('pvExplain');
     if (explainButton) {
       explainButton.disabled = true;
-      explainButton.title = labels.explainNote || '';
+      explainButton.title = labels.explainNote || L('explainNote');
     }
     const moreButton = node('pvMore');
     if (moreButton) { moreButton.title = labels.moreNote || ''; }
+    // Meta labels: this module's own, in the host's language.
+    setText(node('pvKindLabel'), L('kind'));
+    setText(node('pvTableLabel'), L('table'));
+    // Preset fold.
+    setText(node('pvPresetSummary'), L('preset'));
+    setText(node('pvPresetDefault'), L('presetDefault'));
+    const presetSelect = node('pvPresetSelect');
+    const presetManage = node('pvPresetManage');
+    if (presetSelect) {
+      presetSelect.disabled = true;
+      presetSelect.title = L('presetManageNote');
+    }
+    if (presetManage) {
+      presetManage.disabled = true;
+      presetManage.title = L('presetManageNote');
+      presetManage.setAttribute('aria-label', L('presetManageNote'));
+    }
+    // Condition section.
+    setText(node('pvConditionsTitle'), labels.conditions || L('conditions'));
+    setText(node('pvConditionsHint'), labels.conditionsHint || '');
+    setText(node('pvConditionsClear'), L('clear'));
+    const clearButton = node('pvConditionsClear');
+    if (clearButton) {
+      clearButton.title = L('clearNote');
+      clearButton.setAttribute('aria-label', L('clearNote'));
+    }
+    updateConditionsToggle();
+    // Parameter section.
+    setText(node('pvParamsTitle'), labels.params || L('paramsSection'));
+    setText(node('pvParamsHint'), labels.paramsHint || '');
+    // The "more" fold's ten entries.
+    const moreItems = [
+      ['pvRollback', labels.rollback || L('moreRollback'), labels.rollbackNote || L('rollbackNote')],
+      ['pvSwitchDataSource', L('moreSwitchDataSource'), L('switchDataSourceNote')],
+      ['pvImportParams', labels.importClipboard || L('moreImportParams'), ''],
+      ['pvDiff', labels.diff || L('moreDiff'), labels.diffNote || ''],
+      ['pvShare', labels.share || L('moreShare'), labels.shareNote || ''],
+      ['pvExport', L('morePortableExport'), L('portableExportNote')],
+      ['pvReplayExport', L('moreReplayExport'), L('replayExportNote')],
+      ['pvAiContext', L('moreAiContext'), L('aiContextNote')],
+      ['pvAiContextIds', L('moreAiContextIds'), L('aiContextNote')],
+      ['pvDmlImpact', L('moreDmlImpact'), L('dmlImpactNote')],
+    ];
+    for (let i = 0; i < moreItems.length; i++) {
+      const button = node(moreItems[i][0]);
+      if (!button) { continue; }
+      button.textContent = moreItems[i][1];
+      button.title = moreItems[i][2];
+      button.setAttribute('aria-label', moreItems[i][2] || moreItems[i][1]);
+    }
+    const rollbackBtn = node('pvRollback');
+    if (rollbackBtn) {
+      rollbackBtn.disabled = true;
+      rollbackBtn.title = labels.rollbackNote || L('rollbackNote');
+    }
+    const qualifyBtn = node('pvQualify');
+    if (qualifyBtn) {
+      qualifyBtn.textContent = labels.qualify || L('qualifyNote');
+      qualifyBtn.disabled = true;
+      qualifyBtn.title = labels.qualifyNote || '';
+    }
+    // The dialog's fixed action row.
+    setText(node('pvExecute'), labels.execute || L('executeNote'));
+    const executeButton = node('pvExecute');
+    if (executeButton) {
+      executeButton.disabled = true;
+      executeButton.title = labels.executeNote || L('executeNote');
+    }
+    setText(node('pvCopySql'), labels.copySql || L('copySql'));
+    setText(node('pvCopyClose'), L('copySqlAndClose'));
+    const copyClose = node('pvCopyClose');
+    if (copyClose) {
+      copyClose.title = L('copyCloseNote');
+      copyClose.setAttribute('aria-label', L('copyCloseNote'));
+    }
+    setText(node('pvCancel'), L('cancel'));
     const bannerClose = node('pvBannerClose');
     if (bannerClose) {
       bannerClose.textContent = '\u00d7';
@@ -849,46 +1023,15 @@ export function mountPreview(root, deps) {
       bannerClose.setAttribute('aria-label', labels.bannerDismiss || '');
     }
     setText(node('pvInputHint'), labels.hintInput);
-    setText(node('pvParamsTitle'), labels.params);
-    updateModeControl();
+    setText(node('pvRebindBtn'), labels.rebind || '');
+    setText(node('pvImportBtn'), labels.importClipboard || '');
     const buttons = tabButtons();
     for (let tabIndex = 0; tabIndex < buttons.length; tabIndex++) {
       const key = buttons[tabIndex].getAttribute('data-pvtab');
       buttons[tabIndex].textContent = labels[PV_TAB_KEYS[key]] || key;
     }
-    // Lane L27: the editable-parameter actions and the rollback entry.
-    const rebindBtn = node('pvRebindBtn');
-    if (rebindBtn) { setText(rebindBtn, labels.rebind || ''); }
-    const importBtn = node('pvImportBtn');
-    if (importBtn) { setText(importBtn, labels.importClipboard || ''); }
-    const rollbackBtn = node('pvRollback');
-    if (rollbackBtn) {
-      rollbackBtn.textContent = labels.rollback || '';
-      // The workbench carries no table/primary-key metadata: a rollback plan
-      // can never be built here, so the entry stays disabled and explains
-      // itself instead of guessing a table.
-      rollbackBtn.disabled = true;
-      rollbackBtn.title = labels.rollbackNote || '';
-    }
-    // Lane L44: diff works, share degrades to a local copy, and both say so in
-    // their tooltips; qualify stays disabled because the renderer, not the
-    // page, would have to resolve each column's table.
-    const diffBtn = node('pvDiff');
-    if (diffBtn) {
-      diffBtn.textContent = labels.diff || '';
-      diffBtn.title = labels.diffNote || '';
-    }
-    const shareBtn = node('pvShare');
-    if (shareBtn) {
-      shareBtn.textContent = labels.share || '';
-      shareBtn.title = labels.shareNote || '';
-    }
-    const qualifyBtn = node('pvQualify');
-    if (qualifyBtn) {
-      qualifyBtn.textContent = labels.qualify || '';
-      qualifyBtn.disabled = true;
-      qualifyBtn.title = labels.qualifyNote || '';
-    }
+    updateCompactControl();
+    updateModeControls();
     updateParamsActions();
   }
 
@@ -910,6 +1053,24 @@ export function mountPreview(root, deps) {
     return params.join('\u0001');
   }
 
+  /** Middle-ellipsis for the name column: the head and tail both identify the
+   *  parameter, so a very long `#{...}` keeps both ends; the full name is the
+   *  tooltip. */
+  function middleEllipsis(text, limit) {
+    const value = String(text == null ? '' : text);
+    const max = limit || 64;
+    if (value.length <= max) { return value; }
+    const head = Math.ceil((max - 1) / 2);
+    const tail = max - 1 - head;
+    return value.slice(0, head) + '\u2026' + value.slice(value.length - tail);
+  }
+
+  function placeholderFor(meta) {
+    if (meta && meta.placeholder) { return meta.placeholder; }
+    const key = meta ? PV_PLACEHOLDER_KEYS[meta.kind] : '';
+    return key ? L(key) : '';
+  }
+
   function buildParams() {
     const host = node('pvParamsList');
     if (!host) { return; }
@@ -925,58 +1086,49 @@ export function mountPreview(root, deps) {
       row.className = 'pv-param-row' + (meta && meta.injected ? ' pv-param-injected' : '');
       // The reference's `#source` label beside the value box; the ordinal is
       // the fallback for a model that carries values only.
-      const name = doc.createElement('span');
-      name.className = 'pv-param-name';
-      name.textContent = meta && meta.name
+      const fullName = meta && meta.name
         ? '#' + meta.name
         : (labels.paramsName || '').replace('{0}', String(i + 1));
-      name.title = meta && meta.name
-        ? '#' + meta.name + (labels.paramsHint ? ' \u2014 ' + labels.paramsHint : '')
-        : (labels.paramsHint || '');
+      const name = doc.createElement('span');
+      name.className = 'pv-param-name';
+      name.textContent = middleEllipsis(fullName, 64);
+      name.title = fullName + (labels.paramsHint ? ' \u2014 ' + labels.paramsHint : '');
       const cell = doc.createElement('span');
       cell.className = 'pv-param-cell';
       const input = doc.createElement('input');
       input.type = 'text';
       input.className = 'pv-param-input';
       input.value = meta ? (meta.value || '') : params[i];
-      if (meta && meta.placeholder) { input.placeholder = meta.placeholder; }
+      const placeholder = placeholderFor(meta);
+      if (placeholder) { input.placeholder = placeholder; }
       input.autocomplete = 'off';
       input.spellcheck = false;
       cell.appendChild(input);
-      // The class the statement (or a heuristic) gave the parameter; the
-      // warning is a hint only, the value renders exactly as typed.
-      if (meta && meta.kind && meta.kind !== 'unknown') {
-        const chip = doc.createElement('span');
-        chip.className = 'pv-param-kind';
-        chip.textContent = meta.kind;
-        chip.title = (labels.paramsHint || '') + (meta.kindSource
-          ? ' (' + meta.kindSource + ')' : '');
-        cell.appendChild(chip);
-      }
+      // The warning mark appears only when the value does not fit the type the
+      // statement declared (or inferred); it is a hint, never a gate.
       if (meta && meta.warning) {
         const warn = doc.createElement('span');
         warn.className = 'pv-param-warn';
         warn.textContent = '\u26a0';
         warn.title = meta.warning;
+        warn.setAttribute('aria-label', meta.warning);
         cell.appendChild(warn);
       }
       row.appendChild(name);
       row.appendChild(cell);
       host.appendChild(row);
     }
-    if (count === 0) {
+    const conditions = Array.isArray(m.conditions) ? m.conditions : [];
+    if (count === 0 && conditions.length === 0) {
       const empty = doc.createElement('div');
       empty.className = 'pv-params-empty';
-      empty.textContent = labels.paramsEmpty || '';
+      empty.textContent = labels.paramsEmpty || L('paramsEmpty');
       host.appendChild(empty);
     }
     pvParamsSig = paramSignature(parameters, params);
   }
 
   // Dynamic conditions (C07) --------------------------------------------
-  // `model.conditions` lists the statement's `<if>` / `<when>` nodes with the
-  // switch the render used. A tick sends `preview-conditions` with the id → new
-  // truth map; the host re-renders and the next push carries the new SQL.
   function conditionSignature(conditions) {
     const parts = [];
     for (let i = 0; i < conditions.length; i++) {
@@ -994,17 +1146,33 @@ export function mountPreview(root, deps) {
     post({ op: 'preview-conditions', conditions: map });
   }
 
+  /** The header's single toggle names the action a click performs: with every
+   *  branch on it reads "全不选", otherwise "全选" (the reference's T-SelToggle). */
+  function updateConditionsToggle() {
+    const button = node('pvConditionsAll');
+    if (!button) { return; }
+    const conditions = Array.isArray((preview.model || {}).conditions)
+      ? preview.model.conditions : [];
+    const boxes = conditionBoxes();
+    let all = conditions.length > 0 && boxes.length > 0;
+    for (let i = 0; i < boxes.length; i++) {
+      if (!boxes[i].checked) { all = false; }
+    }
+    setText(button, all ? L('selectNone') : L('selectAll'));
+  }
+
   function buildConditions() {
     const block = node('pvConditions');
     if (!block) { return; }
     const labels = preview.labels || {};
     const conditions = Array.isArray((preview.model || {}).conditions)
       ? preview.model.conditions : [];
-    setText(node('pvConditionsTitle'), labels.conditions || '');
+    setText(node('pvConditionsTitle'), labels.conditions || L('conditions'));
     setText(node('pvConditionsHint'), labels.conditionsHint || '');
     if (conditions.length === 0) {
       block.hidden = true;
       pvConditionsSig = null;
+      updateConditionsToggle();
       return;
     }
     block.hidden = false;
@@ -1018,6 +1186,7 @@ export function mountPreview(root, deps) {
         const condition = conditions[i] || {};
         boxes[i].checked = !!condition.enabled;
       }
+      updateConditionsToggle();
       return;
     }
     while (host.firstChild) { host.removeChild(host.firstChild); }
@@ -1033,6 +1202,7 @@ export function mountPreview(root, deps) {
       box.checked = !!condition.enabled;
       box.setAttribute('data-cond-id', condition.id || '');
       box.addEventListener('change', function () {
+        updateConditionsToggle();
         const id = box.getAttribute('data-cond-id');
         if (!id) { return; }
         const map = {};
@@ -1048,6 +1218,7 @@ export function mountPreview(root, deps) {
       host.appendChild(row);
     }
     pvConditionsSig = sig;
+    updateConditionsToggle();
   }
 
   // Rebind / Import availability: no values -> nothing to rebind; no clipboard
@@ -1062,7 +1233,9 @@ export function mountPreview(root, deps) {
     const rebindBtn = node('pvRebindBtn');
     if (rebindBtn) {
       rebindBtn.disabled = count === 0;
-      rebindBtn.title = count === 0 ? (labels.paramsEmpty || '') : (labels.paramsHint || '');
+      rebindBtn.title = count === 0
+        ? (labels.paramsEmpty || L('paramsEmpty'))
+        : (labels.paramsHint || '');
     }
     const importBtn = node('pvImportBtn');
     if (importBtn) {
@@ -1071,15 +1244,17 @@ export function mountPreview(root, deps) {
       importBtn.disabled = blocked || count === 0;
       importBtn.title = blocked
         ? (labels.clipboardMissing || '')
-        : (count === 0 ? (labels.paramsEmpty || '') : '');
+        : (count === 0 ? (labels.paramsEmpty || L('paramsEmpty')) : '');
+    }
+    const moreImport = node('pvImportParams');
+    if (moreImport) {
+      const api = !!(navigator.clipboard && navigator.clipboard.readText);
+      moreImport.disabled = count === 0 || !api || clipboardMissing;
     }
     setText(node('pvParamsHint'), labels.paramsHint);
   }
 
-  // Degradation banner (L35b): the reference's honesty strip. It appears while
-  // the render is `unresolved` (the host sets `degraded`), carries the reasons
-  // verbatim — every line starts with its message key — and the reader can
-  // dismiss it until the next render replaces the model.
+  // Degradation banner (L35b): the reference's honesty strip.
   function applyBanner() {
     const banner = node('pvBanner');
     if (!banner) { return; }
@@ -1107,25 +1282,38 @@ export function mountPreview(root, deps) {
     const labels = preview.labels || {};
     const name = dialect.name || m.dialect || '';
     const suffix = dialect.isDefault ? (labels.dialectDefault || '') : '';
-    setText(node('pvDialectChip'), (labels.dialect || '') + ': ' + name + suffix);
+    setText(node('pvDialectChip'), (labels.dialect || L('dialect')) + ' ' + name + suffix);
     const chip = node('pvDialectChip');
     if (chip) { chip.title = dialect.capabilities || ''; }
-    setText(node('pvDialectHint'), labels.dialectHint);
-    // The source line (statement id / file) is meta, like the reference's
-    // `Type` / `Table` segments; hidden when the render carries none.
+    // Type: the input kind the render came from (SQL / mapper XML).
+    const kindText = m.kind === 'sql' ? L('kindSql')
+      : m.kind === 'xml' ? L('kindXml') : (m.kind || '');
+    setText(node('pvKindValue'), kindText);
+    const kindWrap = node('pvKindWrap');
+    if (kindWrap) { kindWrap.hidden = !kindText; }
+    // The table segment has no source in this render; it stays hidden rather
+    // than guessing a table out of the statement.
+    const table = m.table || '';
+    setText(node('pvTableValue'), table);
+    const tableWrap = node('pvTableWrap');
+    if (tableWrap) { tableWrap.hidden = !table; }
+    // The source line (statement id / file) follows the reference's meta row.
     const source = node('pvSource');
     if (source) {
       source.textContent = m.source || '';
       source.hidden = !m.source;
       source.title = m.source || '';
     }
-    // Performance advice has its own row under the meta line, so a long advice
-    // never eats the meta width. `advice` may be a "no findings" line, which is
-    // still information; an empty string hides the row.
+    // Performance advice has its own row under the meta line.
     const perfRow = node('pvPerfRow');
     const advice = node('pvAdvice');
     if (perfRow) { perfRow.hidden = !m.advice; }
     if (advice) { advice.textContent = m.advice || ''; }
+    // The error-copy entry exists only while there is error text to copy.
+    const errorButton = node('pvCopyError');
+    if (errorButton) {
+      errorButton.hidden = !(m.reason && m.reason.trim());
+    }
 
     const badge = node('pvConfidence');
     if (badge) {
@@ -1142,23 +1330,45 @@ export function mountPreview(root, deps) {
     // that carries the same list must leave the user's edits alone.
     if (paramSignature(parameters, params) !== pvParamsSig) { buildParams(); }
     updateParamsActions();
-    // C07: the condition list follows every push (an unchanged list only syncs
-    // its checkboxes).
     buildConditions();
+    // The "参数" header follows the condition section (the reference only adds
+    // it when another section precedes it), and the preset fold exists only
+    // while there is a statement to save values for.
+    const conditions = Array.isArray(m.conditions) ? m.conditions : [];
+    const paramCount = parameters.length || params.length;
+    const paramsHead = node('pvParamsHead');
+    if (paramsHead) { paramsHead.hidden = conditions.length === 0 || paramCount === 0; }
+    const preset = node('pvPresetBlock');
+    if (preset) { preset.hidden = !m.sql; }
 
+    // Conditional tabs: SQL always, 原文 when the source differs, 列信息 when
+    // the render supplied columns.
+    const raw = tabs().raw || '';
+    const sql = tabs().sql || '';
     const columns = tabs().columns || '';
+    const tabStrip = node('pvTabs');
+    const showRaw = !!raw && raw !== sql;
+    const showColumns = !!columns;
     const buttons = tabButtons();
+    let availableCount = 0;
     for (let tabIndex = 0; tabIndex < buttons.length; tabIndex++) {
       const key = buttons[tabIndex].getAttribute('data-pvtab');
+      const show = key === 'sql' || (key === 'raw' && showRaw)
+        || (key === 'columns' && showColumns);
+      buttons[tabIndex].hidden = !show;
+      if (show) { availableCount += 1; }
       buttons[tabIndex].title = key === 'columns' && !columns
         ? (labels.columnsEmpty || '') : '';
     }
+    if (tabStrip) { tabStrip.hidden = availableCount <= 1; }
+    if (preview.tab !== 'sql') {
+      const current = root.querySelector('.pv-tab[data-pvtab="' + preview.tab + '"]');
+      if (!current || current.hidden) { selectTab('sql'); }
+    }
     applyBanner();
-    // Lane L45: the statement picker and the two display toggles follow every
-    // model push, so switching statements or toggling a switch never needs a
-    // second round trip.
     applyStatementPicker();
-    applyDisplaySwitches();
+    updateCompactControl();
+    updateModeControls();
   }
 
   /**
@@ -1171,14 +1381,20 @@ export function mountPreview(root, deps) {
     preview.model = tab.model || {};
     preview.labels = tab.labels || {};
     preview.dialect = tab.dialect || {};
-    // Lane L45: the display switches travel with every push. Absent (an older
-    // host, the standalone page's first paint) keeps what the page has, so a
-    // missing field never resets a choice the reader made.
+    // The display state travels with every push. Absent (an older host, the
+    // standalone page's first paint) keeps what the page has, so a missing
+    // field never resets a choice the reader made.
     if (tab.display) {
-      preview.display = {
-        keywordWrap: !!tab.display.keywordWrap,
-        vertical: !!tab.display.vertical,
-      };
+      // The mode shape is current; the two legacy switches (an older host)
+      // still map onto it so nothing the reader chose is lost.
+      let mode = tab.display.mode;
+      if (!mode) {
+        mode = tab.display.vertical ? 'vertical'
+          : tab.display.keywordWrap ? 'keyword_wrap' : 'normal';
+      }
+      preview.mode = modeOf(mode);
+      preview.compact = !!tab.display.compact;
+      preview.display = { mode: preview.mode, compact: preview.compact };
     }
     applyLabels();
     // A render that rewrote the input also re-arms the degradation strip: a
@@ -1193,12 +1409,12 @@ export function mountPreview(root, deps) {
     }
     applyInputHint();
     setText(node('pvStatus'), tab.status ? tab.status.text : '');
+    updateFooter();
     const sig = signature();
     if (sig !== pvSig) { renderTab(); }
   }
 
-  // "更多" fold (L35b): Export and Rollback live behind one button, the way the
-  // reference folds its low-frequency actions into `panel.more`.
+  // "更多" fold: the reference's low-frequency actions behind one button.
   function closeMore() {
     const menu = node('pvMoreMenu');
     const more = node('pvMore');
@@ -1239,16 +1455,24 @@ export function mountPreview(root, deps) {
   });
   on('pvClose', closeDialog);
   on('pvCopy', function () { post({ op: 'preview-copy' }); });
+  // The dialog's fixed action row.
+  on('pvCopySql', function () { post({ op: 'preview-copy' }); });
+  on('pvCopyClose', function () {
+    post({ op: 'preview-copy' });
+    closeDialog();
+  });
+  on('pvCancel', closeDialog);
+  on('pvCopyError', function () { closeMore(); post({ op: 'preview-copy-error' }); });
   on('pvExport', function () { closeMore(); post({ op: 'preview-export' }); });
   // Diff / Share (lane L44): both close the fold first, so the menu never sits
   // over the diff tab the host opens.
   on('pvDiff', function () { closeMore(); post({ op: 'preview-diff' }); });
   on('pvShare', function () { closeMore(); post({ op: 'preview-share' }); });
-  // Format (lane C): in the reference `formatSql()` sets the result pane's
-  // FORMAT display mode; it never rewrites the source text on the other half
-  // of the splitter. This button does the same (the input toolbar's Format
-  // still formats what the user typed).
-  on('pvFormatPreview', function () { setMode('formatted'); });
+  // Format in the result toolbar selects the reference's display mode; it never
+  // rewrites the source text on the input half.
+  on('pvFormatPreview', function () {
+    setMode(preview.mode === 'formatted' ? 'normal' : 'formatted');
+  });
   // Refresh (L35b): the reference re-runs the render on the pane's current
   // input; the host re-parses it (and falls back to the model's own text when
   // the box is empty), so a stale render is one click away from fresh.
@@ -1292,18 +1516,15 @@ export function mountPreview(root, deps) {
     }
   });
 
-  // Lane L27: rebind the edited values into the SQL (no automatic rebind after
-  // an import), and import a comma/newline separated list from the clipboard
-  // into the parameter table.
+  // Lane L27: rebind the edited values into the SQL.
   on('pvRebindBtn', function () {
     const inputs = paramInputs();
     const values = [];
     for (let i = 0; i < inputs.length; i++) { values.push(inputs[i].value); }
     post({ op: 'preview-params', values: values });
   });
-  // C07: select all / none. The map is complete, so the host applies exactly
-  // what the page shows; the checkboxes are updated locally at once so the
-  // click feels immediate and the push only confirms it.
+  // C07: the section header's toggle flips every branch at once; the map is
+  // complete, so the host applies exactly what the page shows.
   function setAllConditions(value) {
     const conditions = (preview.model || {}).conditions || [];
     if (!conditions.length) { return; }
@@ -1313,11 +1534,31 @@ export function mountPreview(root, deps) {
     }
     const boxes = conditionBoxes();
     for (let i = 0; i < boxes.length; i++) { boxes[i].checked = value; }
+    updateConditionsToggle();
     postConditions(map);
   }
-  on('pvConditionsAll', function () { setAllConditions(true); });
-  on('pvConditionsNone', function () { setAllConditions(false); });
-  on('pvImportBtn', function () {
+  on('pvConditionsAll', function () {
+    const conditions = (preview.model || {}).conditions || [];
+    if (!conditions.length) { return; }
+    const boxes = conditionBoxes();
+    let all = boxes.length > 0;
+    for (let i = 0; i < boxes.length; i++) {
+      if (!boxes[i].checked) { all = false; }
+    }
+    setAllConditions(!all);
+  });
+  // Clear the parameter values; the reference's `panel.param.clear` does the
+  // same in its condition header. The branch switches are untouched.
+  on('pvConditionsClear', function () {
+    const inputs = paramInputs();
+    for (let i = 0; i < inputs.length; i++) { inputs[i].value = ''; }
+    const values = [];
+    for (let i = 0; i < inputs.length; i++) { values.push(''); }
+    post({ op: 'preview-params', values: values });
+  });
+  on('pvImportBtn', function () { importFromClipboard(); });
+  on('pvImportParams', function () { closeMore(); importFromClipboard(); });
+  function importFromClipboard() {
     if (!(navigator.clipboard && navigator.clipboard.readText)) {
       clipboardMissing = true;
       updateParamsActions();
@@ -1332,6 +1573,7 @@ export function mountPreview(root, deps) {
       }
       if (values.length === 0) {
         setText(node('pvStatus'), (preview.labels || {}).importFailed || '');
+        updateFooter();
         return;
       }
       const inputs = paramInputs();
@@ -1340,13 +1582,15 @@ export function mountPreview(root, deps) {
       }
       const note = ((preview.labels || {}).imported || '').replace('{0}', String(values.length));
       setText(node('pvStatus'), note);
+      updateFooter();
     }).catch(function (error) {
       const message = (error && error.message) ? error.message : '';
       if (error && error.name === 'NotAllowedError') { clipboardMissing = true; }
       updateParamsActions();
       setText(node('pvStatus'), ((preview.labels || {}).importFailed || '').replace('{0}', message));
+      updateFooter();
     });
-  });
+  }
   on('pvRollback', function () { post({ op: 'preview-rollback' }); });
 
   // Statement picker (lane L45): the host re-renders the chosen id out of the
@@ -1357,13 +1601,14 @@ export function mountPreview(root, deps) {
       post({ op: 'preview-statement', id: statementSelect.value });
     });
   }
-  // Display switches (lane L45): each toggles locally and reports the pair.
-  on('pvKeywordWrap', function () { closeMore(); toggleDisplay('keywordWrap'); });
-  on('pvVertical', function () { closeMore(); toggleDisplay('vertical'); });
-
-  // Display mode toggle: one click flips between the executable text and its
-  // formatted form; the button label always names the target mode.
-  on('pvMode', function () { setMode(modeTarget()); });
+  // Display controls (lane L45 + this lane's mode buttons).
+  on('pvKeywordWrap', function () {
+    setMode(preview.mode === 'keyword_wrap' ? 'normal' : 'keyword_wrap');
+  });
+  on('pvVertical', function () {
+    setMode(preview.mode === 'vertical' ? 'normal' : 'vertical');
+  });
+  on('pvMode', function () { toggleCompact(); });
 
   const innerTabs = tabButtons();
   for (let index = 0; index < innerTabs.length; index++) {
@@ -1439,9 +1684,8 @@ export function mountPreview(root, deps) {
     });
   }
 
-  // Horizontal splitter (parameters | result tabs): the reference's
-  // `OnePixelSplitter(false, 0.3f)`. Same pointer + keyboard handling as the
-  // vertical one, so a narrow panel can still give the SQL the larger half.
+  // Horizontal splitter (parameters | SQL editor): the reference's
+  // `OnePixelSplitter(false, 0.3f)`. Same pointer + keyboard handling.
   const paramsPane = root.querySelector('.pv-params');
   const hsplitter = node('pvHSplitter');
   let hDragging = false;
@@ -1500,6 +1744,7 @@ export function mountPreview(root, deps) {
 
   if (deps.labels) { applyLabels(); }
   applyInputHint();
+  updateFooter();
 
   return {
     /** The mounted element (the tab's host in the panel page). */
@@ -1509,6 +1754,16 @@ export function mountPreview(root, deps) {
     /** The op sender this mount uses (the panel page's own). */
     post: post,
   };
+}
+
+/** The host's language, judged by its own localised labels. */
+function pickLang(labels) {
+  const values = Object.keys(labels || {});
+  for (let i = 0; i < values.length; i++) {
+    const value = labels[values[i]];
+    if (typeof value === 'string' && /[\u4e00-\u9fff]/.test(value)) { return 'zh'; }
+  }
+  return 'en';
 }
 
 export default mountPreview;

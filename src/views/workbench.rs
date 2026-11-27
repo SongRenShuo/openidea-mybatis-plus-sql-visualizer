@@ -2358,54 +2358,44 @@ mod tests {
 
     #[test]
     fn the_preview_page_wears_the_reference_layout() {
-        // Lane L35b: the preview half follows `SqlPreviewPanel` — meta row
-        // (dialect chip + advice), toolbar (Copy SQL / Format / Display mode /
-        // Explain / Refresh), the splitter columns (parameters left, result
-        // tabs right), then a status-only footer. The duplicate bottom Copy
-        // SQL and the disabled Execute are gone: Explain replaces the latter
-        // in the toolbar and Export / Rollback fold behind "More".
-        //
-        // Lane L42: the workbench moved out of the panel page into the module
-        // `web/preview.js` (with `web/preview.css`); the layout assertions
-        // follow it there, and the panel page keeps only the mount host.
+        // The preview half follows the IntelliJ edition's `SqlPreviewPanel`:
+        // the meta row (dialect / type / table / source) with the nine text
+        // toolbar entries on its right, the performance-advice line under it,
+        // the degradation strip, the two columns (parameters 30 %, SQL 70 %),
+        // the status line, and — in the dialog mount only — the fixed action
+        // row. The tab mount keeps the input half above the splitter.
         let page = include_str!("../../web/log-panel.html");
         let module = include_str!("../../web/preview.js");
         let css = include_str!("../../web/preview.css");
-        // The input half exists and holds the parameter list: both lookups are
-        // the assertion, so the spans themselves are not kept.
-        let _pane_start = module.find("id=\"pvPaneTop\"").expect("the preview markup");
+        // The input half exists (tab mount): statement box plus its actions.
+        let _pane_start = module.find("id=\"pvPaneTop\"").expect("the input half");
         let _pane_end = module
             .find("id=\"pvParamsList\"")
             .expect("the parameter list");
 
-        // Vertical order: meta row, toolbar, degradation strip, columns. The
-        // input half above has a toolbar of its own, so the preview toolbar is
-        // the first one *after* the meta row.
+        // Vertical order: meta + toolbar row, perf row, degradation strip,
+        // columns. The input half above has a toolbar of its own, so the
+        // preview toolbar is the first exact `class="pv-toolbar"` after the
+        // meta row.
         let meta = module.find("class=\"pv-meta\"").expect("meta row");
         let toolbar = meta
             + module[meta..]
                 .find("class=\"pv-toolbar\"")
                 .expect("preview toolbar");
+        let perf = module.find("id=\"pvPerfRow\"").expect("perf row");
         let banner = module.find("id=\"pvBanner\"").expect("degradation strip");
         let cols = module.find("class=\"pv-cols\"").expect("split columns");
-        assert!(meta < toolbar, "the meta row sits above the toolbar");
-        assert!(toolbar < banner, "the strip sits under the toolbar");
+        assert!(meta < toolbar, "the meta row shares the toolbar row");
+        assert!(toolbar < perf, "the perf row follows the meta/toolbar row");
+        assert!(perf < banner, "the perf row sits above the strip");
         assert!(banner < cols, "the strip keeps clear of the columns");
 
-        // Lane C: the performance advice left the meta row for a line of its
-        // own (the reference's perf row), directly under the meta/toolbar row
-        // and above the degradation strip.
-        let perf = module.find("id=\"pvPerfRow\"").expect("perf row");
-        assert!(meta < perf, "the perf row sits under the meta row");
-        assert!(perf < toolbar, "the perf row keeps the toolbar row clear");
-        assert!(perf < banner, "the perf row sits above the strip");
-
-        // Toolbar order, the reference's entries plus "More": copy / format /
-        // display mode / keyword wrap / vertical / explain / refresh / more.
+        // Toolbar order: the reference's nine entries, all text buttons.
         let order = [
-            "id=\"pvCopy\"",
-            "id=\"pvFormatPreview\"",
+            "id=\"pvStmtType\"",
+            "id=\"pvCopyError\"",
             "id=\"pvMode\"",
+            "id=\"pvFormatPreview\"",
             "id=\"pvKeywordWrap\"",
             "id=\"pvVertical\"",
             "id=\"pvExplain\"",
@@ -2420,12 +2410,11 @@ mod tests {
             assert!(at >= previous, "{id} is out of the reference order");
             previous = at;
         }
-        // Lane C: the display-mode control is the reference's toggle button
-        // (its label names the target mode), and keyword wrap / vertical are
-        // direct toolbar entries rather than entries of the "More" fold.
+        // The compact toggle names the mode a click switches to; the three display
+        // buttons select the reference's four modes.
         assert!(
             module.contains("id=\"pvMode\" class=\"btn pv-btn-text\""),
-            "the mode toggle is a text button"
+            "the compact toggle is a text button"
         );
         assert!(
             module.contains("id=\"pvKeywordWrap\" class=\"btn pv-btn-text\""),
@@ -2436,13 +2425,13 @@ mod tests {
             "vertical is in the toolbar"
         );
         assert!(
-            module.contains("on('pvMode', function () { setMode(modeTarget()); });"),
-            "the mode button toggles"
+            module.contains("on('pvMode', function () { toggleCompact(); });"),
+            "the compact button toggles"
         );
-        // Format in the result toolbar is the reference's display-mode switch,
+        // Format in the result toolbar selects the formatted display mode,
         // not a rewrite of the source text on the input half.
         assert!(
-            module.contains("on('pvFormatPreview', function () { setMode('formatted'); });"),
+            module.contains("setMode(preview.mode === 'formatted' ? 'normal' : 'formatted');"),
             "result Format switches the display mode"
         );
         // Explain is disabled and explains itself; the fold holds Export and
@@ -2455,11 +2444,22 @@ mod tests {
             module.contains("explainButton.title = labels.explainNote"),
             "the reason"
         );
-        assert!(module.contains("id=\"pvExport\""), "Export lives in More");
-        assert!(
-            module.contains("id=\"pvRollback\""),
-            "Rollback lives in More"
-        );
+        // The "More" fold holds the reference's ten low-frequency entries in
+        // order; Qualify is this build's extra disabled entry, out of sight.
+        for id in [
+            "id=\"pvRollback\"",
+            "id=\"pvSwitchDataSource\"",
+            "id=\"pvImportParams\"",
+            "id=\"pvDiff\"",
+            "id=\"pvShare\"",
+            "id=\"pvExport\"",
+            "id=\"pvReplayExport\"",
+            "id=\"pvAiContext\"",
+            "id=\"pvAiContextIds\"",
+            "id=\"pvDmlImpact\"",
+        ] {
+            assert!(module.contains(id), "{id} lives in More");
+        }
         assert!(module.contains("role=\"menu\""), "the fold is a menu");
         // Lane L44: the fold gained Diff and Share (both live) and Qualify (the
         // one entry the renderer would have to provide, so it is disabled with
@@ -2497,9 +2497,9 @@ mod tests {
             css.contains(".pv-root .pv-hsplitter"),
             "the splitter has its own rule"
         );
-        // Lane C: the meta row names where the render came from, and the SQL
-        // tab is syntax-coloured (the reference's editor look), while the
-        // 原文 / 列信息 tabs and placeholders stay plain.
+        // The meta row names the dialect, type, table slot and source; the SQL area
+        // is a line-number gutter beside the code pane, whose conditional tabs
+        // keep 原文 / 列信息 plain.
         assert!(
             module.contains("id=\"pvSource\""),
             "the meta row carries the source"
@@ -2508,6 +2508,14 @@ mod tests {
             module.contains("source.textContent = m.source || '';"),
             "the source is painted"
         );
+        assert!(
+            module.contains("id=\"pvKindWrap\""),
+            "the meta row carries the type"
+        );
+        assert!(
+            module.contains("id=\"pvTableWrap\""),
+            "the meta row keeps the table slot"
+        );
         // The input hint is guidance for an empty box only, as in the
         // reference's standalone workbench.
         assert!(
@@ -2515,20 +2523,16 @@ mod tests {
             "the input hint hides once there is text"
         );
         assert!(
-            module.contains("export function tokenizeSql"),
-            "the SQL tokenizer exists"
+            module.contains("id=\"pvGutter\""),
+            "the SQL area has a line-number gutter"
         );
         assert!(
-            module.contains("paintSql(body, text);"),
-            "the SQL tab is painted from tokens"
+            module.contains("id=\"pvTabBody\""),
+            "the SQL body is the code pane"
         );
         assert!(
-            module.contains("text.length <= PV_HIGHLIGHT_MAX_CHARS"),
-            "very large statements stay plain to keep the panel responsive"
-        );
-        assert!(
-            css.contains(".pv-root .pv-tok-kw"),
-            "the token colours have their own rules"
+            css.contains(".pv-root .pv-gutter"),
+            "the gutter has its own rule"
         );
         assert!(
             css.contains(".pv-root .pv-params {"),
@@ -2544,7 +2548,8 @@ mod tests {
         }
 
         // Editable parameters in two columns (name, value) — the reference's
-        // name-beside-input layout — and the empty state.
+        // name-beside-input layout — plus the preset fold, the condition
+        // section's batch actions and the empty state.
         assert!(
             module.contains("class=\"pv-params-actions\""),
             "Rebind / Import stay"
@@ -2556,31 +2561,67 @@ mod tests {
         assert!(css.contains(".pv-param-name"), "the name column");
         assert!(css.contains("pv-param-input"), "the value input");
         assert!(
-            css.contains("grid-template-columns: minmax(48px, 38%) minmax(0, 1fr)"),
-            "name and value share the row"
+            css.contains("grid-template-columns: minmax(80px, auto) minmax(0, 1fr)"),
+            "the name column adapts between 80 and 480 px"
         );
+        assert!(css.contains("max-width: 480px"), "the name column cap");
         assert!(css.contains("pv-params-empty"), "the no-parameter state");
+        assert!(
+            module.contains("middleEllipsis"),
+            "a very long parameter name keeps both ends"
+        );
+        assert!(module.contains("id=\"pvPresetBlock\""), "the preset fold");
+        assert!(
+            module.contains("id=\"pvPresetManage\""),
+            "the preset management entry"
+        );
+        assert!(
+            module.contains("presetManage.disabled = true"),
+            "no preset backend, so the controls say so"
+        );
+        assert!(
+            module.contains("id=\"pvConditionsClear\""),
+            "the condition section's clear action"
+        );
+        assert!(
+            module.contains("updateConditionsToggle"),
+            "select all / none is one flipping toggle"
+        );
         assert!(
             module.contains("labels.columnsEmpty"),
             "the columns tab keeps its empty state text"
         );
 
-        // Status-only footer: the duplicate Copy SQL and the old Execute are
-        // gone, and nothing else lives down there.
-        let footer_start = module.find("<div class=\"pv-footer\">").expect("footer");
-        let footer_end = footer_start + module[footer_start..].find("</div>").expect("footer end");
-        let footer = &module[footer_start..footer_end];
-        assert!(footer.contains("id=\"pvStatus\""), "the status line");
+        // The footer is the status line plus the dialog's fixed action row. The
+        // row exists in the markup but starts hidden, and the footer collapses
+        // when neither has content.
         assert!(
-            !footer.contains("class=\"btn\""),
-            "the footer holds no controls: {footer}"
+            module.contains("id=\"pvFooter\" hidden"),
+            "the footer starts collapsed"
         );
-        for gone in ["id=\"pvCopySql\"", "id=\"pvExecute\""] {
+        assert!(module.contains("id=\"pvStatus\""), "the status line");
+        for id in ["pvExecute", "pvCopySql", "pvCopyClose", "pvCancel"] {
             assert!(
-                !module.contains(gone),
-                "the duplicate control {gone} is gone"
+                module.contains(&format!("id=\"{id}\"")),
+                "the dialog action {id}"
             );
         }
+        assert!(
+            module.contains("id=\"pvDialogActions\" hidden"),
+            "the dialog action row is hidden in the tab mount"
+        );
+        assert!(
+            module.contains("root.classList.toggle('pv-dialog-mode', !!dialogBridge);"),
+            "the dialog mount hides the input half and shows its action row"
+        );
+        assert!(
+            css.contains(".pv-root.pv-dialog-mode .pv-pane.pv-top"),
+            "the input half is display:none in the dialog"
+        );
+        assert!(
+            module.contains("class=\"btn pv-primary\""),
+            "copy-and-close is the primary action"
+        );
 
         // The degradation strip is closable and driven by the state's flag.
         assert!(module.contains("class=\"pv-banner\""), "the strip");
@@ -3885,7 +3926,7 @@ mod tests {
             "pvConditions",
             "pvConditionsList",
             "pvConditionsAll",
-            "pvConditionsNone",
+            "pvConditionsClear",
         ] {
             assert!(module.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
@@ -3894,8 +3935,14 @@ mod tests {
             "a checkbox posts its own op"
         );
         assert!(module.contains("model.parameters"), "the rows are named");
-        assert!(module.contains("pv-param-kind"), "the type chip exists");
-        assert!(css.contains(".pv-root .pv-param-kind"));
+        assert!(
+            module.contains("updateConditionsToggle"),
+            "all / none is one flipping toggle"
+        );
+        // The reference row is name + value + warning mark; the type is carried
+        // by the placeholder, not a chip.
+        assert!(css.contains(".pv-root .pv-param-warn"));
+        assert!(!module.contains("pv-param-kind"));
         assert!(css.contains(".pv-root .pv-cond-row"));
     }
 }
