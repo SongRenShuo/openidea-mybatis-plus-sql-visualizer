@@ -335,7 +335,7 @@
   "首次捕获 SQL 时显示一次性提示": "One-time tip on the first captured SQL",
   "界面语言": "Interface language",
   "预览 SQL": "Preview SQL",
-  "SQL → Java": "SQL → Java",
+  "SQL 转 Java": "SQL → Java",
   "EXPLAIN 选中表": "EXPLAIN the selected table",
   "COUNT 选中表": "COUNT the selected table",
   "抽样选中表": "Sample the selected table",

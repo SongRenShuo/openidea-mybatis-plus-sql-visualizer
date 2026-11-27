@@ -1196,7 +1196,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "shortcuts.sqlToJava",
-        title: "SQL → Java",
+        title: "SQL 转 Java",
         group: "Shortcuts",
         kind: Kind::String,
         default: DefaultValue::Str("Alt+Shift+J"),
@@ -1441,6 +1441,71 @@ mod tests {
             "properties".to_string(),
             Value::Object(merged),
         )]))
+    }
+
+    #[test]
+    fn every_title_is_chinese_and_non_empty() {
+        for def in definitions() {
+            assert!(!def.title.trim().is_empty(), "empty title on {}", def.key);
+            assert!(
+                def.title
+                    .chars()
+                    .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)),
+                "title of {} is not Chinese: {}",
+                def.key,
+                def.title
+            );
+        }
+        for group in GROUPS {
+            assert!(!group.trim().is_empty(), "an empty group name");
+        }
+    }
+
+    #[test]
+    fn every_enum_default_is_one_of_its_options() {
+        for def in definitions() {
+            if let (Kind::Enum(options), DefaultValue::Str(value)) = (def.kind, def.default) {
+                assert!(
+                    options.contains(&value),
+                    "default {value} missing from the enum of {}",
+                    def.key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn locales_cover_every_title_and_group_with_the_same_key_set() {
+        // The host reads `locales/en.json` and `locales/zh-CN.json` as one
+        // catalog per language; a key present in one and missing from the other
+        // shows the raw key in that language. The settings page renders titles
+        // verbatim, so the Chinese title is the catalog key.
+        let en: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(include_str!("../locales/en.json")).expect("en catalog");
+        let zh: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(include_str!("../locales/zh-CN.json")).expect("zh catalog");
+        assert_eq!(
+            en.keys().collect::<Vec<_>>(),
+            zh.keys().collect::<Vec<_>>(),
+            "the two catalogs must share one key set"
+        );
+        for def in definitions() {
+            for (name, catalog) in [("en", &en), ("zh-CN", &zh)] {
+                let text = catalog.get(def.title).unwrap_or_else(|| {
+                    panic!("{name} misses the title of {}: {}", def.key, def.title)
+                });
+                assert!(
+                    !text.trim().is_empty(),
+                    "{name} value is empty for {}",
+                    def.key
+                );
+            }
+        }
+        for group in GROUPS {
+            for (name, catalog) in [("en", &en), ("zh-CN", &zh)] {
+                assert!(catalog.contains_key(*group), "{name} misses group {group}");
+            }
+        }
     }
 
     #[test]
