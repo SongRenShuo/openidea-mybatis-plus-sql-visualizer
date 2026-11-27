@@ -588,7 +588,7 @@ pub(crate) fn render_mapper_statement_with(
 }
 
 /// One core condition view → the model's shape.
-fn condition_view(view: &crate::core::xml::render::ConditionView) -> ConditionView {
+pub(crate) fn condition_view(view: &crate::core::xml::render::ConditionView) -> ConditionView {
     ConditionView {
         id: view.id.clone(),
         label: view.label.clone(),
@@ -601,7 +601,7 @@ fn condition_view(view: &crate::core::xml::render::ConditionView) -> ConditionVi
 /// Fills `params` (the legacy, value-only list) and `parameters` (C06) from one
 /// detailed render, keeping the two aligned: `parameters[i]` describes the
 /// `?` that `params[i]` binds.
-fn apply_parameters(model: &mut WorkbenchModel, detailed: &DetailedRender) {
+pub(crate) fn apply_parameters(model: &mut WorkbenchModel, detailed: &DetailedRender) {
     let values = &detailed.output.params;
     model.params = Vec::with_capacity(values.len());
     model.parameters = Vec::with_capacity(detailed.params.len());

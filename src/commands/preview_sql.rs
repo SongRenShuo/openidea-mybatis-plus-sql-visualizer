@@ -650,14 +650,23 @@ fn mapper_model(
         ));
     }
 
-    let rendered: Vec<(String, RenderOutput)> = ids
+    let rendered: Vec<(String, crate::core::xml::DetailedRender)> = ids
         .into_iter()
         .map(|id| {
-            let out = set.render(&id, &json!({}));
-            (id, out)
+            // Lane G: the gutter / command entry carries the same parameter names
+            // and condition switches the workbench page shows. `Defaults` is the
+            // preview's own profile — commands and MCP keep `Evaluate`, so a
+            // shared render never changes meaning under them.
+            let detailed = set.render_detailed(
+                &id,
+                &json!({}),
+                crate::core::xml::ConditionSwitches::Defaults,
+            );
+            (id, detailed)
         })
         .collect();
-    let (first_id, out) = &rendered[0];
+    let (first_id, detailed) = &rendered[0];
+    let out = &detailed.output;
 
     // Reuse the workbench's own plain-SQL path for the model shell (advice and
     // the formatted tab), then put the mapper fields back on top.
@@ -678,7 +687,15 @@ fn mapper_model(
         model.source = current.clone();
     }
     model.confidence = confidence_str(out.confidence).to_string();
-    model.params = out.params.iter().map(param_text).collect();
+    // Parameter names + the condition switches (lane G): `apply_parameters`
+    // fills `params` (values) and `parameters` (name/type/placeholder) together
+    // so the two lists stay aligned.
+    workbench::apply_parameters(&mut model, detailed);
+    model.conditions = detailed
+        .conditions
+        .iter()
+        .map(workbench::condition_view)
+        .collect();
     // The whole file is the "原文" for a file-level preview; for one statement
     // the page falls back to the rendered SQL, so re-rendering the input does
     // not silently switch to a different statement.
@@ -686,9 +703,13 @@ fn mapper_model(
         model.raw = xml.to_string();
     }
     if out.confidence == Confidence::Unresolved {
-        // `unresolved` never carries SQL: only the reason goes to the page.
+        // `unresolved` never carries SQL: only the reason goes to the page, and
+        // no parameter rows or condition switches either — there is nothing for
+        // them to bind to.
         model.sql.clear();
         model.params.clear();
+        model.parameters.clear();
+        model.conditions.clear();
         model.advice.clear();
     }
     let mut reasons: Vec<String> = issues
@@ -700,7 +721,7 @@ fn mapper_model(
 
     let summary = rendered
         .iter()
-        .map(|(id, out)| (id.clone(), confidence_str(out.confidence)))
+        .map(|(id, detailed)| (id.clone(), confidence_str(detailed.output.confidence)))
         .collect();
     Ok((model, summary))
 }
