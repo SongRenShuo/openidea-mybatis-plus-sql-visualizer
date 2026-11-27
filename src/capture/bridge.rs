@@ -167,6 +167,8 @@ struct Session {
     events: u64,
     bad_frames: u64,
     last_error: Option<String>,
+    /// The agent's newest self-report (heartbeat body); `None` until one arrives.
+    health: Option<crate::capture::ws::AgentHealth>,
     refresh: RefreshState,
 }
 
@@ -238,6 +240,8 @@ pub struct PollReport {
     pub appended: usize,
     /// Whether the throttle window let this batch trigger `refresh_view`.
     pub refresh: bool,
+    /// The agent's newest self-report, when a heartbeat came in this batch.
+    pub health: Option<crate::capture::ws::AgentHealth>,
 }
 
 impl Stats {
@@ -268,6 +272,7 @@ pub fn connect(project: &Project, url: &str) -> Result<u64, BridgeError> {
         events: 0,
         bad_frames: 0,
         last_error: None,
+        health: None,
         refresh: RefreshState::new(refresh_policy()),
         consumer,
     };
@@ -491,6 +496,10 @@ fn poll_inner(now_ms: u64, sink: &mut dyn FnMut(&str)) -> Result<PollReport, Bri
     session.bad_frames = outcome.bad_frames;
     session.frames += outcome.events.len() as u64 + outcome.controls.len() as u64 + bad_delta;
     session.events += outcome.events.len() as u64;
+    let health = outcome.health;
+    if let Some(health) = health {
+        session.health = Some(health);
+    }
 
     let options = parse_options();
     let mut text = String::new();
@@ -523,6 +532,7 @@ fn poll_inner(now_ms: u64, sink: &mut dyn FnMut(&str)) -> Result<PollReport, Bri
         closed: outcome.closed,
         appended: text.len(),
         refresh,
+        health,
     })
 }
 
@@ -533,6 +543,14 @@ pub fn poll(now_ms: u64) -> Result<PollReport, BridgeError> {
         host::refresh_view(log_panel::VIEW_ID);
     }
     Ok(report)
+}
+
+/// The agent's newest self-report, if a heartbeat has arrived.
+///
+/// `None` means no heartbeat yet: the socket may be up while the agent has not
+/// reported, which is different from an agent that reports zero woven classes.
+pub fn agent_health() -> Option<crate::capture::ws::AgentHealth> {
+    slot().as_ref().and_then(|session| session.health)
 }
 
 /// `websocket-ready` handler; never panics and never blocks. A stale event

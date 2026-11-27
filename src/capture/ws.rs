@@ -55,6 +55,92 @@ pub const KEY_TOO_MANY: &str = "capture.ws.too_many";
 pub const KEY_HOST: &str = "capture.ws.host_error";
 pub const KEY_GIVE_UP: &str = "capture.ws.give_up";
 
+/// What the agent says about itself in every `HEARTBEAT` body.
+///
+/// The agent counts what its weaving did (`weavable` / `woven` / `failed` /
+/// `matched`), what it had to skip (`unmodifiable`, `skippedByVersion`) and why
+/// it stopped on its own (`gate`: 1 = the CONFIG watchdog fired). Without these
+/// numbers "connected but nothing captured" cannot be attributed: hooks that
+/// never attached, hooks that attached but never fired, and a session the agent
+/// stopped all look alike from the plugin side.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct AgentHealth {
+    /// Classes whose bytecode the agent could rewrite.
+    pub weavable: u64,
+    /// Classes actually rewritten.
+    pub woven: u64,
+    /// Classes the rewrite failed on.
+    pub failed: u64,
+    /// Attach attempts that matched a hook target.
+    pub matched: u64,
+    /// Targets skipped because their module/class refused modification.
+    pub unmodifiable: u64,
+    /// Targets matched through an interface and woven that way.
+    pub interface_woven: u64,
+    /// Targets skipped because of the class-file version.
+    pub skipped_by_version: u64,
+    /// Whether the catch-all fallback is active (0/1).
+    pub catch_all: u64,
+    /// `0` = none, `1` = the CONFIG watchdog stopped capture.
+    pub gate: u64,
+    /// Events dropped after the agent's own overflow ledger gave up.
+    pub dropped: u64,
+}
+
+impl AgentHealth {
+    /// Reads a heartbeat body; a body without any known key is `None` so a
+    /// foreign producer cannot fake health.
+    pub fn from_body(body: &str) -> Option<Self> {
+        let value: Value = serde_json::from_str(body).ok()?;
+        let object = value.as_object()?;
+        let num = |key: &str| object.get(key).and_then(Value::as_u64).unwrap_or(0);
+        let known = [
+            "weavable",
+            "woven",
+            "failed",
+            "matched",
+            "unmodifiable",
+            "skippedByVersion",
+            "gate",
+        ];
+        if !known.iter().any(|key| object.contains_key(*key)) {
+            return None;
+        }
+        Some(Self {
+            weavable: num("weavable"),
+            woven: num("woven"),
+            failed: num("failed"),
+            matched: num("matched"),
+            unmodifiable: num("unmodifiable"),
+            interface_woven: num("interfaceWoven"),
+            skipped_by_version: num("skippedByVersion"),
+            catch_all: num("catchAll"),
+            gate: num("gate"),
+            dropped: num("dropped"),
+        })
+    }
+
+    /// One line for the Output channel: the numbers a reader needs first.
+    pub fn summary(&self) -> String {
+        format!(
+            "woven={} matched={} failed={} unmodifiable={} skippedByVersion={} catchAll={} gate={} dropped={}",
+            self.woven,
+            self.matched,
+            self.failed,
+            self.unmodifiable,
+            self.skipped_by_version,
+            self.catch_all,
+            self.gate,
+            self.dropped
+        )
+    }
+
+    /// The agent stopped capture on its own because no `CONFIG` arrived.
+    pub fn stopped_by_watchdog(&self) -> bool {
+        self.gate == 1
+    }
+}
+
 /// One captured SQL event, as the agent sends it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CaptureEvent {
@@ -633,6 +719,8 @@ pub struct PollOutcome {
     pub queued: usize,
     /// The peer reported its final close.
     pub closed: bool,
+    /// The newest `HEARTBEAT` body in this batch, when the agent sent one.
+    pub health: Option<AgentHealth>,
 }
 
 /// Thin wrapper over one `host::WebSocket` plus the pure policy above.
@@ -698,7 +786,18 @@ impl WsConsumer {
             match std::str::from_utf8(&frame) {
                 Ok(text) => match decode_frame(text) {
                     FrameDecode::Event(event) => outcome.events.push(event),
-                    FrameDecode::Control { cmd } => outcome.controls.push(cmd),
+                    FrameDecode::Control { cmd } => {
+                        // The heartbeat carries the agent's own counters, which is
+                        // the only way to tell "hooks never fired" from "the
+                        // session stopped" when no SQL arrives.
+                        if cmd == CMD_HEARTBEAT
+                            && let Some((_, body)) = decode_envelope(text)
+                            && let Some(health) = AgentHealth::from_body(&body)
+                        {
+                            outcome.health = Some(health);
+                        }
+                        outcome.controls.push(cmd);
+                    }
                     FrameDecode::Bad { reason } => {
                         self.bad_frames += 1;
                         host::log(
@@ -840,6 +939,58 @@ mod tests {
             FrameDecode::Control {
                 cmd: CMD_CONFIG_ACK
             }
+        );
+    }
+
+    /// The agent's heartbeat is the only place its counters exist, so the plugin
+    /// has to read them: "connected, zero events" is otherwise unattributable.
+    #[test]
+    fn the_heartbeat_body_becomes_agent_health() {
+        // The shape `SenderLoop.heartbeatBody()` writes, verbatim.
+        let body = "{\"weavable\":42,\"woven\":41,\"failed\":1,\"matched\":7,\
+                    \"unmodifiable\":2,\"matchedByInterface\":3,\"interfaceWoven\":3,\
+                    \"skippedByVersion\":1,\"catchAll\":0,\"gate\":1,\"dropped\":5}";
+        let health = AgentHealth::from_body(body).expect("counters present");
+        assert_eq!(health.weavable, 42);
+        assert_eq!(health.woven, 41);
+        assert_eq!(health.matched, 7);
+        assert_eq!(health.interface_woven, 3);
+        assert_eq!(health.skipped_by_version, 1);
+        assert_eq!(health.dropped, 5);
+        assert!(
+            health.stopped_by_watchdog(),
+            "gate=1 is the CONFIG watchdog"
+        );
+        assert!(health.summary().contains("woven=41"));
+        assert!(health.summary().contains("gate=1"));
+    }
+
+    #[test]
+    fn a_foreign_body_is_not_health() {
+        // No known counter: a different producer's heartbeat must not be read as
+        // "the agent reports zero of everything".
+        assert_eq!(AgentHealth::from_body("{\"pid\":7}"), None);
+        assert_eq!(AgentHealth::from_body("not json"), None);
+        // Partial bodies keep the keys they do carry.
+        let health = AgentHealth::from_body("{\"woven\":3}").expect("one counter is enough");
+        assert_eq!(health.woven, 3);
+        assert_eq!(health.gate, 0);
+    }
+
+    #[test]
+    fn a_heartbeat_envelope_yields_health_through_the_decode_path() {
+        let body = "{\"woven\":9,\"matched\":4,\"gate\":0}";
+        let frame = encode_envelope(CMD_HEARTBEAT, body);
+        assert_eq!(
+            decode_frame(&frame),
+            FrameDecode::Control { cmd: CMD_HEARTBEAT }
+        );
+        let (cmd, decoded_body) = decode_envelope(&frame).expect("envelope");
+        assert_eq!(cmd, CMD_HEARTBEAT);
+        assert_eq!(decoded_body, body);
+        assert_eq!(
+            AgentHealth::from_body(&decoded_body).map(|health| health.woven),
+            Some(9)
         );
     }
 

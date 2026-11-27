@@ -36,6 +36,24 @@ pub fn run(_ctx: &Invocation, _arg: Option<&str>) -> Result<Option<String>, Erro
                 report.appended,
                 if report.refresh { "yes" } else { "throttled" }
             );
+            // The agent's own counters. Without them "connected but nothing
+            // captured" cannot be attributed: hooks that never attached, hooks
+            // that attached but never fired, and a session the agent stopped on
+            // its own all look alike from here.
+            match report.health {
+                Some(health) => {
+                    let _ = writeln!(out, "-- agent: {}", health.summary());
+                    if health.stopped_by_watchdog() {
+                        let _ = writeln!(
+                            out,
+                            "-- agent: stopped itself, no CONFIG within 15 s [capture.agent.config_watchdog]"
+                        );
+                    }
+                }
+                None => {
+                    let _ = writeln!(out, "-- agent: no heartbeat yet");
+                }
+            }
             common::emit(&out)?;
             Ok(None)
         }
