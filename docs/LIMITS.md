@@ -79,6 +79,11 @@
    没有 agent 时用 `capture-open-log` 读工程内导出的日志文件；项目外路径需要额外文件授权。
 7. **捕获端口是固定的**：manifest 的 agent `args` 是静态串，装不下运行期协商的临时端口；
    本版用 `port=<固定端口>`，`capture-start` 显式传端口。端口冲突时换端口并重启目标应用。
+   另注：宿主的 WebSocket 是**纯二进制通道**（`crates/ide-host/src/plugins/websocket.rs` 把
+   `websocket.send(bytes)` 一律封成 `Message::Binary`，且只把收到的 `Message::Binary` 转给插件），
+   而 agent 的 WS 编解码原本只认 RFC 6455 文本帧。两边都不报错、只静默丢帧，症状是「连上了但
+   一条数据都没有」，JVM 控制台 15 秒后打一条 CONFIG 看门狗报停采。agent 侧已改成入站 TEXT/BINARY
+   同等接受、出站镜像对端 opcode，`WsSenderLoopEndToEndTest` 的二进制客户端用例钉住这条。
 8. **引擎 jar 不入库**：仓库只钉 `engine/ENGINE_VERSION` 与 sha256；安装态首次使用需要
    `engine.downloadUrl`（默认空）。留空即不联网，直接用本地/仓库 jar，缺失时降级为纯文本模式。
 9. **SQL 历史的存储位置不同**：原版把日志自动保存成 `.idea` 下的日志文件，历史页读那个目录；
