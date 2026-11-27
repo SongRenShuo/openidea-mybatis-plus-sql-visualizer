@@ -30,14 +30,19 @@ pub(super) const SHOW_DURATION_SETTING: &str = "log.showDuration";
 /// Normalises `logs.displayMode` to its three tokens; an unknown stored value
 /// falls back to `keyword_wrap` instead of guessing a fold.
 ///
-/// The mapping from mode to statement lines lives in the page (`modeLineLimit`
-/// in `web/log-panel.html`): `single` 1 line, `multi` no fold, `keyword_wrap`
-/// the reference's three lines plus `… (+N)`. The state carries the token, so
-/// the page never re-reads the setting.
+/// The tokens are the reference's `SqlListDisplayMode` values: `single` (one
+/// summary line, 160 characters at most), `keyword_wrap` (one major clause per
+/// line, three lines at most) and `formatted` (the dialect formatter's full
+/// output, no cap). `multi` is the token this schema shipped before the lane
+/// renamed it; it maps onto `formatted` because its old meaning was "no fold,
+/// the whole statement" — never onto a different fold.
+///
+/// The display text itself is prepared in `rows::list_display_sql`, so the page
+/// renders exactly what the host resolved and never re-reads the setting.
 pub fn display_mode(value: &str) -> &'static str {
     match value {
         "single" => "single",
-        "multi" => "multi",
+        "formatted" | "multi" => "formatted",
         _ => "keyword_wrap",
     }
 }
@@ -464,10 +469,13 @@ mod tests {
     #[test]
     fn display_mode_normalises_the_setting() {
         // A stored value outside the enum falls back to the default instead of
-        // guessing a fold; the three tokens are what the page branches on.
+        // guessing a fold; the three tokens are what the list renderer branches
+        // on. `multi` is the pre-lane token for "no fold" and stays an alias of
+        // `formatted`, never of a different shape.
         assert_eq!(display_mode("single"), "single");
-        assert_eq!(display_mode("multi"), "multi");
         assert_eq!(display_mode("keyword_wrap"), "keyword_wrap");
+        assert_eq!(display_mode("formatted"), "formatted");
+        assert_eq!(display_mode("multi"), "formatted");
         assert_eq!(display_mode("weird"), "keyword_wrap");
     }
 

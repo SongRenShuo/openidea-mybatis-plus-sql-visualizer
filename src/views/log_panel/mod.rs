@@ -51,7 +51,8 @@ pub use self::state::{
 use self::history::history_state;
 use self::logs::all_sql;
 use self::rows::{
-    apply_sort, dedupe_key_token, display_rows, java_target, n_plus_one_key_token, xml_target,
+    apply_sort, cached_list_display_sql, dedupe_key_token, display_rows, java_target,
+    n_plus_one_key_token, xml_target,
 };
 use self::state::{
     DISPLAY_MODE_SETTING, SHOW_DURATION_SETTING, buffer_cap, dedupe_active, ensure_parsed,
@@ -104,6 +105,13 @@ fn agent_health_json() -> Value {
 fn build_state() -> Value {
     let mut state = store();
     ensure_parsed(&mut state);
+
+    // Lane L2: the list display mode and the configured dialect decide how a
+    // row's statement text is prepared. Both are read before the rows are
+    // serialised, so the page only renders what the host resolved (the folding
+    // and the formatter's casing never disagree between push and render).
+    let display = display_mode(&settings::get_string(DISPLAY_MODE_SETTING, "keyword_wrap"));
+    let (list_dialect, _) = crate::views::workbench::configured_dialect();
 
     let slow_threshold_ms = slow_threshold();
     let dedupe = dedupe_active(&state);
@@ -165,6 +173,11 @@ fn build_state() -> Value {
         .map(|(index, row)| {
             let jump = java_targets.get(index).and_then(Option::as_ref);
             let xml = xml_targets.get(index).and_then(Option::as_ref);
+            // `logs.displayMode`: the display text for this row and the muted
+            // `(+N)` tail (empty outside the folded keyword-wrap mode). The full
+            // statement stays in the store — copy, export and the row actions
+            // never read this field.
+            let (sql_text, sql_tail) = cached_list_display_sql(&row.sql, display, &list_dialect);
             json!({
                 "line": row.line_no,
                 "seq": start + index + 1,
@@ -189,7 +202,8 @@ fn build_state() -> Value {
                 "jump_line": jump.map(|(_, line)| line + 1),
                 "xml_file": xml.map(|(file, _)| file.clone()),
                 "xml_line": xml.map(|(_, line)| line + 1),
-                "sql": row.display_sql(),
+                "sql": sql_text,
+                "sqlTail": sql_tail,
                 "error_text": row.error_text(),
                 "category": row.category.token(),
                 "sql_type": row.sql_type.token(),
@@ -214,11 +228,8 @@ fn build_state() -> Value {
     let send_to_tab = state.send_to_tab.clone();
     drop(state);
 
-    // Lane L34: the two log-list display settings. Both are read on every push,
-    // so a change lands with the next state and needs no restart. The page owns
-    // the folding, so it receives the resolved mode and its line limit rather
-    // than re-implementing the mapping.
-    let display = display_mode(&settings::get_string(DISPLAY_MODE_SETTING, "keyword_wrap"));
+    // Lane L34: the duration segment switch. Read on every push, so a change
+    // lands with the next state and needs no restart.
     let show_duration = settings::get_bool(SHOW_DURATION_SETTING, true);
 
     // The fifth tab (lane L23) is the preview workbench: the model and the
@@ -229,15 +240,11 @@ fn build_state() -> Value {
     let preview = crate::views::workbench::preview_tab();
     let select_tab = crate::views::workbench::select_tab();
     // The engine half of the row's database badge (lane L32). It is the same
-    // configured dialect the preview tab states, so the two never disagree; a
-    // row that states no database still gets the engine only — this build
-    // captures no connection name and never invents one.
-    let dialect_name = preview
-        .get("dialect")
-        .and_then(|dialect| dialect.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    // configured dialect the preview tab states (`list_dialect`, resolved
+    // before the rows), so the two never disagree; a row that states no
+    // database still gets the engine only — this build captures no connection
+    // name and never invents one.
+    let dialect_name = list_dialect.clone();
     let send_to_tab_json = match &send_to_tab {
         Some(send) => json!({
             "tab": send.tab,
@@ -1009,8 +1016,11 @@ mod tests {
         // host only normalises the setting; every push carries it.
         for (stored, mode) in [
             ("single", "single"),
-            ("multi", "multi"),
             ("keyword_wrap", "keyword_wrap"),
+            ("formatted", "formatted"),
+            // The pre-lane token for "no fold" still resolves to the mode that
+            // means the same thing.
+            ("multi", "formatted"),
         ] {
             let (host, _guard) = test_host();
             host.set_setting("logs.displayMode", &format!("\"{stored}\""));
@@ -1039,18 +1049,31 @@ mod tests {
     fn the_page_applies_the_display_mode_and_the_duration_flag() {
         let (_host, _guard) = test_host();
         let page = PAGE;
-        // Lane L34: the three modes map to the statement lines a row shows —
-        // one, none (0 = unfold), or the reference's three-line cell.
-        assert!(page.contains("sqlLineLimit = modeLineLimit(state.displayMode);"));
-        assert!(page.contains("function modeLineLimit(mode)"));
-        assert!(page.contains("if (mode === 'single') { return 1; }"));
-        assert!(page.contains("if (mode === 'multi') { return 0; }"));
-        assert!(page.contains("return SQL_MAX_LINES;"));
-        assert!(page.contains("var limit = sqlLineLimit;"));
-        assert!(page.contains("if (limit <= 0 || lines.length <= limit)"));
-        assert!(page.contains("var SQL_MAX_LINES = 3;"));
-        // The duration segment (and the slow tint on it) is dropped when the
-        // flag is off; the rest of the header stays.
+        // Lane L2: the host prepares the display text; the page only colours
+        // `row.sql` and appends the muted `row.sqlTail`. There is no second
+        // folding implementation in the page.
+        assert!(
+            page.contains("list.dataset.mode = state.displayMode || 'keyword_wrap';"),
+            "the cell padding follows the mode"
+        );
+        assert!(
+            page.contains("highlightInto(sql, row.sql);"),
+            "the prepared statement is what gets coloured"
+        );
+        assert!(
+            page.contains("if (row.sqlTail) {"),
+            "the host states the hidden-line count"
+        );
+        assert!(
+            !page.contains("function foldSql("),
+            "the page must not fold a second time"
+        );
+        assert!(
+            !page.contains("modeLineLimit"),
+            "the line cap moved to the host"
+        );
+        // The duration segment (and its tint) is dropped when the flag is off;
+        // the rest of the header stays.
         assert!(page.contains("showDuration = state.showDuration !== false;"));
         // The segment is only built when the flag is on, so hiding it cannot
         // leave an empty `.dur` node behind.
@@ -1564,7 +1587,7 @@ mod tests {
             "the token classes are installed"
         );
         assert!(
-            page.contains("highlightInto(sql, fold.text);"),
+            page.contains("highlightInto(sql, row.sql);"),
             "the SQL is coloured"
         );
         assert!(
@@ -1666,15 +1689,20 @@ mod tests {
             page.contains("var name = db || '';"),
             "no invented database"
         );
-        // Folding: three lines, a muted `… (+N)` tail, the full SQL in the tip.
-        assert!(page.contains("var SQL_MAX_LINES = 3;"), "sql-lines-3");
+        // Folding: three clause lines with a muted `… (+N)` tail, prepared by the
+        // host (`rows::fold_keyword_wrap`); the page renders the pair as-is.
         assert!(
-            page.contains("tail: ' … (+' + rest + ')'"),
-            "the dropped-line tail"
+            page.contains("if (row.sqlTail) {"),
+            "the page appends the host's tail"
+        );
+        assert_eq!(
+            super::rows::fold_keyword_wrap("a\nb\nc\nd\ne"),
+            ("a\nb\nc".to_string(), " … (+2)".to_string()),
+            "three lines and the hidden count"
         );
         assert!(
             page.contains("sql.title = row.sql;"),
-            "the whole statement stays in the tooltip"
+            "the prepared statement stays in the tooltip"
         );
         assert!(
             page.contains(".sql .sqlTail { color: var(--openidea-fg-muted); }"),
