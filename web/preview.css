@@ -281,8 +281,12 @@ body.pv-root { margin: 0; }
 /* Editable parameters (lane L27): the reference's row is name | value, with the
    name column adapting between 80 and 480 px and the warning mark pinned to
    the value box. */
+/* The label width is one budget for the whole column (set by the page from the
+   widest name, clamped to 80..480 px), as the reference sizes its label
+   column. */
 .pv-root .pv-param-row {
-  display: grid; grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+  display: grid;
+  grid-template-columns: var(--pv-name-width, minmax(80px, auto)) minmax(0, 1fr);
   align-items: center; gap: 6px; margin-bottom: 4px;
 }
 .pv-root .pv-param-name {

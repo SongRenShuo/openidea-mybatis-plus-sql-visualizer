@@ -1080,6 +1080,21 @@ export function mountPreview(root, deps) {
     const parameters = Array.isArray(m.parameters) ? m.parameters : [];
     const labels = preview.labels || {};
     const count = parameters.length || params.length;
+    // The reference budgeted one label width for the whole column: the widest
+    // name (after the middle ellipsis) clamped to 80..480 px, never one width
+    // per row.
+    let widest = 0;
+    for (let i = 0; i < count; i++) {
+      const meta = parameters[i] || null;
+      const full = meta && meta.name
+        ? '#' + meta.name
+        : (labels.paramsName || '').replace('{0}', String(i + 1));
+      widest = Math.max(widest, middleEllipsis(full, 64).length);
+    }
+    host.style.setProperty(
+      '--pv-name-width',
+      Math.round(Math.min(480, Math.max(80, widest * 6.9 + 14))) + 'px',
+    );
     for (let i = 0; i < count; i++) {
       const meta = parameters[i] || null;
       const row = doc.createElement('div');
@@ -1103,6 +1118,11 @@ export function mountPreview(root, deps) {
       if (placeholder) { input.placeholder = placeholder; }
       input.autocomplete = 'off';
       input.spellcheck = false;
+      // The reference's box tooltip names the source parameter; the label may
+      // have been shortened by the middle ellipsis, so the box carries the
+      // full name too.
+      input.title = fullName;
+      input.setAttribute('aria-label', fullName);
       cell.appendChild(input);
       // The warning mark appears only when the value does not fit the type the
       // statement declared (or inferred); it is a hint, never a gate.

@@ -2561,8 +2561,14 @@ mod tests {
         assert!(css.contains(".pv-param-name"), "the name column");
         assert!(css.contains("pv-param-input"), "the value input");
         assert!(
-            css.contains("grid-template-columns: minmax(80px, auto) minmax(0, 1fr)"),
+            css.contains(
+                "grid-template-columns: var(--pv-name-width, minmax(80px, auto)) minmax(0, 1fr)"
+            ),
             "the name column adapts between 80 and 480 px"
+        );
+        assert!(
+            module.contains("--pv-name-width"),
+            "one label width budget for the column"
         );
         assert!(css.contains("max-width: 480px"), "the name column cap");
         assert!(css.contains("pv-params-empty"), "the no-parameter state");
