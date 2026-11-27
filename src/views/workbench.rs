@@ -2010,6 +2010,12 @@ mod tests {
             module.contains("source.textContent = m.source || '';"),
             "the source is painted"
         );
+        // The input hint is guidance for an empty box only, as in the
+        // reference's standalone workbench.
+        assert!(
+            module.contains("hint.hidden = editor.value.trim() !== '';"),
+            "the input hint hides once there is text"
+        );
         assert!(
             module.contains("export function tokenizeSql"),
             "the SQL tokenizer exists"

@@ -586,6 +586,15 @@ export function mountPreview(root, deps) {
     return editor ? editor.value : '';
   }
 
+  /** The input hint is guidance for an empty box: once there is text it goes
+   *  away (the reference hides its `inputHintLabel` on the same condition). */
+  function applyInputHint() {
+    const hint = node('pvInputHint');
+    const editor = node('pvInput');
+    if (!hint || !editor) { return; }
+    hint.hidden = editor.value.trim() !== '';
+  }
+
   /** Paints one SQL text as coloured runs (lane C). The token texts are the
    *  exact input, so selecting or copying the rendered page yields the SQL. */
   function paintSql(body, text) {
@@ -1006,6 +1015,7 @@ export function mountPreview(root, deps) {
       const editor = node('pvInput');
       if (editor) { editor.value = tabs().raw || ''; }
     }
+    applyInputHint();
     setText(node('pvStatus'), tab.status ? tab.status.text : '');
     const sig = signature();
     if (sig !== pvSig) { renderTab(); }
@@ -1144,6 +1154,7 @@ export function mountPreview(root, deps) {
 
   const editor = node('pvInput');
   if (editor) {
+    editor.addEventListener('input', applyInputHint);
     editor.addEventListener('keydown', function (event) {
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
         event.preventDefault();
@@ -1266,6 +1277,7 @@ export function mountPreview(root, deps) {
   }
 
   if (deps.labels) { applyLabels(); }
+  applyInputHint();
 
   return {
     /** The mounted element (the tab's host in the panel page). */
