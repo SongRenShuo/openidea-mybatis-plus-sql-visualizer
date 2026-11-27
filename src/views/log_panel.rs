@@ -5733,6 +5733,195 @@ public interface UserMapper {
         assert!(page.contains("$('scrollEndBtn').title = follow ? (L.followOn"));
     }
 
+    // B4–B8 页面契约（lane L46） -------------------------------------------
+    //
+    // 这五项功能早已落地，本组测试只钉住「接线」：把它们从页面上删掉（或改成
+    // 死按钮），这里必须变红。功能本身的正确性由上面的用例覆盖，这里不重复。
+
+    /// 命中针的那一行必须是**活代码**，而不是注释。
+    ///
+    /// 直接 `contains` 会把 `// post({ op: 'toggle-group', … })` 也算命中：
+    /// 把接线注释掉、测试照样绿，等于没拦（反向验证时就踩到了这个假绿）。
+    /// 这里要求命中行本身不是注释行，且针之前没有 `//`、`<!--`。
+    fn live_line(source: &str, needle: &str) -> bool {
+        source.lines().any(|line| {
+            let Some(at) = line.find(needle) else {
+                return false;
+            };
+            let head = &line[..at];
+            !head.contains("//") && !head.contains("<!--") && !line.trim_start().starts_with('*')
+        })
+    }
+
+    /// 分发匹配臂的写法。针在运行时拼出来，不会以字面量出现在
+    /// `log_panel.rs` 源码里，`live_line(source, …)` 才不会自己命中自己。
+    fn dispatch_arm(op: &str) -> String {
+        format!("\"{op}\" =>")
+    }
+
+    #[test]
+    fn b4_the_group_badges_stay_wired_to_toggle_group() {
+        // B4：`×N` 同结构徽章点了要能展开/折叠。拦的是「删掉徽章的 click 回调
+        // 或它的 post」——删了之后徽章还在、看着能点，用户点下去毫无反应，
+        // 而后端 `toggle-group` 的测试照样全绿。
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+
+        // 两个徽章各自把一个 `post({ op: 'toggle-group', … })` 交给
+        // `badgeButton` 当 click 回调；回调与 post 两行都要在，缺一行就断开。
+        for (badge, kind) in [
+            (
+                "badgeButton(dedupeText, 'dedupe', dedupeTitle, function () {",
+                "dedupe",
+            ),
+            (
+                "badgeButton(groupText, 'group', groupTitle, function () {",
+                "group",
+            ),
+        ] {
+            assert!(
+                live_line(page, badge),
+                "the {kind} badge lost its click callback"
+            );
+            assert!(
+                live_line(
+                    page,
+                    &format!("post({{ op: 'toggle-group', line: row.line, kind: '{kind}' }});")
+                ),
+                "the {kind} badge no longer posts toggle-group"
+            );
+        }
+
+        // 后端分支：删掉这个匹配臂，op 会落进 `_ => {}`，徽章变成死按钮。
+        let source = include_str!("log_panel.rs");
+        assert!(
+            live_line(source, &dispatch_arm("toggle-group")),
+            "the host no longer dispatches toggle-group"
+        );
+    }
+
+    #[test]
+    fn b5_the_blocked_entry_points_stay_wired() {
+        // B5：屏蔽方法有两个入口（右键菜单项 + 工具栏 eye-off 的列表）。拦的是
+        // 「删掉菜单项 / 删掉按行能力的启用条件 / 删掉后端分支」——任何一处被
+        // 删，入口就变成常亮或点了没反应的死按钮。
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        assert!(
+            live_line(page, "data-act=\"block-method\""),
+            "the row menu lost its block-method item"
+        );
+        // 没有 focus_key 的行没有方法可屏蔽，菜单项必须按行能力置灰；
+        // 这条丢了就变成「点了才失败」而不是「一眼看出不可用」。
+        assert!(
+            live_line(page, "enableItem('block-method', !!(row && row.focus_key))"),
+            "the block-method item no longer follows the row's focus_key"
+        );
+        let source = include_str!("log_panel.rs");
+        assert!(
+            live_line(source, &dispatch_arm("block-method")),
+            "the host no longer dispatches block-method"
+        );
+    }
+
+    #[test]
+    fn b6_the_slow_badge_reads_the_state_count() {
+        // B6：工具栏右侧的慢查询计数胶囊。拦的是「删掉元素、或删掉它跟
+        // `counts.slow` 的绑定」——删了之后慢查询还在拦截，但用户看不出有几条。
+        let (host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        assert!(
+            live_line(page, "id=\"slowBadge\" class=\"pill danger\" hidden"),
+            "the slow count capsule is gone (or no longer starts hidden)"
+        );
+        // 元素还在不等于接线还在：计数要来自推送状态的 `counts.slow`，并且
+        // 文案真的写进胶囊。
+        for needle in [
+            "var c = state.counts || {};",
+            "if (c.slow > 0) {",
+            "setText(slowBadge, (L.slowPrefix || '') + ' ' + c.slow);",
+        ] {
+            assert!(
+                live_line(page, needle),
+                "the capsule no longer reads counts.slow: missing {needle}"
+            );
+        }
+        // 状态里确实带着这个字段：一条 1200ms 的慢查询（阈值 1000ms）要计入。
+        set_log_text("1723456789014|1200|statement|SELECT * FROM c\n");
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(
+            state["counts"]["slow"], 1,
+            "the state carries counts.slow: {state}"
+        );
+    }
+
+    #[test]
+    fn b7_the_settings_help_and_community_buttons_stay_wired() {
+        // B7：设置 / 帮助 / 交流群三个降级入口。拦的是「按钮留着但 event
+        // listener 被删」——点了什么都不发生，用户以为插件卡住。
+        let (_host, _guard) = test_host();
+        let page = include_str!("../../web/log-panel.html");
+        for id in ["settingsBtn", "helpBtn", "communityBtn"] {
+            assert!(
+                live_line(page, &format!("id=\"{id}\" class=\"iconbtn\"")),
+                "the toolbar lost {id}"
+            );
+        }
+        // 设置齿轮展开自己的菜单，菜单项才 post `settings`；帮助与交流群直接 post。
+        assert!(
+            live_line(
+                page,
+                "$('settingsPageItem').addEventListener('click', function () {"
+            ),
+            "the settings menu item lost its click handler"
+        );
+        assert!(
+            live_line(page, "post({ op: 'settings' })"),
+            "the settings entry no longer posts its op"
+        );
+        assert!(
+            live_line(
+                page,
+                "$('helpBtn').addEventListener('click', function () { post({ op: 'help' }); })"
+            ),
+            "the help button lost its click handler"
+        );
+        assert!(
+            live_line(
+                page,
+                "$('communityBtn').addEventListener('click', function () { post({ op: 'community' }); })"
+            ),
+            "the community button lost its click handler"
+        );
+    }
+
+    #[test]
+    fn b8_the_parameter_column_stays_editable_and_rebindable() {
+        // B8：工作台参数列可编辑并重绑定（L42 起在 `web/preview.js`）。拦的是
+        // 「输入框不再生成、或重绑定按钮丢掉 post」——参数框变只读文本，
+        // 用户改了值也进不了 SQL。
+        let (_host, _guard) = test_host();
+        let module = include_str!("../../web/preview.js");
+        assert!(
+            live_line(module, "input.className = 'pv-param-input';"),
+            "the parameter inputs are no longer created"
+        );
+        assert!(
+            live_line(module, "on('pvRebindBtn', function () {"),
+            "the rebind button lost its click handler"
+        );
+        // 回调体里既要读输入框，又要把它 post 出去；只剩一行就断链。
+        assert!(
+            live_line(module, "const inputs = paramInputs();"),
+            "the rebind no longer reads the parameter inputs"
+        );
+        assert!(
+            live_line(module, "post({ op: 'preview-params', values: values });"),
+            "the rebind no longer posts the edited values"
+        );
+    }
+
     // Helpers -------------------------------------------------------------
 
     fn handle_panel_message(host: &MockHost, message: &str) -> Result<(), Error> {
