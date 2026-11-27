@@ -136,7 +136,7 @@ pub struct SettingDef {
 ///   `log.autoOpenOnCapture`, `log.autoOpenYield`, `log.stopOnWindowClose`,
 ///   `log.timestampEnabled`, `log.timestampFormat`, `log.timestampSource`,
 ///   `log.formatRestored`, `log.showMethodName`, `log.dataSourceBadgeDetail`,
-///   `log.crudColorStyle`, the four `log.crudColor*` colours,
+/// `logs.crud.style`, `logs.crud.select/insert/update/delete`,
 ///   `log.shardingSphereEnabled`, `log.autoSaveEnabled/Path/FileNamePattern/
 ///   MaxFiles`, `log.stackMaxFrames` (no call-stack collection),
 ///   `log.sourceFrameSkipPrefixes`, `log.sourceFrameBizJarPrefixes`,
@@ -731,12 +731,12 @@ pub static DEFINITIONS: [SettingDef; 142] = [
         key: "logs.displayMode",
         title: "SQL 显示模式",
         group: "List display",
-        kind: Kind::Enum(&["single", "multi", "keyword_wrap"]),
+        kind: Kind::Enum(&["single", "keyword_wrap", "formatted"]),
         default: DefaultValue::Str("keyword_wrap"),
         needs_restart: false,
     },
     SettingDef {
-        key: "log.crudColorStyle",
+        key: "logs.crud.style",
         title: "CRUD 颜色标记形态",
         group: "CRUD colors",
         kind: Kind::Enum(&["bar", "background", "off"]),
@@ -744,32 +744,32 @@ pub static DEFINITIONS: [SettingDef; 142] = [
         needs_restart: false,
     },
     SettingDef {
-        key: "log.crudColorSelect",
-        title: "SELECT 颜色",
+        key: "logs.crud.select",
+        title: "SELECT 颜色（#RRGGBB）",
         group: "CRUD colors",
         kind: Kind::String,
         default: DefaultValue::Str("#4A86E8"),
         needs_restart: false,
     },
     SettingDef {
-        key: "log.crudColorInsert",
-        title: "INSERT 颜色",
+        key: "logs.crud.insert",
+        title: "INSERT 颜色（#RRGGBB）",
         group: "CRUD colors",
         kind: Kind::String,
         default: DefaultValue::Str("#4CAF50"),
         needs_restart: false,
     },
     SettingDef {
-        key: "log.crudColorUpdate",
-        title: "UPDATE 颜色",
+        key: "logs.crud.update",
+        title: "UPDATE 颜色（#RRGGBB）",
         group: "CRUD colors",
         kind: Kind::String,
         default: DefaultValue::Str("#E67E22"),
         needs_restart: false,
     },
     SettingDef {
-        key: "log.crudColorDelete",
-        title: "DELETE 颜色",
+        key: "logs.crud.delete",
+        title: "DELETE 颜色（#RRGGBB）",
         group: "CRUD colors",
         kind: Kind::String,
         default: DefaultValue::Str("#D32F2F"),
@@ -1630,7 +1630,7 @@ mod tests {
             definition("logs.displayMode")
                 .expect("logs.displayMode")
                 .kind,
-            Kind::Enum(&["single", "multi", "keyword_wrap"])
+            Kind::Enum(&["single", "keyword_wrap", "formatted"])
         );
     }
 

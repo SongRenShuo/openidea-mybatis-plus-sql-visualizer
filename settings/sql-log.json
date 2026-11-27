@@ -193,10 +193,11 @@
       "type": "string",
       "title": "SQL 显示模式",
       "group": "List display",
-      "enum": ["single", "multi", "keyword_wrap"],
-      "default": "keyword_wrap"
+      "enum": ["single", "keyword_wrap", "formatted"],
+      "default": "keyword_wrap",
+      "description": "宿主会把旧值 multi 归一为 formatted，未知值回落 keyword_wrap。"
     },
-    "log.crudColorStyle": {
+    "logs.crud.style": {
       "type": "string",
       "title": "CRUD 颜色标记形态",
       "group": "CRUD colors",
@@ -204,30 +205,30 @@
       "default": "bar",
       "description": "bar = 左侧色条；background = 整行淡背景；off = 关闭。本仓日志面板尚未读取该值。"
     },
-    "log.crudColorSelect": {
+    "logs.crud.select": {
       "type": "string",
-      "title": "SELECT 颜色",
+      "title": "SELECT 颜色（#RRGGBB）",
       "group": "CRUD colors",
       "default": "#4A86E8",
       "description": "颜色值使用 #RRGGBB。本仓日志面板尚未读取该值。"
     },
-    "log.crudColorInsert": {
+    "logs.crud.insert": {
       "type": "string",
-      "title": "INSERT 颜色",
+      "title": "INSERT 颜色（#RRGGBB）",
       "group": "CRUD colors",
       "default": "#4CAF50",
       "description": "颜色值使用 #RRGGBB。本仓日志面板尚未读取该值。"
     },
-    "log.crudColorUpdate": {
+    "logs.crud.update": {
       "type": "string",
-      "title": "UPDATE 颜色",
+      "title": "UPDATE 颜色（#RRGGBB）",
       "group": "CRUD colors",
       "default": "#E67E22",
       "description": "颜色值使用 #RRGGBB。本仓日志面板尚未读取该值。"
     },
-    "log.crudColorDelete": {
+    "logs.crud.delete": {
       "type": "string",
-      "title": "DELETE 颜色",
+      "title": "DELETE 颜色（#RRGGBB）",
       "group": "CRUD colors",
       "default": "#D32F2F",
       "description": "颜色值使用 #RRGGBB。本仓日志面板尚未读取该值。"
