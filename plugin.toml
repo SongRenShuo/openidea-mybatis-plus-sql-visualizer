@@ -237,7 +237,7 @@ id = "sqlv-preview"
 title = "SQL Preview"
 web = "web/preview.html"
 width = 900
-height = 640
+height = 600
 
 # Settings: one node named after the plugin, split into pages like the IntelliJ
 # edition's `Tools › SQL Visualizer` (UI and Actions / Shortcuts / SQL Preview /
