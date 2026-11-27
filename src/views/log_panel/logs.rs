@@ -41,6 +41,8 @@ thread_local! {
     static HAD_HEARTBEAT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static MISSING_REPORTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static SILENT_TICKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// A failing drain is reported once per session, not 120 times a minute.
+    static DRAIN_ERROR_REPORTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 // ---------------------------------------------------------------------------
@@ -528,8 +530,20 @@ pub(super) fn capture_poll() -> Result<(), Error> {
             HAD_HEARTBEAT.with(|latch| latch.set(false));
             MISSING_REPORTED.with(|flag| flag.set(false));
             SILENT_TICKS.with(|count| count.set(0));
+            DRAIN_ERROR_REPORTED.with(|flag| flag.set(false));
         }
         Err(error) => {
+            // A drain that keeps failing is exactly the state where the panel
+            // says "connected" and shows nothing. Say it once, in the channel the
+            // user is already reading, not only in the IDE log.
+            if !DRAIN_ERROR_REPORTED.with(|flag| flag.get()) {
+                DRAIN_ERROR_REPORTED.with(|flag| flag.set(true));
+                let _ = common::emit(&format!(
+                    "-- capture: drain failed [{}] {}\n",
+                    error.message_key(),
+                    error.detail()
+                ));
+            }
             host::log(
                 openidea_plugin::LogLevel::Warn,
                 &format!("capture: {} {}", error.message_key(), error.detail()),
