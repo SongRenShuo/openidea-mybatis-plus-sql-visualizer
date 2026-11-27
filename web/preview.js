@@ -220,6 +220,8 @@ const PV_TEXT = {
     refresh: '刷新',
     compact: '压缩',
     multiline: '多行',
+    keywordWrap: '关键字换行',
+    vertical: '竖向排列',
     moreRollback: '回滚 SQL',
     moreSwitchDataSource: '切换数据源',
     moreImportParams: '导入参数',
@@ -272,6 +274,8 @@ const PV_TEXT = {
     refresh: 'Refresh',
     compact: 'Compact',
     multiline: 'Multi-line',
+    keywordWrap: 'Keyword wrap',
+    vertical: 'Vertical',
     moreRollback: 'Rollback SQL',
     moreSwitchDataSource: 'Switch data source',
     moreImportParams: 'Import parameters',
@@ -691,13 +695,6 @@ export function mountPreview(root, deps) {
     return table[key] != null ? table[key] : (PV_TEXT.zh[key] || key);
   }
 
-  /** A host label when it exists, else this module's own text. */
-  function labelOf(key, fallbackKey) {
-    const labels = preview.labels || {};
-    if (labels[key]) { return labels[key]; }
-    return L(fallbackKey || key);
-  }
-
   function tabs() { return preview.model.tabs || {}; }
   function tabButtons() { return root.querySelectorAll('.pv-tab'); }
   function paramInputs() { return root.querySelectorAll('.pv-param-input'); }
@@ -946,10 +943,13 @@ export function mountPreview(root, deps) {
       closeDialog.hidden = true;
       closeDialog.title = labels.dialogNote || '';
     }
-    // The nine button labels (the host knows none of them; `PV_TEXT` does).
+    // The nine button labels (the host knows some of them; `PV_TEXT` covers the
+    // rest, and the page's own text is the fallback in every case).
     setText(node('pvMode'), preview.compact ? L('multiline') : L('compact'));
     setText(node('pvStmtType'), L('stmtType').replace('{0}', ''));
     setText(node('pvCopyError'), L('copyError'));
+    setText(node('pvKeywordWrap'), labels.keywordWrap || L('keywordWrap'));
+    setText(node('pvVertical'), labels.vertical || L('vertical'));
     setText(node('pvExplain'), labels.explain || L('explain'));
     setText(node('pvRefresh'), labels.refresh || L('refresh'));
     const explainButton = node('pvExplain');
@@ -993,7 +993,7 @@ export function mountPreview(root, deps) {
     const moreItems = [
       ['pvRollback', labels.rollback || L('moreRollback'), labels.rollbackNote || L('rollbackNote')],
       ['pvSwitchDataSource', L('moreSwitchDataSource'), L('switchDataSourceNote')],
-      ['pvImportParams', labels.importClipboard || L('moreImportParams'), ''],
+      ['pvImportParams', L('moreImportParams'), ''],
       ['pvDiff', labels.diff || L('moreDiff'), labels.diffNote || ''],
       ['pvShare', labels.share || L('moreShare'), labels.shareNote || ''],
       ['pvExport', L('morePortableExport'), L('portableExportNote')],
@@ -1016,7 +1016,7 @@ export function mountPreview(root, deps) {
     }
     const qualifyBtn = node('pvQualify');
     if (qualifyBtn) {
-      qualifyBtn.textContent = labels.qualify || L('qualifyNote');
+      qualifyBtn.textContent = labels.qualify || '';
       qualifyBtn.disabled = true;
       qualifyBtn.title = labels.qualifyNote || '';
     }
@@ -1289,6 +1289,13 @@ export function mountPreview(root, deps) {
     if (moreImport) {
       const api = !!(navigator.clipboard && navigator.clipboard.readText);
       moreImport.disabled = count === 0 || !api || clipboardMissing;
+      if (moreImport.disabled) {
+        moreImport.title = !api || clipboardMissing
+          ? (labels.clipboardMissing || '')
+          : (labels.paramsEmpty || L('paramsEmpty'));
+      } else {
+        moreImport.title = L('moreImportParams');
+      }
     }
     setText(node('pvParamsHint'), labels.paramsHint);
   }

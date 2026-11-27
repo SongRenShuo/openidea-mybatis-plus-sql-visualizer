@@ -3567,6 +3567,40 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_preview_page_exposes_the_four_modes_and_the_dialog_row() {
+        let module = include_str!("../../web/preview.js");
+        for mode in ["'normal'", "'formatted'", "'keyword_wrap'", "'vertical'"] {
+            assert!(module.contains(mode), "missing display mode {mode}");
+        }
+        assert!(
+            module.contains("export function compactSql"),
+            "the compact shaper exists"
+        );
+        assert!(
+            module.contains("text = shapeForDisplay(text, preview.display);"),
+            "the display state drives the painted text"
+        );
+        assert!(
+            module.contains("preview.compact ? L('multiline') : L('compact')"),
+            "the toggle names the mode a click switches to"
+        );
+        assert!(module.contains("function postDisplay"), "the state is sent");
+        assert!(
+            module.contains("op: 'preview-display'"),
+            "the display op carries the state"
+        );
+        // The fixed action row is dialog-only: hidden in the tab mount, and the
+        // footer collapses when it has neither a status nor that row.
+        assert!(module.contains("actions.hidden = !dialogBridge;"));
+        assert!(module.contains("footer.hidden = !hasStatus && !dialogBridge;"));
+        assert!(module.contains("on('pvCopyClose', function () {"));
+        assert!(
+            module.contains("post({ op: 'preview-copy' });\n    closeDialog();"),
+            "copy-and-close copies first, then closes"
+        );
+    }
+
     // Parameters, clipboard import and rollback (lane L27) ----------------
 
     #[test]

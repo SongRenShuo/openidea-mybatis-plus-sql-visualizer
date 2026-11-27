@@ -356,6 +356,7 @@ body.pv-root { margin: 0; }
 .pv-root .pv-gutter[hidden] { display: none; }
 .pv-root #pvTabBody {
   flex: 1 1 auto; margin: 0; padding: 4px 8px;
+  min-width: max-content;
   border: none; border-radius: 0; background: transparent;
   color: var(--openidea-fg);
   font-family: var(--openidea-font-mono, monospace);
