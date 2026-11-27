@@ -2,19 +2,19 @@
   "properties": {
     "engine.downloadUrl": {
       "type": "string",
-      "title": "Engine download URL",
+      "title": "引擎下载地址",
       "group": "Engine",
       "default": ""
     },
     "engine.autoDownload": {
       "type": "boolean",
-      "title": "Download the engine on first use",
+      "title": "首次使用时下载引擎",
       "group": "Engine",
       "default": true
     },
     "engine.degradePolicy": {
       "type": "string",
-      "title": "When the engine is unavailable",
+      "title": "引擎不可用时的处理",
       "group": "Engine",
       "enum": [
         "text-only",
@@ -24,25 +24,25 @@
     },
     "engine.startupTimeoutMs": {
       "type": "integer",
-      "title": "Engine startup timeout (ms)",
+      "title": "引擎启动超时（毫秒）",
       "group": "Engine",
       "default": 5000
     },
     "engine.requestTimeoutMs": {
       "type": "integer",
-      "title": "Engine request timeout (ms)",
+      "title": "引擎请求超时（毫秒）",
       "group": "Engine",
       "default": 30000
     },
     "engine.javaPath": {
       "type": "string",
-      "title": "Java executable",
+      "title": "Java 可执行文件",
       "group": "Engine",
       "default": ""
     },
     "engine.maxRestarts": {
       "type": "integer",
-      "title": "Engine restarts before degrading",
+      "title": "降级前的引擎重启次数",
       "group": "Engine",
       "default": 3
     }

@@ -2,10 +2,25 @@
   "properties": {
     "about.updateChannel": {
       "type": "string",
-      "title": "Update channel",
+      "title": "更新通道",
       "group": "About",
       "enum": ["marketplace", "gitee"],
-      "default": "marketplace"
+      "default": "marketplace",
+      "description": "marketplace = 由应用市场推送；gitee = 从 Gitee 发行版检查。本仓尚未读取该值。"
+    },
+    "about.buildNumber": {
+      "type": "string",
+      "title": "内部构建号",
+      "group": "About",
+      "default": "",
+      "description": "只读：构建号由打包写入，设置页不可修改；反馈问题时用于定位版本。"
+    },
+    "about.cacheAction": {
+      "type": "string",
+      "title": "插件缓存清理",
+      "group": "About",
+      "default": "",
+      "description": "只读说明：平台不支持在设置页内直接执行清理动作，缓存清理由面板或命令完成，此处不提供按钮。"
     }
   }
 }

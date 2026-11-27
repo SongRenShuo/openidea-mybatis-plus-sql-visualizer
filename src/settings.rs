@@ -100,7 +100,7 @@ pub struct SettingDef {
 /// The first release's settings, the L34 parity keys, the L48 preview shell,
 /// the C14 MyBatis-Plus interceptor simulation and the L-SettingsParity
 /// expansion to the IntelliJ edition's 81 application-level fields.
-pub static DEFINITIONS: [SettingDef; 138] = [
+pub static DEFINITIONS: [SettingDef; 142] = [
     // Preview -------------------------------------------------------------
     // Lane L48: where the preview opens. The dialog is the IntelliJ edition's
     // `SqlPreviewDialog`; the tab is the fifth tab of the log panel, which the
@@ -1184,26 +1184,65 @@ pub static DEFINITIONS: [SettingDef; 138] = [
         default: DefaultValue::Str(""),
         needs_restart: false,
     },
+    // MCP Tools page, L-SettingsParity -------------------------------------
+    // The reference pages each of its tools with a checkbox; the platform
+    // schema has no checkbox list here, so the disabled set is one comma
+    // separated string. Nothing in this port reads the three keys yet.
     SettingDef {
         key: "mcp.enabled",
-        title: "Expose the SQL Visualizer MCP tools",
+        title: "启用 MCP 工具",
         group: "MCP",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
         needs_restart: false,
     },
     SettingDef {
+        key: "mcp.disabledTools",
+        title: "禁用的 MCP 工具",
+        group: "MCP",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "mcp.mask",
+        title: "MCP 输出脱敏",
+        group: "MCP",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    // About page, L-SettingsParity ----------------------------------------
+    // The build number and the cache cleanup row are read-only: the platform
+    // has no settings-page action, so the second is explanatory text only.
+    SettingDef {
         key: "about.updateChannel",
-        title: "Update channel",
+        title: "更新通道",
         group: "About",
         kind: Kind::Enum(&["marketplace", "gitee"]),
         default: DefaultValue::Str("marketplace"),
         needs_restart: false,
     },
+    SettingDef {
+        key: "about.buildNumber",
+        title: "内部构建号",
+        group: "About",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "about.cacheAction",
+        title: "插件缓存清理",
+        group: "About",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
     // Engine --------------------------------------------------------------
     SettingDef {
         key: "engine.downloadUrl",
-        title: "Engine download URL",
+        title: "引擎下载地址",
         group: "Engine",
         kind: Kind::String,
         default: DefaultValue::Str(""),
@@ -1211,7 +1250,7 @@ pub static DEFINITIONS: [SettingDef; 138] = [
     },
     SettingDef {
         key: "engine.autoDownload",
-        title: "Download the engine on first use",
+        title: "首次使用时下载引擎",
         group: "Engine",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -1219,7 +1258,7 @@ pub static DEFINITIONS: [SettingDef; 138] = [
     },
     SettingDef {
         key: "engine.degradePolicy",
-        title: "When the engine is unavailable",
+        title: "引擎不可用时的处理",
         group: "Engine",
         kind: Kind::Enum(&["text-only", "prompt"]),
         default: DefaultValue::Str("text-only"),
@@ -1227,7 +1266,7 @@ pub static DEFINITIONS: [SettingDef; 138] = [
     },
     SettingDef {
         key: "engine.startupTimeoutMs",
-        title: "Engine startup timeout (ms)",
+        title: "引擎启动超时（毫秒）",
         group: "Engine",
         kind: Kind::Integer,
         default: DefaultValue::Int(5000),
@@ -1235,7 +1274,7 @@ pub static DEFINITIONS: [SettingDef; 138] = [
     },
     SettingDef {
         key: "engine.requestTimeoutMs",
-        title: "Engine request timeout (ms)",
+        title: "引擎请求超时（毫秒）",
         group: "Engine",
         kind: Kind::Integer,
         default: DefaultValue::Int(30000),
@@ -1243,7 +1282,7 @@ pub static DEFINITIONS: [SettingDef; 138] = [
     },
     SettingDef {
         key: "engine.javaPath",
-        title: "Java executable",
+        title: "Java 可执行文件",
         group: "Engine",
         kind: Kind::String,
         default: DefaultValue::Str(""),
@@ -1251,7 +1290,7 @@ pub static DEFINITIONS: [SettingDef; 138] = [
     },
     SettingDef {
         key: "engine.maxRestarts",
-        title: "Engine restarts before degrading",
+        title: "降级前的引擎重启次数",
         group: "Engine",
         kind: Kind::Integer,
         default: DefaultValue::Int(3),

@@ -443,5 +443,18 @@
   "调用栈快照帧数": "Call stack frames",
   "源码捕获帧过滤前缀": "Source capture frame skip prefixes",
   "JAR 业务帧包名前缀": "JAR business frame prefixes",
-  "采集时脱敏": "Desensitise at capture time"
+  "采集时脱敏": "Desensitise at capture time",
+  "启用 MCP 工具": "Enable the MCP tools",
+  "禁用的 MCP 工具": "Disabled MCP tools",
+  "MCP 输出脱敏": "Mask MCP output",
+  "更新通道": "Update channel",
+  "内部构建号": "Internal build number",
+  "插件缓存清理": "Plugin cache cleanup",
+  "引擎下载地址": "Engine download URL",
+  "首次使用时下载引擎": "Download the engine on first use",
+  "引擎不可用时的处理": "When the engine is unavailable",
+  "引擎启动超时（毫秒）": "Engine startup timeout (ms)",
+  "引擎请求超时（毫秒）": "Engine request timeout (ms)",
+  "Java 可执行文件": "Java executable",
+  "降级前的引擎重启次数": "Engine restarts before degrading"
 }
