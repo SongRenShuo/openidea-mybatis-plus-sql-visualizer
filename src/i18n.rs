@@ -303,8 +303,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ("view.workbench.action.more", "More", "更多"),
     (
         "view.workbench.more.note",
-        "Export and rollback",
-        "导出与回滚",
+        "Export, diff, share, qualify columns and rollback",
+        "导出、差异对比、分享、含表列名与回滚",
     ),
     ("view.workbench.banner.dismiss", "Dismiss", "关闭"),
     ("view.workbench.params.name", "Param {0}", "参数 {0}"),
@@ -464,6 +464,65 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "view.workbench.rollback.note",
         "The workbench has no table / primary-key metadata, so a rollback plan cannot be generated here; the rollback-plan command takes a table description (columns + primary key).",
         "工作台没有表/主键元数据，无法在此生成回滚；回滚计划需要表结构（列 + 主键），请用 rollback-plan 命令并给出表描述。",
+    ),
+    // Lane L44: the "更多" menu's two usable entries plus the one the renderer
+    // would have to provide.
+    ("view.workbench.action.diff", "Diff with source", "差异对比"),
+    (
+        "view.workbench.diff.title",
+        "SQL preview diff",
+        "SQL 预览差异",
+    ),
+    ("view.workbench.diff.inline", "inline statement", "行内语句"),
+    (
+        "view.workbench.diff.note",
+        "Original on the left, rendered SQL on the right; open it in the platform diff viewer.",
+        "左侧原文、右侧渲染出的 SQL，在平台差异查看器中打开。",
+    ),
+    (
+        "view.workbench.action.share",
+        "Share (copy)",
+        "分享（复制）",
+    ),
+    (
+        "view.workbench.share.note",
+        "No share service or network channel: the entry copies the SQL to the clipboard.",
+        "没有分享服务与联网通道：此入口把 SQL 复制到剪贴板。",
+    ),
+    (
+        "view.workbench.action.qualify",
+        "Qualify columns",
+        "含表列名",
+    ),
+    (
+        "view.workbench.qualify.note",
+        "Rendering each column as table.column is the renderer's job; neither the core renderer nor the engine jar has such a switch yet, so the entry stays disabled.",
+        "把列渲染成 表名.列名 是渲染器的职责；core 渲染器与引擎 jar 都还没有这个开关，因此此项保持禁用。",
+    ),
+    (
+        "view.workbench.status.diff_opened",
+        "Opened the diff tab.",
+        "已打开差异页签。",
+    ),
+    (
+        "view.workbench.status.diff_empty",
+        "Nothing to compare: render a statement first.",
+        "没有可对比的内容：请先解析预览。",
+    ),
+    (
+        "view.workbench.status.shared",
+        "SQL copied to the clipboard.",
+        "SQL 已复制到剪贴板。",
+    ),
+    (
+        "view.workbench.status.share_empty",
+        "Nothing to share: render a statement first.",
+        "没有可分享的内容：请先解析预览。",
+    ),
+    (
+        "view.workbench.status.qualify_refused",
+        "Qualifying columns needs the renderer: neither the core renderer nor the engine has a table-qualifier switch yet.",
+        "含表列名需要渲染器支持：core 渲染器与引擎都还没有表名限定开关。",
     ),
     (
         "view.workbench.params.hint",

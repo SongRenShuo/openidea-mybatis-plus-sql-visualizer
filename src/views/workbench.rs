@@ -25,7 +25,7 @@
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use openidea_plugin::{Error, PickItem, host};
+use openidea_plugin::{ContentDiff, Error, PickItem, host};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -53,6 +53,10 @@ const FORMAT_ON_PREVIEW_SETTING: &str = "render.formatOnPreview";
 
 /// How many project files one "load from file" pick lists.
 const PICK_LIMIT: u32 = 200;
+
+/// The diff viewer's file name, so its right side gets SQL highlighting (same
+/// choice `commands::preview_sql_diff` makes).
+const DIFF_FILE_NAME: &str = "sql";
 
 /// The document name a pasted fragment is rendered under; it only shows up in
 /// load diagnostics.
@@ -749,6 +753,16 @@ fn labels(confidence: &str) -> Value {
         "paramsNoPlaceholder": t("view.workbench.status.params_no_placeholder"),
         "rebound": t("view.workbench.status.rebound"),
         "rollbackRefused": t("view.workbench.status.rollback_refused"),
+        // Lane L44: "更多" gained diff / share / qualify. Diff and share work;
+        // qualify cannot, because the renderer, not this page, would have to
+        // resolve each column's table — the entry stays disabled and its
+        // tooltip says so.
+        "diff": t("view.workbench.action.diff"),
+        "diffNote": t("view.workbench.diff.note"),
+        "share": t("view.workbench.action.share"),
+        "shareNote": t("view.workbench.share.note"),
+        "qualify": t("view.workbench.action.qualify"),
+        "qualifyNote": t("view.workbench.qualify.note"),
     })
 }
 
@@ -803,6 +817,14 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
         }
         "copy" => copy_sql()?,
         "export" => export_sql()?,
+        // Lane L44: the reference's "差异对比" — the original on the left, the
+        // rendered SQL on the right, opened in the platform diff viewer (the one
+        // surface that can be popped out into a window). The payload is built
+        // the same way `commands::preview_sql_diff` builds it.
+        "diff" => open_diff_tab()?,
+        // Lane L44: "分享" degrades to a local copy — this plugin never sends
+        // anything over the network, and the clipboard is the whole share path.
+        "share" => share_sql()?,
         // Parameter rebinding (lane L27): the page sends the edited values; the
         // host renders each as a SQL literal and substitutes them into the
         // model's SQL through the core log placeholder scanner.
@@ -814,6 +836,14 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
         // The dialect is read-only: it comes from the settings page. The op is
         // still answered so an older page does not wait for a reply.
         "dialect" => set_status(t("view.workbench.status.dialect_readonly"), false),
+        // Lane L44: "含表列名" (qualify every column with its table). The switch
+        // belongs to the renderer: it has to know which table each column came
+        // from, which is exactly what this plugin does not have. There is no
+        // such flag in `core::xml` or in the engine jar (`RenderRequest` carries
+        // source / dialect / params / entity_tables only), so the entry is
+        // disabled in the page and this branch — reached only by an old page —
+        // says why instead of rewriting SQL here.
+        "qualify" => set_status(t("view.workbench.status.qualify_refused"), false),
         // Lane L42: a row handed over from the log list. Resolving it here (not
         // in the page) keeps the log's parsed rows the single source, and the
         // destination is `preview_target`'s call, not this handler's.
@@ -924,6 +954,59 @@ fn export_sql() -> Result<(), Error> {
     );
     crate::commands::common::emit(&text)?;
     set_status(t("view.workbench.status.exported"), false);
+    Ok(())
+}
+
+/// Opens the rendered SQL against its own source in the platform diff viewer
+/// (lane L44).
+///
+/// The left side is the model's `raw` — what the user typed, the mapper
+/// fragment a command handed over, or the log row a "quick preview" resolved —
+/// and the right side is the executable SQL. Names follow the model's origin so
+/// the diff header says which statement it is; a statement-only model (one a
+/// command handed over) has no separate source text, so the left side falls back
+/// to the SQL exactly as `preview_tab` does for the "原文" tab.
+fn open_diff_tab() -> Result<(), Error> {
+    let current = model();
+    if !current.has_sql() {
+        set_status(t("view.workbench.status.diff_empty"), false);
+        return Ok(());
+    }
+    let left = if current.raw.is_empty() {
+        current.sql.clone()
+    } else {
+        current.raw.clone()
+    };
+    let source = if current.source.is_empty() {
+        t("view.workbench.diff.inline")
+    } else {
+        current.source.clone()
+    };
+    let diff = ContentDiff {
+        left,
+        right: current.sql.clone(),
+        left_label: Some(t("preview.diff.left")),
+        right_label: Some(t("preview.diff.right")),
+        title: Some(format!("{}: {source}", t("view.workbench.diff.title"))),
+    };
+    host::open_diff(&diff, Some(DIFF_FILE_NAME))
+        .map_err(|error| Error::Failed(error.to_string()))?;
+    set_status(t("view.workbench.status.diff_opened"), false);
+    Ok(())
+}
+
+/// Copies the rendered SQL — the reference's "分享" path, reduced to what this
+/// platform can do without leaving the machine: there is no share service, no
+/// external clipboard target and no network capability in the manifest, so the
+/// clipboard is the whole share.
+fn share_sql() -> Result<(), Error> {
+    let current = model();
+    if !current.has_sql() {
+        set_status(t("view.workbench.status.share_empty"), false);
+        return Ok(());
+    }
+    host::copy_to_clipboard(&current.copy_text())?;
+    set_status(t("view.workbench.status.shared"), false);
     Ok(())
 }
 
@@ -1498,6 +1581,16 @@ mod tests {
             "Rollback lives in More"
         );
         assert!(module.contains("role=\"menu\""), "the fold is a menu");
+        // Lane L44: the fold gained Diff and Share (both live) and Qualify (the
+        // one entry the renderer would have to provide, so it is disabled with
+        // the reason in its tooltip).
+        for id in ["id=\"pvDiff\"", "id=\"pvShare\"", "id=\"pvQualify\""] {
+            assert!(module.contains(id), "{id} lives in More");
+        }
+        assert!(
+            module.contains("id=\"pvQualify\" class=\"pv-more-item\" type=\"button\" role=\"menuitem\"\n                disabled"),
+            "Qualify is disabled in the markup too"
+        );
 
         // Two columns: parameters at 30%, result tabs beside them, in the
         // reference tab order SQL / Original / Columns.
@@ -2078,5 +2171,134 @@ mod tests {
         let formatted = tab["model"]["tabs"]["formatted"].as_str().unwrap();
         assert_ne!(formatted, "select id from t where a=1");
         assert!(formatted.to_uppercase().contains("SELECT"), "{formatted}");
+    }
+
+    // Lane L44: the "更多" menu's diff and share paths, and the refusal of the
+    // one entry the renderer would have to provide.
+
+    #[test]
+    fn the_diff_op_opens_the_source_against_the_rendered_sql() {
+        let (host, _guard) = test_host();
+        let mut current = WorkbenchModel::new(
+            "select id from user where id = ?",
+            vec!["1".to_string()],
+            "MySQL",
+        );
+        current.raw =
+            "<mapper namespace=\"com.acme\"><select id=\"find\">select id from user where id = #{id}</select></mapper>"
+                .to_string();
+        current.source = "UserMapper.xml#find".to_string();
+        current.confidence = "exact".to_string();
+        set_model(current);
+        send(json!({ "op": "preview-diff" }));
+        let diffs = host.opened_diffs();
+        assert_eq!(diffs.len(), 1, "one diff tab");
+        let (diff, file_name) = &diffs[0];
+        assert_eq!(file_name.as_deref(), Some("sql"), "SQL highlighting");
+        assert!(
+            diff.left
+                .as_deref()
+                .is_some_and(|left| left.contains("<mapper")),
+            "the left side is the original source: {:?}",
+            diff.left
+        );
+        assert!(
+            diff.right
+                .as_deref()
+                .is_some_and(|right| right.contains("select id from user")),
+            "the right side is the rendered SQL: {:?}",
+            diff.right
+        );
+        let title = diff.title.as_deref().unwrap_or_default();
+        assert!(title.contains("UserMapper.xml#find"), "{title}");
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.diff_opened")
+        );
+        assert!(
+            !host.output().contains_key(common::CHANNEL),
+            "the diff tab is the surface; Output stays closed"
+        );
+    }
+
+    #[test]
+    fn the_diff_op_without_sql_reports_it_and_opens_nothing() {
+        let (host, _guard) = test_host();
+        send(json!({ "op": "preview-diff" }));
+        assert!(host.opened_diffs().is_empty(), "no diff for an empty model");
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.diff_empty")
+        );
+    }
+
+    #[test]
+    fn a_statement_only_model_diffs_against_its_own_sql() {
+        // A command hands the statement over with no separate source text; the
+        // diff still opens, with the statement on both sides.
+        let (host, _guard) = test_host();
+        let mut current = WorkbenchModel::new("select 1", Vec::new(), "MySQL");
+        current.confidence = "exact".to_string();
+        set_model(current);
+        send(json!({ "op": "preview-diff" }));
+        let diffs = host.opened_diffs();
+        assert_eq!(diffs.len(), 1);
+        let (diff, _) = &diffs[0];
+        assert_eq!(diff.left.as_deref(), Some("select 1"));
+        assert_eq!(diff.right.as_deref(), Some("select 1"));
+        assert!(
+            diff.title
+                .as_deref()
+                .is_some_and(|title| title.contains(&t("view.workbench.diff.inline"))),
+            "an inline statement names itself: {:?}",
+            diff.title
+        );
+    }
+
+    #[test]
+    fn the_share_op_copies_the_sql_and_stays_offline() {
+        let (host, _guard) = test_host();
+        set_model(WorkbenchModel::new(
+            "select 2 from dual",
+            Vec::new(),
+            "MySQL",
+        ));
+        send(json!({ "op": "preview-share" }));
+        assert_eq!(host.clipboard().as_deref(), Some("select 2 from dual"));
+        assert_eq!(tab()["status"]["text"], t("view.workbench.status.shared"));
+        assert_eq!(
+            tab()["replaceInput"],
+            false,
+            "sharing leaves the input box alone"
+        );
+    }
+
+    #[test]
+    fn sharing_without_sql_reports_it_and_leaves_the_clipboard_alone() {
+        let (host, _guard) = test_host();
+        send(json!({ "op": "preview-share" }));
+        assert!(host.clipboard().is_none());
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.share_empty")
+        );
+    }
+
+    #[test]
+    fn the_qualify_op_refuses_because_the_renderer_owns_the_flag() {
+        let (host, _guard) = test_host();
+        set_model(WorkbenchModel::new(
+            "select id from user",
+            Vec::new(),
+            "MySQL",
+        ));
+        send(json!({ "op": "preview-qualify" }));
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.qualify_refused")
+        );
+        // The refusal never rewrites the SQL: nothing here guesses table names.
+        assert_eq!(model().sql, "select id from user");
+        assert!(host.opened_diffs().is_empty());
     }
 }

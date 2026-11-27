@@ -4382,6 +4382,9 @@ Preparing: DELETE FROM users WHERE id = ?
             "preview-params",
             "preview-refresh",
             "preview-rollback",
+            // Lane L44: the two entries L42 left to this lane.
+            "preview-diff",
+            "preview-share",
         ] {
             assert!(module.contains(op), "missing op {op} in the module");
         }
@@ -4938,6 +4941,9 @@ Preparing: DELETE FROM users WHERE id = ?
             "pvMore",
             "pvMoreMenu",
             "pvExport",
+            "pvDiff",
+            "pvShare",
+            "pvQualify",
             "pvRollback",
             "pvBanner",
             "pvBannerText",
@@ -4973,6 +4979,19 @@ Preparing: DELETE FROM users WHERE id = ?
         );
         assert!(module.contains("op: 'preview-rollback'"), "the rollback op");
         assert!(module.contains("labels.rollbackNote"), "the rollback note");
+        // Lane L44: Diff and Share post their ops; Qualify stays disabled with
+        // the renderer reason in its tooltip (no SQL rewriting on this side).
+        assert!(module.contains("op: 'preview-diff'"), "the diff op");
+        assert!(module.contains("op: 'preview-share'"), "the share op");
+        assert!(module.contains("labels.qualifyNote"), "the qualify note");
+        assert!(
+            module.contains("qualifyBtn.disabled = true"),
+            "Qualify stays disabled: the renderer owns the flag"
+        );
+        assert!(
+            !module.contains("op: 'preview-qualify'"),
+            "the page never asks for qualify, so the entry cannot look usable"
+        );
         // Explain stays disabled with the reason in its tooltip; the page has
         // no external link, no storage and builds no markup from data.
         assert!(
