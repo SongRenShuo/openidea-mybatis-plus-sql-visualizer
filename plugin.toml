@@ -225,6 +225,20 @@ web = "web/suppress.html"
 width = 760
 height = 520
 
+# The preview as a modal dialog (API 1.18), the IntelliJ edition's
+# `SqlPreviewDialog`. It loads the same page as the fifth tab (`web/preview.html`
+# mounts `web/preview.js`), so the render is identical and only the shell
+# differs. `views::reveal("sqlv-preview")` opens it from the preview commands and
+# from the workbench's "Open in Dialog"; the size below is what it first opens
+# at, and the IDE remembers what the user resizes it to. `preview.presentation`
+# picks this shell or the tab (see `settings/sql-preview.json`).
+[[contributes.dialogs]]
+id = "sqlv-preview"
+title = "SQL Preview"
+web = "web/preview.html"
+width = 900
+height = 640
+
 # Settings: one node named after the plugin, split into pages like the IntelliJ
 # edition's `Tools › SQL Visualizer` (UI and Actions / SQL Preview / SQL Log /
 # Engine). Keys are unchanged; only the page they live on moved.

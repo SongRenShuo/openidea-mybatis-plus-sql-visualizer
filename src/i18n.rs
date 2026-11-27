@@ -326,9 +326,15 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "view.workbench.open_dialog.note",
-        "This build has no separate dialog: the tool window is the workbench.",
-        "本版没有独立弹框，工具窗就是工作台。",
+        "Open the preview in a modal dialog (Escape closes it).",
+        "在模态弹框中打开预览（Esc 关闭）。",
     ),
+    (
+        "view.workbench.dialog.note",
+        "The preview in its own dialog; Escape or Close returns to the editor.",
+        "独立弹框中的预览；Esc 或「关闭」回到编辑器。",
+    ),
+    ("view.workbench.action.close", "Close", "关闭"),
     ("view.workbench.action.copy_sql", "Copy SQL", "复制 SQL"),
     ("view.workbench.action.explain", "Explain", "执行计划"),
     ("view.workbench.action.refresh", "Refresh", "刷新"),

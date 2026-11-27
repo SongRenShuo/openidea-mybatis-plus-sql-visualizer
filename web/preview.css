@@ -62,6 +62,10 @@ body.pv-root { margin: 0; }
 .pv-root .btn:hover { background: var(--openidea-bg-hover); }
 .pv-root .btn.on { background: var(--openidea-bg-selected); border-color: var(--openidea-accent); }
 .pv-root .btn[disabled] { opacity: 0.5; cursor: default; }
+/* Lane L48: "Open in Dialog" hides inside the dialog and the dialog's "Close"
+   hides in the tab. The `.btn` rule above sets `display`, which beats the
+   browser's `[hidden]` rule, so the attribute needs its own. */
+.pv-root .btn[hidden] { display: none; }
 .pv-root .muted { color: var(--openidea-fg-muted); }
 .pv-root .code {
   margin: 0; padding: 6px; border-radius: 3px;

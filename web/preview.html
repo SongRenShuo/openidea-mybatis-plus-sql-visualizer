@@ -12,13 +12,17 @@
 <body>
   <!-- The standalone mount of the preview workbench (lane L42). The fifth tab
        of `web/log-panel.html` imports the same module and mounts it there; this
-       page is the shell the API 1.18 dialog will load. `mountPreview` builds
-       every control, so the body starts empty on purpose. -->
+       page is what `[[contributes.dialogs]] id = "sqlv-preview"` loads (lane
+       L48). `mountPreview` builds every control, so the body starts empty on
+       purpose, and everything that closes the dialog lives behind the module's
+       `openidea.dialog` check — this page has no dialog code of its own. -->
   <script type="module">
     import { mountPreview } from './preview.js';
 
     // A standalone page and the tab share the protocol exactly: the host pushes
-    // `{ op: "state", tabs: { preview } }` and `applyTab` renders it. Until the
+    // `{ op: "state", tabs: { preview } }` and `applyTab` renders it. The host
+    // that opened this page as a dialog posts the same payload on its own as
+    // `{ op: "preview-tab", tab }`; both shapes land in `applyTab`. Until the
     // first push the workbench shows its own empty state, so a plain browser
     // (no host: no `openidea`) still renders a readable skeleton.
     const mounted = mountPreview(document.body, {});
@@ -30,14 +34,16 @@
           if (message.op === 'state' && message.tabs) {
             mounted.applyTab(message.tabs.preview);
           } else if (message.op === 'preview-tab') {
-            // A host may also push the `tabs.preview` payload on its own (the
-            // "send to preview" hand-off); both shapes land in `applyTab`.
+            // The dialog's own payload (a hand-off, a close-and-reopen, or the
+            // answer to `preview-ready` below).
             mounted.applyTab(message.tab || message);
           }
         } catch (error) { /* ignore malformed */ }
       });
     }
     if (window.openidea && window.openidea.postMessage) {
+      // The handshake: the host answers with the last render, so closing the
+      // dialog and opening it again shows the same statement.
       window.openidea.postMessage(JSON.stringify({ op: 'preview-ready' }));
     }
   </script>

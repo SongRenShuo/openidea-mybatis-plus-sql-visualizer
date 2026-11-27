@@ -1,5 +1,15 @@
 {
   "properties": {
+    "preview.presentation": {
+      "type": "string",
+      "title": "Open preview in",
+      "group": "Preview",
+      "enum": [
+        "dialog",
+        "tab"
+      ],
+      "default": "dialog"
+    },
     "dialect.mode": {
       "type": "string",
       "title": "Dialect mode",

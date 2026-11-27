@@ -1,16 +1,18 @@
-//! `open-workbench`: send a statement to the preview tab and reveal the panel.
+//! `open-workbench`: send a statement to the preview and bring it to the front.
 //!
-//! Since lane L23 the preview workbench is the fifth tab of the SQL log panel
-//! (`sqlv-logs`), exactly as the IntelliJ edition's "SQL 预览" tab lives inside
-//! the SQL Log tool window. So this command sets the workbench model, pushes
-//! the log panel's state with `selectTab: "preview"` and reveals `sqlv-logs`;
-//! there is no `sqlv-workbench` view any more.
+//! Since lane L23 the preview workbench also lives as the fifth tab of the SQL
+//! log panel (`sqlv-logs`), exactly as the IntelliJ edition's "SQL 预览" tab
+//! lives inside the SQL Log tool window. Lane L48 added the modal dialog
+//! (`sqlv-preview`, API 1.18), so this command sets the workbench model and
+//! then opens whichever shell `preview.presentation` names: the dialog by
+//! default, the fifth tab (`selectTab: "preview"` + reveal `sqlv-logs`) when
+//! the user chose `tab`.
 //!
 //! The argument is optional SQL text, `@<path>`, or a bare project file path
 //! (the form the project view context menu passes). The plugin-side model is
-//! set too, because the page asks for the state again with `{op:"ready"}`
-//! when it finishes loading (that handshake would otherwise overwrite the load
-//! with an empty model).
+//! set too, because the page asks for the state again when it finishes loading
+//! (`{op:"preview-ready"}` in the dialog, `{op:"ready"}` in the panel) — that
+//! handshake would otherwise overwrite the load with an empty model.
 
 use openidea_plugin::{Error, Invocation, host};
 
@@ -62,10 +64,24 @@ fn open(ctx: &Invocation, arg: Option<&str>) -> Result<(), CliError> {
     // it gets).
     workbench::request_tab();
     workbench::request_input_replace();
-    log_panel::push_state()
-        .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
-    host::reveal_view(log_panel::VIEW_ID)
-        .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
+    // Lane L48: the shell comes from `preview.presentation`. The dialog is a
+    // view of its own, so it is revealed instead of the tool window; the
+    // payload follows from `push_dialog` / the page's `preview-ready`
+    // handshake, never from the panel's `state` push.
+    match workbench::preview_target() {
+        workbench::PreviewTarget::Dialog => {
+            workbench::push_dialog()
+                .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
+            host::reveal_view(workbench::DIALOG_VIEW_ID)
+                .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
+        }
+        workbench::PreviewTarget::Tab => {
+            log_panel::push_state()
+                .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
+            host::reveal_view(log_panel::VIEW_ID)
+                .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
+        }
+    }
 
     Ok(())
 }
@@ -95,21 +111,39 @@ mod tests {
         out
     }
 
+    /// The preview payload the command produced, whatever shell it went to.
+    ///
+    /// Lane L48: the dialog is the default and receives
+    /// `{op:"preview-tab", tab}`; the tab shell receives the panel's whole
+    /// `state`. Both carry the same `tabs.preview` object, so the tests read it
+    /// through this one helper and stay shell-independent.
     fn preview_state(host: &MockHost) -> Value {
         let messages = host.view_messages();
         assert_eq!(messages.len(), 1, "{messages:?}");
-        assert_eq!(messages[0].0, log_panel::VIEW_ID);
-        serde_json::from_str(&messages[0].1).expect("valid JSON")
+        let value: Value = serde_json::from_str(&messages[0].1).expect("valid JSON");
+        match workbench::preview_target() {
+            workbench::PreviewTarget::Dialog => {
+                assert_eq!(messages[0].0, workbench::DIALOG_VIEW_ID);
+                assert_eq!(value["op"], "preview-tab");
+                json!({
+                    "selectTab": workbench::select_tab(),
+                    "tabs": { "preview": value["tab"].clone() },
+                })
+            }
+            workbench::PreviewTarget::Tab => {
+                assert_eq!(messages[0].0, log_panel::VIEW_ID);
+                value
+            }
+        }
     }
 
     #[test]
-    fn commands_open_workbench_pushes_the_log_panel_state_and_reveals_it() {
+    fn commands_open_workbench_carries_the_statement_and_reveals_the_shell() {
         with_model_restore(|| {
             let host = MockHost::install();
             run(&host.invocation(), Some("select * from user")).unwrap();
 
             let value = preview_state(&host);
-            assert_eq!(value["op"], "state");
             assert_eq!(value["selectTab"], "preview");
             let preview = &value["tabs"]["preview"];
             assert_eq!(preview["model"]["sql"], "select * from user");
@@ -124,7 +158,10 @@ mod tests {
                 "the statement has to show up in the input box"
             );
             assert!(preview["labels"].is_object());
-            assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
+            assert_eq!(
+                host.revealed_views(),
+                [workbench::preview_target().view_id().to_string()]
+            );
             assert!(!host.output().contains_key(common::CHANNEL));
         });
     }
@@ -159,7 +196,46 @@ mod tests {
             let preview = &value["tabs"]["preview"]["model"];
             assert_eq!(preview["sql"], "");
             assert_eq!(preview["confidence"], "");
-            assert_eq!(value["selectTab"], "preview", "the tab still opens");
+            assert_eq!(value["selectTab"], "preview", "the preview still opens");
+        });
+    }
+
+    #[test]
+    fn commands_open_workbench_keeps_the_tab_shell_when_the_setting_says_so() {
+        // Lane L48: `preview.presentation = tab` restores the shell this build
+        // shipped before API 1.18 — the panel's own `state` push and the tool
+        // window brought forward.
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.set_setting("preview.presentation", "\"tab\"");
+            run(&host.invocation(), Some("select 1")).unwrap();
+
+            let value = preview_state(&host);
+            assert_eq!(value["op"], "state");
+            assert_eq!(value["selectTab"], "preview");
+            assert_eq!(value["tabs"]["preview"]["model"]["sql"], "select 1");
+            assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
+        });
+    }
+
+    #[test]
+    fn commands_open_workbench_opens_the_dialog_by_default() {
+        // Lane L48: the default shell is the modal dialog, so the statement goes
+        // to `sqlv-preview` and the tool window stays where it is.
+        with_model_restore(|| {
+            let host = MockHost::install();
+            run(&host.invocation(), Some("select 2")).unwrap();
+
+            let messages = host.view_messages();
+            assert_eq!(messages.len(), 1, "{messages:?}");
+            assert_eq!(messages[0].0, workbench::DIALOG_VIEW_ID);
+            let value: Value = serde_json::from_str(&messages[0].1).expect("valid JSON");
+            assert_eq!(value["op"], "preview-tab");
+            assert_eq!(value["tab"]["model"]["sql"], "select 2");
+            assert_eq!(
+                host.revealed_views(),
+                [workbench::DIALOG_VIEW_ID.to_string()]
+            );
         });
     }
 }
