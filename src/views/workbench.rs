@@ -1420,11 +1420,12 @@ mod tests {
         let page = include_str!("../../web/log-panel.html");
         let module = include_str!("../../web/preview.js");
         let css = include_str!("../../web/preview.css");
-        let pane_start = module.find("id=\"pvPaneTop\"").expect("the preview markup");
-        let pane_end = module
+        // The input half exists and holds the parameter list: both lookups are
+        // the assertion, so the spans themselves are not kept.
+        let _pane_start = module.find("id=\"pvPaneTop\"").expect("the preview markup");
+        let _pane_end = module
             .find("id=\"pvParamsList\"")
             .expect("the parameter list");
-        let pane = &module[pane_start..pane_end];
 
         // Vertical order: meta row, toolbar, degradation strip, columns. The
         // input half above has a toolbar of its own, so the preview toolbar is
