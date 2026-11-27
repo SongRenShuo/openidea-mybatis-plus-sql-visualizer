@@ -291,6 +291,14 @@ fn resolve(ctx: &Invocation, arg: Option<&str>) -> Result<Input, CliError> {
 }
 
 fn resolve_argument(ctx: &Invocation, raw: &str) -> Result<Input, CliError> {
+    // `<path>@<offset>`: what a Java gutter button passes. The offset is the
+    // anchor's byte position, resolved here by the same span rule the caret
+    // path uses, so an icon on an annotation and one on a wrapper chain share
+    // one route.
+    if let Some((path, offset)) = split_offset_arg(raw) {
+        let java = common::read_file(ctx, &path)?;
+        return Ok(java_at(ctx, &path, java, offset));
+    }
     if let Some((path, statement)) = split_statement_arg(raw) {
         let xml = common::read_file(ctx, &path)?;
         // `<sqlMap>` and `<mapper>` both take `path#id`; the root element says
@@ -371,6 +379,60 @@ fn split_java_arg(arg: &str) -> Option<(String, String)> {
         return None;
     }
     Some((path.to_string(), method.to_string()))
+}
+
+/// `path.java@<offset>` → `(path, offset)`: the argument a Java gutter button
+/// passes.
+///
+/// Distinguishing it from `@<path>` (the "this is a path" prefix) is the `@`
+/// position: a prefix form has no path before it, and the offset must be all
+/// digits. A bare Java path with an `@` in its directory therefore still reads
+/// as a path unless the tail after the last `@` is numeric.
+fn split_offset_arg(arg: &str) -> Option<(String, usize)> {
+    let (path, offset) = arg.rsplit_once('@')?;
+    let path = path.trim();
+    let offset = offset.trim();
+    if path.is_empty() || path.chars().any(char::is_whitespace) {
+        return None;
+    }
+    if !path.to_ascii_lowercase().ends_with(".java") {
+        return None;
+    }
+    if offset.is_empty() || !offset.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some((path.to_string(), offset.parse().ok()?))
+}
+
+/// The input a Java document at a byte offset resolves to.
+///
+/// An offset inside an annotated statement's method span is that statement
+/// (whatever cursor position the icon was drawn from); otherwise it is the
+/// wrapper chain containing it. A offset that names neither is reported as "no
+/// input at this position" instead of falling back to the whole file — the
+/// gutter only ever points at something it found.
+fn java_at(ctx: &Invocation, path: &str, java: String, offset: usize) -> Input {
+    if let Some(statement) = sources::annotation_at(&java, offset) {
+        return Input::Annotation {
+            path: path.to_string(),
+            java,
+            method: statement.method_name.clone(),
+            caret: Some(offset),
+        };
+    }
+    match sources::wrapper_chain_at(&java, offset) {
+        Some(chain) => wrapper_input(ctx, &chain, Some(path.to_string())),
+        // The icon was drawn from a scan of the same text, so this only happens
+        // when the file changed between the draw and the click. Rendering the
+        // whole file as a chain would be the wrong statement; the annotation
+        // model reports "no annotated statement" for it, which is the truth.
+        None => Input::Annotation {
+            path: path.to_string(),
+            java,
+            method: None,
+            caret: Some(offset),
+        },
+    }
 }
 
 /// `Class#method` (no path): the shape a user types to reach an annotated
@@ -1603,6 +1665,138 @@ public class User {
             assert!(reason.contains("wrapper.entity.not_found"), "{reason}");
             assert!(reason.contains("Ghost"), "{reason}");
         });
+    }
+
+    // The gutter's Java argument (`<path>@<offset>`) ---------------------
+
+    #[test]
+    fn commands_preview_sql_accepts_the_gutter_offset_for_a_wrapper_chain() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/entity/User.java", DECLARED_ENTITY);
+            host.set_symbols(
+                "/project",
+                vec![symbol_of("User", "/project/entity/User.java")],
+            );
+            let service = r#"package a;
+
+public class UserService {
+    java.util.List<User> list(String status) {
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(User::getStatus, status);
+        return mapper.selectList(wrapper);
+    }
+}
+"#;
+            host.add_file("/project/UserService.java", service);
+            let offset = service
+                .find("LambdaQueryWrapper<User>")
+                .expect("declaration");
+            run(
+                &host.invocation(),
+                Some(&format!("/project/UserService.java@{offset}")),
+            )
+            .unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["kind"], "wrapper");
+            assert_eq!(model["table"], "sys_user");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.contains("FROM sys_user WHERE status = ?")),
+                "{model}"
+            );
+            // The chain, not the whole file: the declaration and the one call
+            // that continues it before the caret.
+            assert!(
+                model["params"]
+                    .as_array()
+                    .is_some_and(|rows| rows.len() == 1),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_resolves_the_gutter_offset_inside_a_continued_chain() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/entity/User.java", DECLARED_ENTITY);
+            host.set_symbols(
+                "/project",
+                vec![symbol_of("User", "/project/entity/User.java")],
+            );
+            let service = r#"package a;
+
+public class UserService {
+    java.util.List<User> list(String status) {
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(User::getStatus, status);
+        return mapper.selectList(wrapper);
+    }
+}
+"#;
+            host.add_file("/project/UserService.java", service);
+            // The icon on a chaining statement resolves the chain it belongs to,
+            // so both icons of one chain reach the same render.
+            let at_call = service.find("wrapper.eq").expect("the chaining call");
+            run(
+                &host.invocation(),
+                Some(&format!("/project/UserService.java@{at_call}")),
+            )
+            .unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["kind"], "wrapper");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.contains("status = ?")),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_accepts_the_gutter_offset_for_an_annotation() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/ByIds.java", ONE_ANNOTATION);
+            let offset = ONE_ANNOTATION.find("@Delete").expect("the annotation");
+            run(
+                &host.invocation(),
+                Some(&format!("/project/ByIds.java@{offset}")),
+            )
+            .unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "exact");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.contains("DELETE FROM users")),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_offset_form_is_not_mistaken_for_a_path_prefix() {
+        // `@<path>` is the "this is a path" prefix; `path@123` is the gutter
+        // form. The two must not be confused, and a non-numeric tail stays a path.
+        assert_eq!(
+            split_offset_arg("/project/A.java@42"),
+            Some(("/project/A.java".to_string(), 42))
+        );
+        assert_eq!(split_offset_arg("@/project/A.java"), None);
+        assert_eq!(split_offset_arg("/project/A.java#find"), None);
+        assert_eq!(split_offset_arg("/project/A.xml@42"), None);
+        assert_eq!(
+            split_offset_arg("/a@b/UserService.java@7"),
+            Some(("/a@b/UserService.java".to_string(), 7)),
+            "a directory named with an @ still works: the tail must be numeric"
+        );
     }
 
     #[test]

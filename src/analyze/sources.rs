@@ -256,34 +256,62 @@ pub fn wrapper_chain_at(java: &str, caret: usize) -> Option<String> {
     let index = statements
         .iter()
         .position(|(start, end)| *start <= caret && caret <= *end)?;
-    let (start, end) = statements[index];
-    let statement = &java[start..end];
-    if let Some(chain) = as_chain(statement) {
-        return Some(chain);
-    }
-    // `wrapper.eq(…)`: the chain starts at the variable's declaration, and the
-    // statements between it and the caret that keep chaining belong to it too.
-    let receiver = receiver_ident(statement)?;
-    let assignment = format!("{receiver} =");
-    let declaration = (0..index).rev().find(|&earlier| {
-        let text = &java[statements[earlier].0..statements[earlier].1];
-        text.contains(&assignment) && as_chain(text).is_some()
-    })?;
-    let mut chain = as_chain(&java[statements[declaration].0..statements[declaration].1])?;
-    let call_prefix = format!("{receiver}.");
-    for (piece_start, piece_end) in statements.iter().take(index + 1).skip(declaration + 1) {
-        let piece = java[*piece_start..*piece_end].trim();
-        if !piece.starts_with(&call_prefix) {
-            continue;
+    let statement = &java[statements[index].0..statements[index].1];
+
+    // Where the chain starts: this statement when it is itself a root, else the
+    // declaration of the variable this statement keeps calling on.
+    let (root, declared) = if as_chain(statement).is_some() {
+        (index, declared_name(statement))
+    } else {
+        let receiver = receiver_ident(statement)?;
+        let assignment = format!("{receiver} =");
+        let declaration = (0..index).rev().find(|&earlier| {
+            let text = &java[statements[earlier].0..statements[earlier].1];
+            text.contains(&assignment) && as_chain(text).is_some()
+        })?;
+        (declaration, Some(receiver))
+    };
+
+    let mut chain = as_chain(&java[statements[root].0..statements[root].1])?;
+    // A declaration's chain is what the statements after it keep adding to, and
+    // that set does not depend on which of the icons the reader clicked: both
+    // have to reach the same SQL. Stop at the first statement that no longer
+    // calls on the declared variable — that is the consuming call
+    // (`mapper.selectList(wrapper)`), not part of the chain.
+    if let Some(receiver) = declared {
+        let call_prefix = format!("{receiver}.");
+        for (piece_start, piece_end) in statements.iter().skip(root + 1) {
+            let piece = java[*piece_start..*piece_end].trim();
+            if !piece.starts_with(&call_prefix) {
+                break;
+            }
+            chain.push('\n');
+            chain.push_str(piece);
         }
-        chain.push('\n');
-        chain.push_str(piece);
     }
     if looks_like_wrapper(&chain) {
         Some(chain)
     } else {
         None
     }
+}
+
+/// The variable a declaration statement binds (`LambdaQueryWrapper<User> w = …`
+/// → `w`), when it declares one.
+fn declared_name(statement: &str) -> Option<String> {
+    let assignment = statement.find('=')?;
+    let head = statement[..assignment].trim_end();
+    let name: String = head
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_alphanumeric() || *ch == '_' || *ch == '$')
+        .collect::<Vec<char>>()
+        .into_iter()
+        .rev()
+        .collect();
+    // A chain root with no `=` (an inline `mapper.selectList(new …)`) binds
+    // nothing, and a name-less head is not a declaration.
+    (!name.is_empty()).then_some(name)
 }
 
 /// The wrapper chain for a whole document: the one at `caret`, else the
@@ -334,15 +362,21 @@ const TYPE_TOKENS: [&str; 4] = [
     "QueryWrapper<",
 ];
 
-/// `statement` from its first wrapper construction on, when that is a chain.
-fn as_chain(statement: &str) -> Option<String> {
+/// Where a statement's wrapper chain begins (byte offset inside `statement`),
+/// or `None` when the statement is not a chain root.
+fn chain_token_at(statement: &str) -> Option<usize> {
     let mut earliest: Option<usize> = None;
     for token in CHAIN_TOKENS.into_iter().chain(TYPE_TOKENS) {
         if let Some(found) = statement.find(token) {
             earliest = Some(earliest.map_or(found, |at: usize| at.min(found)));
         }
     }
-    let text = match earliest {
+    earliest
+}
+
+/// `statement` from its first wrapper construction on, when that is a chain.
+fn as_chain(statement: &str) -> Option<String> {
+    let text = match chain_token_at(statement) {
         Some(at) => &statement[at..],
         None => statement,
     };
@@ -352,6 +386,52 @@ fn as_chain(statement: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// The byte offset of every wrapper *chain root* in `java`, in document order.
+///
+/// This is the gutter's anchoring rule, and it is the reference's
+/// `WrapperAnchorDetector` de-duplication restated over text: a chain root is a
+/// declaration (`LambdaQueryWrapper<User> w = …`, whose type names the entity)
+/// or an inline construction (`new …Wrapper<User>()…`, `Wrappers.…`). A
+/// statement that only continues a variable (`w.eq(…)`) contributes nothing of
+/// its own — the root already speaks for it, so one chain never draws two
+/// icons. A bare parameter (`LambdaQueryWrapper<User> ew` in a mapper interface)
+/// is not a chain either: it has neither a construction nor a call.
+pub fn wrapper_chain_starts(java: &str) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (start, end) in statements(java) {
+        let statement = &java[start..end];
+        // `as_chain` is the single arbiter of "this is a chain": the offset is
+        // only reported when the renderer would accept the same text.
+        let Some(at) = chain_token_at(statement) else {
+            continue;
+        };
+        if as_chain(statement).is_none() {
+            continue;
+        }
+        out.push(start + at);
+    }
+    out
+}
+
+/// The annotated statement whose span contains `caret`, if any.
+///
+/// The span runs from the annotation's `@` to the end of the method it
+/// annotates, which is what makes a gutter icon on the annotation line and a
+/// caret anywhere in that method reach the same statement.
+pub fn annotation_at(java: &str, caret: usize) -> Option<AnnotatedStatement> {
+    annotation_statements(java).into_iter().find(|statement| {
+        caret >= statement.annotation_start && caret < annotation_end(java, statement)
+    })
+}
+
+/// End of the method an annotated statement covers (byte offset).
+///
+/// The gutter needs it to keep a wrapper chain inside an annotated method from
+/// drawing a second icon: the span of "this method's SQL" is exactly this.
+pub fn annotation_end(java: &str, statement: &AnnotatedStatement) -> usize {
+    method_end(java, statement)
 }
 
 /// The identifier a statement is called on (`wrapper.eq(…)` → `wrapper`).
@@ -1142,6 +1222,50 @@ public interface UserMapper {
             chain.contains("LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>()"),
             "{chain}"
         );
+    }
+
+    #[test]
+    fn both_icons_of_one_chain_reach_the_same_text() {
+        // The gutter draws one icon per chain root, but a command or a caret can
+        // land on any statement of the chain: both have to render the same
+        // statement. A chain that grew or shrank depending on where the reader
+        // clicked would be the bug this pins.
+        let at_declaration = WRAPPER_JAVA.find("LambdaQueryWrapper<User>").unwrap();
+        let at_call = WRAPPER_JAVA.find("wrapper.orderByDesc").unwrap() + 3;
+        let from_declaration = wrapper_chain_at(WRAPPER_JAVA, at_declaration).unwrap();
+        let from_call = wrapper_chain_at(WRAPPER_JAVA, at_call).unwrap();
+        assert_eq!(from_declaration, from_call);
+        // And the consuming call is not part of it: it is the mapper's own
+        // statement, not the wrapper's.
+        assert!(
+            !from_declaration.contains("selectList"),
+            "{from_declaration}"
+        );
+    }
+
+    #[test]
+    fn a_chain_root_is_reported_once_per_declaration_or_inline_construction() {
+        let starts = wrapper_chain_starts(WRAPPER_JAVA);
+        // The declaration, and nothing for the two calls that continue it.
+        assert_eq!(starts.len(), 1, "{starts:?}");
+        assert!(
+            WRAPPER_JAVA.as_bytes()[starts[0]..].starts_with(b"LambdaQueryWrapper<User>"),
+            "the root is the declaration's type, which is where the entity is named"
+        );
+
+        let inline = "class A { void run() {\n  mapper.selectList(new LambdaQueryWrapper<User>().eq(User::getId, 1));\n} }";
+        let starts = wrapper_chain_starts(inline);
+        assert_eq!(starts.len(), 1, "the inline construction is the root");
+    }
+
+    #[test]
+    fn a_wrapper_parameter_is_not_a_chain_root() {
+        // A mapper interface's `@Param("ew") Wrapper<T> ew` is a placeholder for
+        // `${ew.customSqlSegment}`, not a chain: an icon there would sit on the
+        // same line as the method's own preview icon.
+        let text =
+            "public interface M {\n  List<T> find(@Param(\"ew\") LambdaQueryWrapper<T> ew);\n}\n";
+        assert!(wrapper_chain_starts(text).is_empty(), "{text}");
     }
 
     #[test]

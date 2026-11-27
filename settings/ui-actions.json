@@ -19,7 +19,7 @@
       "title": "注解 SQL（@Select 族）",
       "group": "Gutter",
       "default": true,
-      "description": "仅存储，尚未接线：本仓尚未实现注解 SQL 的图标通道。"
+      "description": "按来源分组显示预览图标。是否在 @Select 族注解行显示（已接线）。"
     },
     "ui.gutter.jpaHql": {
       "type": "boolean",
@@ -47,7 +47,7 @@
       "title": "Wrapper 链 / 方法名字符串 SQL",
       "group": "Gutter",
       "default": true,
-      "description": "仅存储，尚未接线：本仓尚未实现 Wrapper 链的图标通道。"
+      "description": "按来源分组显示预览图标。是否在 Wrapper 链根（声明行 / 内联 new）显示（已接线）。"
     },
     "ui.mapperNavYield": {
       "type": "boolean",

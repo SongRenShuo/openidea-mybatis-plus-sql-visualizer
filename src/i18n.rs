@@ -1100,6 +1100,18 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     // SQL preview entry (L35a): the gutter button and the command's editor path.
     ("preview.gutter.tooltip", "Preview SQL", "预览 SQL"),
+    // The wrapper chain's own icon (the reference's `gutter.tooltip`, which names
+    // the Wrapper rather than the statement), and the annotation family's.
+    (
+        "preview.gutter.wrapper.tooltip",
+        "Preview the SQL this Wrapper converts to",
+        "预览该 Wrapper 转换的 SQL",
+    ),
+    (
+        "preview.gutter.annotation.tooltip",
+        "Preview the SQL of this annotation",
+        "预览该注解的 SQL",
+    ),
     (
         "preview.error.no_input",
         "Nothing to preview: pass a mapper path, `path#statement` or SQL text, or open a file in the editor.",

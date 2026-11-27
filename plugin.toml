@@ -341,11 +341,14 @@ extensions = ["xml", "java"]
 kinds = ["definition"]
 languages = ["xml", "java"]
 
-# The preview button beside each mapper statement (L35a); its click runs
-# `preview-sql` with `<path>#<statementId>`.
+# The preview button beside each mapper statement (L35a), beside every
+# `@Select` family annotation and beside every wrapper chain root. `xml` passes
+# `<path>#<statementId>`; `java` passes `<path>@<byteOffset>`, which the command
+# resolves by the same span rule its caret path uses. The IntelliJ edition keeps
+# these in separate `LineMarkerProvider`s for the same three surfaces.
 [[contributes.providers]]
 kinds = ["gutter-actions"]
-languages = ["xml"]
+languages = ["xml", "java"]
 
 # Hover card with the rendered SQL on a statement id, a fragment, a result map or
 # a mapper method (L37): the in-place preview the platform can offer instead of a

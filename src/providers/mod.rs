@@ -65,6 +65,19 @@ pub(crate) fn is_java(path: &str) -> bool {
     path.to_ascii_lowercase().ends_with(".java")
 }
 
+/// The three gutter tooltips, looked up once per document.
+///
+/// The host calls `gutter_actions` on every document change, so the lookups are
+/// batched here instead of one `t()` per button — a file with 50 chains would
+/// otherwise pay 50 identical table scans.
+pub(crate) fn gutter_tooltips() -> gutter::Tooltips {
+    gutter::Tooltips {
+        mapper: crate::i18n::t(gutter::TOOLTIP_KEY),
+        wrapper: crate::i18n::t(gutter::WRAPPER_TOOLTIP_KEY),
+        annotation: crate::i18n::t(gutter::ANNOTATION_TOOLTIP_KEY),
+    }
+}
+
 /// Table name (lower-cased, lower-case compare) → column names.
 pub type ColumnLookup = fn(&str) -> Option<Vec<String>>;
 

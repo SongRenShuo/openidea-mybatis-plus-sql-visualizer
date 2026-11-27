@@ -64,6 +64,10 @@
 2. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
    `LambdaQueryWrapper` 文本→链由 `src/analyze` 解析（无 PSI 的类型推断），
    `unresolved` 时只给原因，不出 Java 代码。
+   Java 源码左侧的预览图标覆盖两族：Wrapper 链根（变量声明行 / 内联 `new …Wrapper`）
+   与 `@Select/@Insert/@Update/@Delete` 注解行；链内续写语句与注解方法体内的链不再重复
+   出图标（一条语句一枚）。JdbcTemplate / 方法名字符串 SQL / JPA / HQL / Criteria 仍无图标
+   （无 PSI，只能按名字猜，误亮比不亮更糟），见 `docs/registration/L35a.md` §13。
    预览按**光标所在语句**抽链（`preview-sql` 的 Java 文件入口）：光标落在链上取该语句，
    落在 `wrapper.eq(...)` 这类续写语句时回溯变量声明并把中间的续写语句拼上；整文件只有一个链时
    即使没有光标也取它，多个链则只在光标指明时取，不猜。实体类不在工程索引里时渲染为
