@@ -29,9 +29,9 @@ use super::suppress;
 use super::{VIEW_ID, format_epoch_ms, message_line, push_state};
 
 /// Ticks (500 ms each) of a connected capture with no heartbeat before the
-/// Output channel states it once: the socket answering nothing at all is a
-/// protocol mismatch, not silence from the application.
-const SILENT_TICKS_BEFORE_REPORT: u32 = 20;
+/// Output channel states it once. The agent's heartbeat interval is 10 s, so the
+/// window is 20 s: shorter would race the first beat and cry wolf.
+const SILENT_TICKS_BEFORE_REPORT: u32 = 40;
 
 thread_local! {
     /// The health line last written to Output, so a tick that sees the same
@@ -493,30 +493,36 @@ pub(super) fn capture_retry(ctx: &Invocation) -> Result<(), Error> {
 pub(super) fn capture_poll() -> Result<(), Error> {
     match crate::capture::bridge::poll(super::now_ms()) {
         Ok(report) => {
-            if let Some(health) = report.health {
-                HAD_HEARTBEAT.with(|latch| latch.set(true));
-                SILENT_TICKS.with(|count| count.set(0));
-                if PRINTED_HEALTH.with(|last| last.get()) != Some(health) {
-                    PRINTED_HEALTH.with(|last| last.set(Some(health)));
-                    // One line per change of the counters: the panel's status row
-                    // is too narrow for them, and "connected with zero rows" has
-                    // to be attributable without running a command.
-                    let _ = common::emit(&format!("-- agent: {}\n", health.summary()));
+            // Read the session's stored health, not this batch's: the heartbeat
+            // may have been drained by `capture-start`'s own poll, and the tick
+            // would then keep counting silence forever.
+            match crate::capture::bridge::agent_health() {
+                Some(health) => {
+                    HAD_HEARTBEAT.with(|latch| latch.set(true));
+                    SILENT_TICKS.with(|count| count.set(0));
+                    if PRINTED_HEALTH.with(|last| last.get()) != Some(health) {
+                        PRINTED_HEALTH.with(|last| last.set(Some(health)));
+                        // One line per change of the counters: the panel's status
+                        // row is too narrow for them, and "connected with zero
+                        // rows" has to be attributable without a command.
+                        let _ = common::emit(&format!("-- agent: {}\n", health.summary()));
+                    }
                 }
-            } else if !HAD_HEARTBEAT.with(|latch| latch.get())
-                && !MISSING_REPORTED.with(|flag| flag.get())
-            {
-                let ticks = SILENT_TICKS.with(|count| {
-                    let next = count.get() + 1;
-                    count.set(next);
-                    next
-                });
-                if ticks >= SILENT_TICKS_BEFORE_REPORT {
-                    MISSING_REPORTED.with(|flag| flag.set(true));
-                    let _ = common::emit(
-                        "-- agent: connected but no heartbeat frame arrived \
-                         (the socket is not speaking the capture protocol)\n",
-                    );
+                None => {
+                    if !MISSING_REPORTED.with(|flag| flag.get()) {
+                        let ticks = SILENT_TICKS.with(|count| {
+                            let next = count.get() + 1;
+                            count.set(next);
+                            next
+                        });
+                        if ticks >= SILENT_TICKS_BEFORE_REPORT {
+                            MISSING_REPORTED.with(|flag| flag.set(true));
+                            let _ = common::emit(
+                                "-- agent: connected but no heartbeat frame arrived \
+                                 (the socket is not speaking the capture protocol)\n",
+                            );
+                        }
+                    }
                 }
             }
             if report.fetched > 0 {
