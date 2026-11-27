@@ -2299,6 +2299,10 @@
       }
 
       function closeSheet() { $('sheet').hidden = true; }
+      // Clicking outside the card closes it, the way the reference's overlay
+      // behaves. Esc is bound on this document too, but it only arrives while
+      // the page has keyboard focus; the backdrop always works.
+      $('sheetBackdrop').addEventListener('click', closeSheet);
 
       // Context menu --------------------------------------------------------
       // The menu acts on the row that opened it. An item whose dimension the
