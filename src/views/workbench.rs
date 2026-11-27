@@ -606,8 +606,10 @@ fn apply_parameters(model: &mut WorkbenchModel, detailed: &DetailedRender) {
     model.params = Vec::with_capacity(values.len());
     model.parameters = Vec::with_capacity(detailed.params.len());
     for (index, value) in values.iter().enumerate() {
-        // A `?` the interceptor appended has no metadata entry; the loop below
-        // covers those through `append_injected`.
+        // A `?` written directly in the statement (not a `#{}`) has no metadata
+        // entry; its row then shows the ordinal and an empty name. A `?` an
+        // interceptor appended is not here at all — `apply_intercepts` adds its
+        // rows after this list is complete.
         let text = if value.is_null() {
             String::new()
         } else {
