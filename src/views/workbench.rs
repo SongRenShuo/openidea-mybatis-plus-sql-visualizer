@@ -1522,6 +1522,9 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
             set_status(t("view.workbench.status.cleared"), true);
         }
         "copy" => copy_sql()?,
+        // The toolbar's "copy error" entry, shown only for a render that
+        // carries reasons: the reason text is the whole payload.
+        "copy-error" => copy_error_text()?,
         "export" => export_sql()?,
         // Lane L48: the tab mount's "Open in Dialog". It is an event context
         // (a page message), so `views::reveal` is allowed here; the dialog page
@@ -1787,6 +1790,21 @@ fn copy_sql() -> Result<(), Error> {
         return Ok(());
     }
     host::copy_to_clipboard(&current.copy_text())?;
+    set_status(t("view.workbench.copied"), false);
+    Ok(())
+}
+
+/// Copies the render's reasons (the reference's `panel.copyError`): the same
+/// text the degradation strip shows, never a fabricated success when the
+/// render carries none.
+fn copy_error_text() -> Result<(), Error> {
+    let current = model();
+    let reason = current.reason.trim().to_string();
+    if reason.is_empty() {
+        set_status(t("view.workbench.status.copy_empty"), false);
+        return Ok(());
+    }
+    host::copy_to_clipboard(&reason)?;
     set_status(t("view.workbench.copied"), false);
     Ok(())
 }
@@ -2523,6 +2541,26 @@ mod tests {
             assert!(module.contains(id), "{id} lives in More");
         }
         assert!(module.contains("role=\"menu\""), "the fold is a menu");
+        // What the fold can honour is wired; what it cannot is disabled with
+        // its reason spelled out (no entry fakes a success).
+        for op in [
+            "on('pvImportParams', function () { closeMore(); importFromClipboard(); });",
+            "on('pvDiff', function () { closeMore(); post({ op: 'preview-diff' }); });",
+            "on('pvShare', function () { closeMore(); post({ op: 'preview-share' }); });",
+            "on('pvExport', function () { closeMore(); post({ op: 'preview-export' }); });",
+            "on('pvCopyError', function () { closeMore(); post({ op: 'preview-copy-error' }); });",
+        ] {
+            assert!(module.contains(op), "missing wiring: {op}");
+        }
+        for reason in [
+            "L('rollbackNote')",
+            "L('switchDataSourceNote')",
+            "L('replayExportNote')",
+            "L('aiContextNote')",
+            "L('dmlImpactNote')",
+        ] {
+            assert!(module.contains(reason), "missing disabled reason: {reason}");
+        }
         // Lane L44: the fold gained Diff and Share (both live) and Qualify (the
         // one entry the renderer would have to provide, so it is disabled with
         // the reason in its tooltip).
@@ -3063,6 +3101,35 @@ mod tests {
     fn copying_without_sql_reports_the_status_and_leaves_the_clipboard_alone() {
         let (host, _guard) = test_host();
         send(json!({ "op": "preview-copy" }));
+        assert!(host.clipboard().is_none());
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.copy_empty")
+        );
+    }
+
+    #[test]
+    fn copying_the_error_text_puts_the_reasons_on_the_clipboard() {
+        // The toolbar entry the reference shows only for an error render: the
+        // payload is the reason text itself, never the statement.
+        let (host, _guard) = test_host();
+        let mut model = sample();
+        model.confidence = "partial".to_string();
+        model.reason = "xml.include.not_found: refid=missing".to_string();
+        set_model(model);
+        send(json!({ "op": "preview-copy-error" }));
+        assert_eq!(
+            host.clipboard().as_deref(),
+            Some("xml.include.not_found: refid=missing")
+        );
+        assert_eq!(tab()["status"]["text"], t("view.workbench.copied"));
+    }
+
+    #[test]
+    fn copying_the_error_text_without_reasons_reports_it_and_copies_nothing() {
+        let (host, _guard) = test_host();
+        set_model(sample());
+        send(json!({ "op": "preview-copy-error" }));
         assert!(host.clipboard().is_none());
         assert_eq!(
             tab()["status"]["text"],

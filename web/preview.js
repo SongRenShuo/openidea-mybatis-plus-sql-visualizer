@@ -1353,6 +1353,17 @@ export function mountPreview(root, deps) {
     if (errorButton) {
       errorButton.hidden = !(m.reason && m.reason.trim());
     }
+    // The portable export and the compare entries need a statement; with an
+    // empty render they stay disabled instead of reporting a failure later.
+    const exportButton = node('pvExport');
+    if (exportButton) {
+      exportButton.disabled = !m.sql;
+      exportButton.setAttribute('aria-label', L('morePortableExport'));
+    }
+    const diffButton = node('pvDiff');
+    if (diffButton) { diffButton.disabled = !m.sql; }
+    const shareButton = node('pvShare');
+    if (shareButton) { shareButton.disabled = !m.sql; }
 
     const badge = node('pvConfidence');
     if (badge) {
