@@ -40,6 +40,11 @@ mod tests {
 
     #[test]
     fn commands_open_logs_reveals_and_refreshes_the_panel() {
+        // The push below consumes the workbench's one-shot flags, so it must
+        // hold the same lock every other panel test takes. Without it this test
+        // silently stole `replaceInput` from `open_workbench`'s case, which then
+        // failed on CI only.
+        let _guard = crate::views::test_state_lock();
         let host = MockHost::install();
         run(&host.invocation(), None).unwrap();
         assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);

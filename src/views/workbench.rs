@@ -1440,7 +1440,7 @@ fn status_for(current: &WorkbenchModel) -> String {
 /// tests load logs and open the workbench too, and one lock per panel keeps a
 /// parallel test from observing the other's state.
 #[cfg(test)]
-pub(crate) fn test_store_lock() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn test_store_lock() -> super::StateLockGuard {
     super::test_state_lock()
 }
 
@@ -1450,7 +1450,7 @@ mod tests {
     use crate::commands::common;
     use openidea_plugin::mock::MockHost;
 
-    fn test_host() -> (MockHost, MutexGuard<'static, ()>) {
+    fn test_host() -> (MockHost, super::super::StateLockGuard) {
         let guard = test_store_lock();
         let host = MockHost::install();
         clear();

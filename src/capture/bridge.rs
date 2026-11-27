@@ -363,7 +363,7 @@ pub(crate) fn reset_capture_for_tests() {
 /// Tests that already hold the lock must call [`reset_capture_for_tests`]
 /// instead of this.
 #[cfg(test)]
-pub(crate) fn test_guard() -> MutexGuard<'static, ()> {
+pub(crate) fn test_guard() -> crate::views::StateLockGuard {
     let guard = crate::views::test_state_lock();
     reset_for_tests();
     guard
@@ -648,7 +648,7 @@ mod tests {
 
     /// The same guard `views::test_state_lock` hands out: one lock for the
     /// capture session, the panel rows and the workbench model.
-    fn guard() -> std::sync::MutexGuard<'static, ()> {
+    fn guard() -> crate::views::StateLockGuard {
         test_guard()
     }
 

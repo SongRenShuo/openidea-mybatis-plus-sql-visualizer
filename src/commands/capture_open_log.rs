@@ -104,7 +104,7 @@ Parameters: 2(Long)
     /// Resetting matters as much as locking — without it the count asserted
     /// below depends on which test happened to hold the lock last, which is how
     /// this case went red in CI while passing locally.
-    fn host_with_store_lock() -> (MockHost, std::sync::MutexGuard<'static, ()>) {
+    fn host_with_store_lock() -> (MockHost, crate::views::StateLockGuard) {
         let guard = crate::views::test_state_lock();
         crate::views::log_panel::reset_for_tests();
         (MockHost::install(), guard)

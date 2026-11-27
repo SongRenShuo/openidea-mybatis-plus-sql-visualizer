@@ -1456,6 +1456,12 @@ fn build_state() -> Value {
 
 /// Posts the full state to the packaged page.
 pub fn push_state() -> Result<(), Error> {
+    // Every push consumes the workbench's one-shot `replace_input`/`handoff`
+    // flags, so a test that pushes without the lock steals another test's flag
+    // and fails it later, somewhere else. This assert turns that into a
+    // deterministic failure at the offending call (test builds only).
+    #[cfg(test)]
+    crate::views::assert_state_lock_held("log_panel::push_state");
     let state = build_state();
     host::post_view_message(VIEW_ID, &state.to_string())
 }
@@ -3243,7 +3249,7 @@ mod tests {
 
     /// The row store and the workbench model are shared by the whole process;
     /// the lock is the one both panels' tests and the `commands` tests take.
-    fn test_host() -> (MockHost, MutexGuard<'static, ()>) {
+    fn test_host() -> (MockHost, super::super::StateLockGuard) {
         let guard = super::super::test_state_lock();
         let host = MockHost::install();
         // One shared reset: the same baseline the `commands` tests use, so a
