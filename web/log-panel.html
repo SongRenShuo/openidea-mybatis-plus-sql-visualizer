@@ -1113,16 +1113,20 @@
 
       function updateLabels() {
         labelIconButton($('clearBtn'), L.clear || 'Clear');
-        // Capture (L26): the icon follows the agent connection state — a run
-        // glyph while disconnected (click starts), a stop glyph while connected.
-        var connected = !!(current && current.status && current.status.agent_connected);
+        // Capture (L26): the icon follows "capture is on", not the socket. A
+        // start whose dial was refused stays waiting for the target application
+        // (lane A) — capture is on from the user's point of view, so the entry
+        // has to flip to the stop glyph right away instead of leaving a play
+        // triangle that reads as "nothing happened".
+        var status = (current && current.status) || {};
+        var active = !!(status.agent_connected || status.capture_waiting);
         var captureBtn = $('captureBtn');
-        labelIconButton(captureBtn, connected
+        labelIconButton(captureBtn, active
           ? (L.captureStop || 'Stop capture')
           : (L.captureStart || 'Start capture'));
-        captureBtn.classList.toggle('run', !connected);
-        $('captureRunIcon').hidden = connected;
-        $('captureStopIcon').hidden = !connected;
+        captureBtn.classList.toggle('run', !active);
+        $('captureRunIcon').hidden = active;
+        $('captureStopIcon').hidden = !active;
         // Sort (lane A): the button is a popup opener, so its tooltip states the
         // mode the list is in — the reference action's `Sort: <label>`
         // description. The popup itself is rebuilt from the host's label list.
@@ -2298,10 +2302,13 @@
       $('regexBtn').addEventListener('click', function () { ui.regex = !ui.regex; this.classList.toggle('on', ui.regex); postFilter(); });
       $('clearBtn').addEventListener('click', function () { post({ op: 'clear' }); });
 
-      // Toolbar actions (lane L26).
+      // Toolbar actions (lane L26). "Capture is on" is connected *or* waiting
+      // for the target application (lane A), so a second click while waiting
+      // cancels the start instead of dialing again.
       $('captureBtn').addEventListener('click', function () {
-        var connected = !!(current && current.status && current.status.agent_connected);
-        post({ op: connected ? 'capture-stop' : 'capture-start' });
+        var s = (current && current.status) || {};
+        var active = !!(s.agent_connected || s.capture_waiting);
+        post({ op: active ? 'capture-stop' : 'capture-start' });
       });
       $('scrollEndBtn').addEventListener('click', function () {
         follow = true;

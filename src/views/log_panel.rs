@@ -18,7 +18,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use openidea_plugin::host;
-use openidea_plugin::views::{Body, Button, View, ViewEvent, Views};
+use openidea_plugin::views::{Body, View, ViewEvent, Views};
 use openidea_plugin::{Error, Invocation, NotificationLevel};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -2745,29 +2745,20 @@ fn labels_actions() -> Value {
 // Rendering (toolbar + status chrome; the body is the packaged page)
 // ---------------------------------------------------------------------------
 
-/// Builds the panel view chrome for a `web =` view.
+/// Builds the panel view for a `web =` view.
 ///
-/// The page is the body; this returns the toolbar buttons and status that the
-/// host draws around it. It also re-pushes the state on every render so the
-/// live capture path (`refresh_view`) reaches the page.
+/// The page is the body **and** the chrome: it draws the reference's action row,
+/// its footer and its status line itself. The host renders `View::toolbar` as a
+/// separate strip above the body (`features/plugins/views/PluginView.tsx`), so
+/// anything pushed here appears *in addition to* the page's own controls —
+/// that is what put a stray second row above the panel. The one-shot state push
+/// stays: the live capture path (`refresh_view`) has no other way to reach the
+/// page.
 pub fn render_panel() -> View {
-    let paused = store().paused;
-    if !paused {
+    if !store().paused {
         let _ = push_state();
     }
-
-    // No capture-pause button: the reference's `agentPauseAction` is in the
-    // toolbar group but its `update()` hides it unconditionally (lane A), and the
-    // page owns the action row for a `web =` view.
-    let mut view = View::new(Body::Html(String::new()));
-    view.toolbar
-        .push(Button::new("clear", &t("view.logs.button.clear")).icon("remove"));
-    view.toolbar
-        .push(Button::new("copy-all", &t("view.logs.button.copy")));
-    if paused {
-        view.status = Some(t("view.logs.paused"));
-    }
-    view
+    View::new(Body::Html(String::new()))
 }
 
 // ---------------------------------------------------------------------------
@@ -3981,10 +3972,17 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
         assert!(page.contains("openSettingsMenu($('settingsMenu').hidden)"));
-        // Both icons of the state-dependent capture entry are in the page.
+        // Both icons of the state-dependent capture entry are in the page, and
+        // the glyph follows "capture is on" — connected *or* waiting for the
+        // target application — so a refused start still flips to the stop glyph
+        // instead of looking like the click did nothing.
         for id in ["captureRunIcon", "captureStopIcon"] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
+        assert!(
+            page.contains("status.agent_connected || status.capture_waiting"),
+            "the glyph has to answer to the waiting state too"
+        );
         // The sort entry is a popup opener (the reference's `sortModeAction`
         // shows a radio menu), so it is a menu anchor with its own menu node.
         assert!(page.contains("id=\"sortMenu\""), "missing sortMenu");
@@ -4127,16 +4125,25 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         let _ = render_panel();
         assert_eq!(host.view_messages().len(), 1, "render pushes the state");
         set_paused(true);
-        let view = render_panel();
+        let _ = render_panel();
         assert_eq!(
             host.view_messages().len(),
             1,
             "render does not push while paused"
         );
-        assert!(
-            view.status.is_some(),
-            "the paused state shows in the status"
-        );
+    }
+
+    /// The page is the chrome. The host draws `View::toolbar` as a strip above
+    /// the body, so a button pushed here shows up *next to* the page's own
+    /// action row: a second "clear" and a text "Copy" that the reference does
+    /// not have. The page also prints the paused note in its own footer, so the
+    /// host status is a duplicate too.
+    #[test]
+    fn the_view_carries_no_host_drawn_chrome() {
+        let (_host, _guard) = test_host();
+        let view = render_panel();
+        assert!(view.toolbar.is_empty(), "the page owns the action row");
+        assert!(view.status.is_none(), "the page owns its footer");
     }
 
     // Tabs (lane L22) -----------------------------------------------------
@@ -6208,9 +6215,12 @@ public interface UserMapper {
         assert!(page.contains("kind: 'dedupe'"));
         assert!(page.contains("kind: 'group'"));
         assert!(page.contains("content.classList.add('member')"));
-        // The capture button is one icon button whose glyph follows the state.
-        assert!(page.contains("post({ op: connected ? 'capture-stop' : 'capture-start' })"));
-        assert!(page.contains("$('captureRunIcon').hidden = connected"));
+        // The capture button is one icon button whose glyph follows the state:
+        // "capture is on" is connected *or* waiting for the target application,
+        // here and in `updateLabels` alike.
+        assert!(page.contains("post({ op: active ? 'capture-stop' : 'capture-start' })"));
+        assert!(page.contains("var active = !!(s.agent_connected || s.capture_waiting);"));
+        assert!(page.contains("$('captureRunIcon').hidden = active"));
         // Lane A: a refused capture start waits for the target application and
         // the page retries every 2 s (`on-schedule` has a 60 s floor).
         assert!(page.contains("function syncCaptureRetry(state)"));
