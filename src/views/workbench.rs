@@ -637,10 +637,9 @@ pub fn preview_target() -> PreviewTarget {
 /// the result goes. Written as a message crossing views so the two mounts stay
 /// interchangeable: today both ends resolve to the same view id.
 ///
-/// The caller must not push again when this returns `true`: the tab mount's
-/// delivery *is* the log panel's state push, which every `preview*` op is
-/// followed by.
-pub fn send_to_preview(line: usize, select_tab: bool) -> bool {
+/// It stores and does not push: the panel answers every `preview*` op with one
+/// `state` push, which is exactly how the tab mount delivers.
+pub fn send_to_preview(line: usize, select_tab: bool) {
     let statement = crate::views::log_panel::snapshot()
         .entries
         .into_iter()
@@ -650,9 +649,7 @@ pub fn send_to_preview(line: usize, select_tab: bool) -> bool {
     if let Some(text) = statement {
         let (dialect_name, _) = configured_dialect();
         render_input_state(&text, "");
-        let mut store = preview_store();
-        store.model.dialect = dialect_name;
-        drop(store);
+        preview_store().model.dialect = dialect_name;
         // A hand-off rewrites the input box, and it is what
         // `render.formatOnPreview` applies to (lane L34) — the same rule a
         // command handing a statement over gets.
@@ -661,10 +658,11 @@ pub fn send_to_preview(line: usize, select_tab: bool) -> bool {
     if select_tab {
         request_tab();
     }
+    // The target itself is asked, so the branch that names a channel lives
+    // here in one place instead of at each call site.
     match preview_target() {
-        // The payload rides the panel's `state` push, which follows every
-        // `preview*` op; pushing here as well would send it twice.
-        PreviewTarget::Tab => false,
+        // The payload rides the panel's `state` push right after this op.
+        PreviewTarget::Tab => {}
     }
 }
 
