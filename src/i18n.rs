@@ -564,6 +564,48 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "A rollback plan needs the table's primary key; the workbench has no table metadata, so no plan is generated (use the rollback-plan command with a table description).",
         "回滚计划需要表的主键；工作台没有表元数据，因此不生成回滚（请用 rollback-plan 命令并给出表描述）。",
     ),
+    // Statement picker and display switches (lane L45).
+    ("view.workbench.statement", "Statement", "目标语句"),
+    (
+        "view.workbench.statement.note",
+        "Switch which statement of this mapper the preview shows; parameters, dialect and display mode stay as they are.",
+        "切换预览该 mapper 里的哪条语句；参数、方言与显示模式保持不变。",
+    ),
+    (
+        "view.workbench.statement.none",
+        "This mapper has a single statement.",
+        "该 mapper 只有一条语句。",
+    ),
+    (
+        "view.workbench.status.no_statements",
+        "There is no mapper behind this render, so there is no statement to switch to.",
+        "当前渲染不来自 mapper，没有可切换的语句。",
+    ),
+    (
+        "view.workbench.status.statement_unknown",
+        "No statement with id {0} in this mapper.",
+        "该 mapper 里没有 id 为 {0} 的语句。",
+    ),
+    (
+        "view.workbench.display.keyword_wrap",
+        "Wrap at keywords",
+        "关键字换行",
+    ),
+    (
+        "view.workbench.display.keyword_wrap.note",
+        "Display only: break the SQL before top-level keywords (SELECT/FROM/WHERE/…). The SQL itself is unchanged.",
+        "仅影响显示：在每个顶层关键字（SELECT/FROM/WHERE/…）前断行，SQL 本身不变。",
+    ),
+    (
+        "view.workbench.display.vertical",
+        "One item per line",
+        "竖向排列",
+    ),
+    (
+        "view.workbench.display.vertical.note",
+        "Display only: put each comma-separated item on its own line. The SQL itself is unchanged.",
+        "仅影响显示：逗号分隔的每一项各占一行，SQL 本身不变。",
+    ),
     // Parameter restoration keys (lane L2, docs/registration/L2.md).
     (
         "params.missing_positional",

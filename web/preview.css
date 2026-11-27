@@ -135,6 +135,21 @@ body.pv-root { margin: 0; }
   padding: 0 6px; border-radius: 3px;
   background: var(--openidea-bg-selected); font-size: 11px;
 }
+/* Statement picker (lane L45): label beside a compact select, on the meta
+   line. The wrapper is hidden by the page whenever the render has no
+   statements to switch between. */
+.pv-root .pv-statement-wrap {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-width: 0; flex: 0 1 auto;
+}
+/* `display: inline-flex` would beat the UA rule for `hidden`, and the
+   standalone page has no panel-wide `[hidden]` rule (log-panel.html does). */
+.pv-root .pv-statement-wrap[hidden] { display: none; }
+.pv-root .pv-statement-wrap > label { flex: 0 0 auto; font-size: 11px; }
+.pv-root #pvStatement {
+  max-width: 220px; min-width: 0; font-size: 11px;
+}
+.pv-root #pvStatement[disabled] { opacity: 0.6; }
 .pv-root .pv-badge.partial { color: var(--openidea-warning); }
 .pv-root .pv-badge.unresolved { color: var(--openidea-danger); }
 .pv-root .pv-advice { font-size: 11px; }

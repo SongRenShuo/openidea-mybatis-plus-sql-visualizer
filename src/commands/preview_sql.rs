@@ -117,12 +117,18 @@ pub fn model_for(
 /// Resolve the input, render it into the workbench model, push the log panel's
 /// state with `selectTab = "preview"` and reveal the tool window.
 fn preview(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
-    let (model, detail, _raw) = model_for(ctx, arg)?;
+    let (model, detail, raw) = model_for(ctx, arg)?;
 
     // The same handshake as `open-workbench`: the page asks for the state again
     // with `{op:"ready"}` once its script is ready, so the plugin-side model has
     // to be set as well as the push below.
+    // Lane L45: the statement picker switches by id, so the host keeps the
+    // mapper document when that is what was rendered. `model_for` returns the
+    // raw input as the third value, which is the mapper XML for a mapper render
+    // and the SQL text otherwise.
+    let is_mapper = model.kind == workbench::KIND_XML;
     workbench::set_model(model);
+    workbench::set_mapper_source(is_mapper.then_some(raw));
     workbench::request_tab();
     workbench::request_input_replace();
     log_panel::push_state()
@@ -289,6 +295,9 @@ type MapperRender = (workbench::WorkbenchModel, Vec<RenderedStatement>);
 ///
 /// The model carries the first statement; the returned list is every statement
 /// with its confidence, so the summary line can say how many were rendered.
+/// Lane L45: the model also carries every statement id (`statements`) and the
+/// chosen one (`statement`), so the preview page can switch between them without
+/// the host shipping the file again.
 fn mapper_model(
     path: &str,
     xml: &str,
@@ -296,9 +305,10 @@ fn mapper_model(
     dialect: &str,
 ) -> Result<MapperRender, CliError> {
     let (set, issues) = MapperSet::load(&[(path, xml)]);
+    let all_ids = unique_statement_ids(&set);
     let ids = match statement {
         Some(id) => vec![id.to_string()],
-        None => unique_statement_ids(&set),
+        None => all_ids.clone(),
     };
     if ids.is_empty() {
         return Err(CliError::new(
@@ -321,6 +331,19 @@ fn mapper_model(
     let mut model = workbench::render_input(out.sql.trim_end(), workbench::KIND_SQL, dialect);
     model.kind = workbench::KIND_XML.to_string();
     model.source = first_id.clone();
+    model.statement = first_id.clone();
+    // Lane L45: the picker's options, computed from the whole file even when
+    // one statement was named explicitly. An explicit bare id (`path#findById`)
+    // must still be the one the picker shows selected, so map it onto the
+    // qualified entry the list carries when that is what the file has.
+    model.statements = all_ids.clone();
+    if let Some(current) = all_ids
+        .iter()
+        .find(|known| *known == first_id || known.ends_with(&format!(".{first_id}")))
+    {
+        model.statement = current.clone();
+        model.source = current.clone();
+    }
     model.confidence = confidence_str(out.confidence).to_string();
     model.params = out.params.iter().map(param_text).collect();
     // The whole file is the "原文" for a file-level preview; for one statement
