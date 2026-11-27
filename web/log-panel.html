@@ -1061,6 +1061,14 @@
         node.title = label || '';
       }
 
+      // `<svg>` is an `SVGElement`: it has no `hidden` IDL property, so
+      // `node.hidden = true` only sets an expando on the JS object and leaves
+      // the attribute alone — the glyph never hides. Toggle the attribute.
+      function setHidden(node, hidden) {
+        if (!node) { return; }
+        if (hidden) { node.setAttribute('hidden', ''); } else { node.removeAttribute('hidden'); }
+      }
+
       // Focus / muted chips (lane L28) --------------------------------
       function chipButton(label, title, onClose) {
         var chip = document.createElement('span');
@@ -1125,8 +1133,8 @@
           ? (L.captureStop || 'Stop capture')
           : (L.captureStart || 'Start capture'));
         captureBtn.classList.toggle('run', !active);
-        $('captureRunIcon').hidden = active;
-        $('captureStopIcon').hidden = !active;
+        setHidden($('captureRunIcon'), active);
+        setHidden($('captureStopIcon'), !active);
         // Sort (lane A): the button is a popup opener, so its tooltip states the
         // mode the list is in — the reference action's `Sort: <label>`
         // description. The popup itself is rebuilt from the host's label list.

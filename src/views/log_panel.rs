@@ -6220,7 +6220,16 @@ public interface UserMapper {
         // here and in `updateLabels` alike.
         assert!(page.contains("post({ op: active ? 'capture-stop' : 'capture-start' })"));
         assert!(page.contains("var active = !!(s.agent_connected || s.capture_waiting);"));
-        assert!(page.contains("$('captureRunIcon').hidden = active"));
+        assert!(page.contains("setHidden($('captureRunIcon'), active)"));
+        // `SVGElement` has no `hidden` IDL property: `node.hidden = true` sets an
+        // expando and leaves the attribute (and the glyph) alone, which is why
+        // the entry sat on the play triangle forever. The page must toggle the
+        // attribute, never assign the property.
+        assert!(page.contains("node.setAttribute('hidden', '')"));
+        assert!(
+            !page.contains("Icon').hidden"),
+            "an SVG's `hidden` is not a property: toggle the attribute"
+        );
         // Lane A: a refused capture start waits for the target application and
         // the page retries every 2 s (`on-schedule` has a 60 s floor).
         assert!(page.contains("function syncCaptureRetry(state)"));
