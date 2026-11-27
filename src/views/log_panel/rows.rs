@@ -12,7 +12,7 @@ use crate::core::log::{
 };
 use crate::indexer;
 
-use super::state::{Filter, SortMode, TypeFilter};
+use super::state::{Filter, SortMode};
 use super::suppress;
 use super::{SQL_DISPLAY_CHARS, format_epoch_ms, format_ms, truncate_chars};
 
