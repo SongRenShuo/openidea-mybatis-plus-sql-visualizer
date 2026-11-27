@@ -72,3 +72,4 @@
 | `database` 不执行 SQL | EXPLAIN/预览执行只能走 sidecar |
 | 读不到运行控制台 | 捕获只能 `java.agent` 或「导出日志 + 读文件」 |
 | 无 provider 失效接口 | 设置改完不重开文件不生效，设置页要写明 |
+| `web/**` 的 JS 没有任何 cargo 门禁 | 面板逻辑在 `web/*.js` 与 `log-panel.html` 的行内 `<script type="module">` 里，Rust 侧从不读它们。一次解析失败（如模板字符串里出现反引号）会让整段脚本不执行 → 页签无文字、按钮无回调、正文空白，看着像宿主断链。改完必跑 `node scripts/check-web-syntax.mjs` |
