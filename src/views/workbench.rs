@@ -848,14 +848,55 @@ fn advice_text(sql: &str, dialect_name: &str) -> String {
 // Model store
 // ---------------------------------------------------------------------------
 
-/// The preview's two display switches (lane L45). Pure presentation: the page
-/// shapes the text it paints, the model's SQL is never rewritten.
+/// The four display modes the preview paints (the reference's Format /
+/// keyword-wrap / vertical buttons and the raw text).
+///
+/// Pure presentation: the page shapes the text it paints; the model's SQL,
+/// the Copy / Export paths and the input box are never rewritten.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DisplayMode {
+    /// The executable SQL, verbatim.
+    #[default]
+    Normal,
+    /// The dialect formatter's output (`tabs.formatted`).
+    Formatted,
+    /// A line break before each top-level keyword.
+    KeywordWrap,
+    /// One top-level comma-separated item per line.
+    Vertical,
+}
+
+impl DisplayMode {
+    /// The wire name (`tabs.preview.display.mode`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Formatted => "formatted",
+            Self::KeywordWrap => "keyword_wrap",
+            Self::Vertical => "vertical",
+        }
+    }
+
+    /// Parses a wire name; anything unknown is `normal`, never an error (a
+    /// page from another build must not leave the preview unpaintable).
+    pub fn parse(text: &str) -> Self {
+        match text {
+            "formatted" => Self::Formatted,
+            "keyword_wrap" => Self::KeywordWrap,
+            "vertical" => Self::Vertical,
+            _ => Self::Normal,
+        }
+    }
+}
+
+/// The preview's display state: the mode plus the compact (single-line)
+/// switch. Page state that rides every push, so a remount restores what the
+/// reader chose. Host memory only — no setting key.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DisplayPrefs {
-    /// Break the shown SQL before each top-level keyword.
-    pub keyword_wrap: bool,
-    /// Put each top-level comma-separated item on its own line.
-    pub vertical: bool,
+    pub mode: DisplayMode,
+    /// Collapse whitespace runs to one space (the reference's 压缩).
+    pub compact: bool,
 }
 
 /// What the preview tab keeps between state pushes.
@@ -881,11 +922,9 @@ struct PreviewStore {
     /// page can switch statements by id without shipping the file back. `None`
     /// for inline SQL and log rows, which have nothing to switch.
     mapper_xml: Option<String>,
-    /// The two display switches (lane L45): break before top-level keywords, and
-    /// one comma-separated item per line. Page state that rides the `state`
-    /// push, so a remount (or the standalone page reloading) restores what the
-    /// reader chose. Host memory only — no setting key, and the SQL itself is
-    /// never touched.
+    /// The display state (lane L45, four modes + compact): the page paints the
+    /// shaped text, the host only remembers the choice so a remount (or the
+    /// standalone page reloading) restores it. The SQL itself is never touched.
     display: DisplayPrefs,
     /// The condition switches the reader set (C07): condition id → truth. Empty
     /// means "the statement's defaults" (see `core::xml::render::
@@ -932,7 +971,8 @@ pub fn mapper_source() -> Option<String> {
     preview_store().mapper_xml.clone()
 }
 
-/// The two display switches as the page last set them (lane L45).
+/// The display state as the page last set it (lane L45): the four modes plus
+/// the compact switch.
 pub fn display_prefs() -> DisplayPrefs {
     preview_store().display
 }
@@ -1107,11 +1147,14 @@ pub fn preview_tab() -> Value {
         },
         "labels": labels(&current.confidence),
         "status": { "text": status },
-        // Lane L45: the two display switches ride every push, so a remount or
-        // the standalone page restores them without a settings key.
+        // Lane L45: the display state rides every push, so a remount or the
+        // standalone page restores it without a settings key. The two legacy
+        // booleans stay derived from the mode for an older page.
         "display": {
-            "keywordWrap": display.keyword_wrap,
-            "vertical": display.vertical,
+            "mode": display.mode.as_str(),
+            "compact": display.compact,
+            "keywordWrap": display.mode == DisplayMode::KeywordWrap,
+            "vertical": display.mode == DisplayMode::Vertical,
         },
     })
 }
@@ -1438,28 +1481,50 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
         // not an edit) and the parameter values the reader typed are re-derived
         // from the new render, exactly like the reference's panel.
         "conditions" => apply_conditions(message),
-        // Display switches (lane L45): the page reports the two toggles, the
-        // host only remembers them so the next `state` push (and a page that
-        // remounts) carries them back. Pure presentation — the model, its SQL
-        // and the input box are untouched.
+        // Display state (lane L45, four modes + compact): the page reports the
+        // mode and the switch, the host only remembers them so the next `state`
+        // push (and a page that remounts) carries them back. Pure presentation
+        // — the model, its SQL and the input box are untouched. A message that
+        // carries only the two legacy booleans (an older page) still maps onto
+        // the mode.
         "display" => {
             let mut store = preview_store();
-            store.display = DisplayPrefs {
-                keyword_wrap: message
-                    .get("keywordWrap")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(store.display.keyword_wrap),
-                vertical: message
-                    .get("vertical")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(store.display.vertical),
-            };
+            let mut next = store.display;
+            if let Some(mode) = message.get("mode").and_then(Value::as_str) {
+                next.mode = DisplayMode::parse(mode);
+            } else {
+                if let Some(keyword) = message.get("keywordWrap").and_then(Value::as_bool) {
+                    next.mode = if keyword {
+                        DisplayMode::KeywordWrap
+                    } else if next.mode == DisplayMode::KeywordWrap {
+                        DisplayMode::Normal
+                    } else {
+                        next.mode
+                    };
+                }
+                if let Some(vertical) = message.get("vertical").and_then(Value::as_bool) {
+                    next.mode = if vertical {
+                        DisplayMode::Vertical
+                    } else if next.mode == DisplayMode::Vertical {
+                        DisplayMode::Normal
+                    } else {
+                        next.mode
+                    };
+                }
+            }
+            if let Some(compact) = message.get("compact").and_then(Value::as_bool) {
+                next.compact = compact;
+            }
+            store.display = next;
         }
         "clear" => {
             clear();
             set_status(t("view.workbench.status.cleared"), true);
         }
         "copy" => copy_sql()?,
+        // The toolbar's "copy error" entry, shown only for a render that
+        // carries reasons: the reason text is the whole payload.
+        "copy-error" => copy_error_text()?,
         "export" => export_sql()?,
         // Lane L48: the tab mount's "Open in Dialog". It is an event context
         // (a page message), so `views::reveal` is allowed here; the dialog page
@@ -1725,6 +1790,21 @@ fn copy_sql() -> Result<(), Error> {
         return Ok(());
     }
     host::copy_to_clipboard(&current.copy_text())?;
+    set_status(t("view.workbench.copied"), false);
+    Ok(())
+}
+
+/// Copies the render's reasons (the reference's `panel.copyError`): the same
+/// text the degradation strip shows, never a fabricated success when the
+/// render carries none.
+fn copy_error_text() -> Result<(), Error> {
+    let current = model();
+    let reason = current.reason.trim().to_string();
+    if reason.is_empty() {
+        set_status(t("view.workbench.status.copy_empty"), false);
+        return Ok(());
+    }
+    host::copy_to_clipboard(&reason)?;
     set_status(t("view.workbench.copied"), false);
     Ok(())
 }
@@ -2358,54 +2438,44 @@ mod tests {
 
     #[test]
     fn the_preview_page_wears_the_reference_layout() {
-        // Lane L35b: the preview half follows `SqlPreviewPanel` — meta row
-        // (dialect chip + advice), toolbar (Copy SQL / Format / Display mode /
-        // Explain / Refresh), the splitter columns (parameters left, result
-        // tabs right), then a status-only footer. The duplicate bottom Copy
-        // SQL and the disabled Execute are gone: Explain replaces the latter
-        // in the toolbar and Export / Rollback fold behind "More".
-        //
-        // Lane L42: the workbench moved out of the panel page into the module
-        // `web/preview.js` (with `web/preview.css`); the layout assertions
-        // follow it there, and the panel page keeps only the mount host.
+        // The preview half follows the IntelliJ edition's `SqlPreviewPanel`:
+        // the meta row (dialect / type / table / source) with the nine text
+        // toolbar entries on its right, the performance-advice line under it,
+        // the degradation strip, the two columns (parameters 30 %, SQL 70 %),
+        // the status line, and — in the dialog mount only — the fixed action
+        // row. The tab mount keeps the input half above the splitter.
         let page = include_str!("../../web/log-panel.html");
         let module = include_str!("../../web/preview.js");
         let css = include_str!("../../web/preview.css");
-        // The input half exists and holds the parameter list: both lookups are
-        // the assertion, so the spans themselves are not kept.
-        let _pane_start = module.find("id=\"pvPaneTop\"").expect("the preview markup");
+        // The input half exists (tab mount): statement box plus its actions.
+        let _pane_start = module.find("id=\"pvPaneTop\"").expect("the input half");
         let _pane_end = module
             .find("id=\"pvParamsList\"")
             .expect("the parameter list");
 
-        // Vertical order: meta row, toolbar, degradation strip, columns. The
-        // input half above has a toolbar of its own, so the preview toolbar is
-        // the first one *after* the meta row.
+        // Vertical order: meta + toolbar row, perf row, degradation strip,
+        // columns. The input half above has a toolbar of its own, so the
+        // preview toolbar is the first exact `class="pv-toolbar"` after the
+        // meta row.
         let meta = module.find("class=\"pv-meta\"").expect("meta row");
         let toolbar = meta
             + module[meta..]
                 .find("class=\"pv-toolbar\"")
                 .expect("preview toolbar");
+        let perf = module.find("id=\"pvPerfRow\"").expect("perf row");
         let banner = module.find("id=\"pvBanner\"").expect("degradation strip");
         let cols = module.find("class=\"pv-cols\"").expect("split columns");
-        assert!(meta < toolbar, "the meta row sits above the toolbar");
-        assert!(toolbar < banner, "the strip sits under the toolbar");
+        assert!(meta < toolbar, "the meta row shares the toolbar row");
+        assert!(toolbar < perf, "the perf row follows the meta/toolbar row");
+        assert!(perf < banner, "the perf row sits above the strip");
         assert!(banner < cols, "the strip keeps clear of the columns");
 
-        // Lane C: the performance advice left the meta row for a line of its
-        // own (the reference's perf row), directly under the meta/toolbar row
-        // and above the degradation strip.
-        let perf = module.find("id=\"pvPerfRow\"").expect("perf row");
-        assert!(meta < perf, "the perf row sits under the meta row");
-        assert!(perf < toolbar, "the perf row keeps the toolbar row clear");
-        assert!(perf < banner, "the perf row sits above the strip");
-
-        // Toolbar order, the reference's entries plus "More": copy / format /
-        // display mode / keyword wrap / vertical / explain / refresh / more.
+        // Toolbar order: the reference's nine entries, all text buttons.
         let order = [
-            "id=\"pvCopy\"",
-            "id=\"pvFormatPreview\"",
+            "id=\"pvStmtType\"",
+            "id=\"pvCopyError\"",
             "id=\"pvMode\"",
+            "id=\"pvFormatPreview\"",
             "id=\"pvKeywordWrap\"",
             "id=\"pvVertical\"",
             "id=\"pvExplain\"",
@@ -2420,12 +2490,11 @@ mod tests {
             assert!(at >= previous, "{id} is out of the reference order");
             previous = at;
         }
-        // Lane C: the display-mode control is the reference's toggle button
-        // (its label names the target mode), and keyword wrap / vertical are
-        // direct toolbar entries rather than entries of the "More" fold.
+        // The compact toggle names the mode a click switches to; the three display
+        // buttons select the reference's four modes.
         assert!(
             module.contains("id=\"pvMode\" class=\"btn pv-btn-text\""),
-            "the mode toggle is a text button"
+            "the compact toggle is a text button"
         );
         assert!(
             module.contains("id=\"pvKeywordWrap\" class=\"btn pv-btn-text\""),
@@ -2436,13 +2505,13 @@ mod tests {
             "vertical is in the toolbar"
         );
         assert!(
-            module.contains("on('pvMode', function () { setMode(modeTarget()); });"),
-            "the mode button toggles"
+            module.contains("on('pvMode', function () { toggleCompact(); });"),
+            "the compact button toggles"
         );
-        // Format in the result toolbar is the reference's display-mode switch,
+        // Format in the result toolbar selects the formatted display mode,
         // not a rewrite of the source text on the input half.
         assert!(
-            module.contains("on('pvFormatPreview', function () { setMode('formatted'); });"),
+            module.contains("setMode(preview.mode === 'formatted' ? 'normal' : 'formatted');"),
             "result Format switches the display mode"
         );
         // Explain is disabled and explains itself; the fold holds Export and
@@ -2455,12 +2524,43 @@ mod tests {
             module.contains("explainButton.title = labels.explainNote"),
             "the reason"
         );
-        assert!(module.contains("id=\"pvExport\""), "Export lives in More");
-        assert!(
-            module.contains("id=\"pvRollback\""),
-            "Rollback lives in More"
-        );
+        // The "More" fold holds the reference's ten low-frequency entries in
+        // order; Qualify is this build's extra disabled entry, out of sight.
+        for id in [
+            "id=\"pvRollback\"",
+            "id=\"pvSwitchDataSource\"",
+            "id=\"pvImportParams\"",
+            "id=\"pvDiff\"",
+            "id=\"pvShare\"",
+            "id=\"pvExport\"",
+            "id=\"pvReplayExport\"",
+            "id=\"pvAiContext\"",
+            "id=\"pvAiContextIds\"",
+            "id=\"pvDmlImpact\"",
+        ] {
+            assert!(module.contains(id), "{id} lives in More");
+        }
         assert!(module.contains("role=\"menu\""), "the fold is a menu");
+        // What the fold can honour is wired; what it cannot is disabled with
+        // its reason spelled out (no entry fakes a success).
+        for op in [
+            "on('pvImportParams', function () { closeMore(); importFromClipboard(); });",
+            "on('pvDiff', function () { closeMore(); post({ op: 'preview-diff' }); });",
+            "on('pvShare', function () { closeMore(); post({ op: 'preview-share' }); });",
+            "on('pvExport', function () { closeMore(); post({ op: 'preview-export' }); });",
+            "on('pvCopyError', function () { closeMore(); post({ op: 'preview-copy-error' }); });",
+        ] {
+            assert!(module.contains(op), "missing wiring: {op}");
+        }
+        for reason in [
+            "L('rollbackNote')",
+            "L('switchDataSourceNote')",
+            "L('replayExportNote')",
+            "L('aiContextNote')",
+            "L('dmlImpactNote')",
+        ] {
+            assert!(module.contains(reason), "missing disabled reason: {reason}");
+        }
         // Lane L44: the fold gained Diff and Share (both live) and Qualify (the
         // one entry the renderer would have to provide, so it is disabled with
         // the reason in its tooltip).
@@ -2497,9 +2597,9 @@ mod tests {
             css.contains(".pv-root .pv-hsplitter"),
             "the splitter has its own rule"
         );
-        // Lane C: the meta row names where the render came from, and the SQL
-        // tab is syntax-coloured (the reference's editor look), while the
-        // 原文 / 列信息 tabs and placeholders stay plain.
+        // The meta row names the dialect, type, table slot and source; the SQL area
+        // is a line-number gutter beside the code pane, whose conditional tabs
+        // keep 原文 / 列信息 plain.
         assert!(
             module.contains("id=\"pvSource\""),
             "the meta row carries the source"
@@ -2508,6 +2608,14 @@ mod tests {
             module.contains("source.textContent = m.source || '';"),
             "the source is painted"
         );
+        assert!(
+            module.contains("id=\"pvKindWrap\""),
+            "the meta row carries the type"
+        );
+        assert!(
+            module.contains("id=\"pvTableWrap\""),
+            "the meta row keeps the table slot"
+        );
         // The input hint is guidance for an empty box only, as in the
         // reference's standalone workbench.
         assert!(
@@ -2515,20 +2623,38 @@ mod tests {
             "the input hint hides once there is text"
         );
         assert!(
-            module.contains("export function tokenizeSql"),
-            "the SQL tokenizer exists"
+            module.contains("id=\"pvGutter\""),
+            "the SQL area has a line-number gutter"
         );
         assert!(
-            module.contains("paintSql(body, text);"),
-            "the SQL tab is painted from tokens"
+            module.contains("paintGutter(placeholder ? '' : text);"),
+            "the gutter follows the painted lines"
         );
         assert!(
-            module.contains("text.length <= PV_HIGHLIGHT_MAX_CHARS"),
+            module.contains(
+                "import { into as highlightInto, installStyles } from './sql-highlight.js'"
+            ),
+            "the SQL colouring is the shared lexer, not a second copy"
+        );
+        assert!(
+            module.contains("installStyles(doc);"),
+            "the token styles are injected once per document"
+        );
+        assert!(
+            module.contains("highlightInto(body, text, PV_HIGHLIGHT_MAX_CHARS)"),
+            "the SQL tab is painted from the shared tokens"
+        );
+        assert!(
+            module.contains("PV_HIGHLIGHT_MAX_CHARS"),
             "very large statements stay plain to keep the panel responsive"
         );
         assert!(
-            css.contains(".pv-root .pv-tok-kw"),
-            "the token colours have their own rules"
+            module.contains("id=\"pvTabBody\""),
+            "the SQL body is the code pane"
+        );
+        assert!(
+            css.contains(".pv-root .pv-gutter"),
+            "the gutter has its own rule"
         );
         assert!(
             css.contains(".pv-root .pv-params {"),
@@ -2544,7 +2670,8 @@ mod tests {
         }
 
         // Editable parameters in two columns (name, value) — the reference's
-        // name-beside-input layout — and the empty state.
+        // name-beside-input layout — plus the preset fold, the condition
+        // section's batch actions and the empty state.
         assert!(
             module.contains("class=\"pv-params-actions\""),
             "Rebind / Import stay"
@@ -2556,31 +2683,73 @@ mod tests {
         assert!(css.contains(".pv-param-name"), "the name column");
         assert!(css.contains("pv-param-input"), "the value input");
         assert!(
-            css.contains("grid-template-columns: minmax(48px, 38%) minmax(0, 1fr)"),
-            "name and value share the row"
+            css.contains(
+                "grid-template-columns: var(--pv-name-width, minmax(80px, auto)) minmax(0, 1fr)"
+            ),
+            "the name column adapts between 80 and 480 px"
         );
+        assert!(
+            module.contains("--pv-name-width"),
+            "one label width budget for the column"
+        );
+        assert!(css.contains("max-width: 480px"), "the name column cap");
         assert!(css.contains("pv-params-empty"), "the no-parameter state");
+        assert!(
+            module.contains("middleEllipsis"),
+            "a very long parameter name keeps both ends"
+        );
+        assert!(module.contains("id=\"pvPresetBlock\""), "the preset fold");
+        assert!(
+            module.contains("id=\"pvPresetManage\""),
+            "the preset management entry"
+        );
+        assert!(
+            module.contains("presetManage.disabled = true"),
+            "no preset backend, so the controls say so"
+        );
+        assert!(
+            module.contains("id=\"pvConditionsClear\""),
+            "the condition section's clear action"
+        );
+        assert!(
+            module.contains("updateConditionsToggle"),
+            "select all / none is one flipping toggle"
+        );
         assert!(
             module.contains("labels.columnsEmpty"),
             "the columns tab keeps its empty state text"
         );
 
-        // Status-only footer: the duplicate Copy SQL and the old Execute are
-        // gone, and nothing else lives down there.
-        let footer_start = module.find("<div class=\"pv-footer\">").expect("footer");
-        let footer_end = footer_start + module[footer_start..].find("</div>").expect("footer end");
-        let footer = &module[footer_start..footer_end];
-        assert!(footer.contains("id=\"pvStatus\""), "the status line");
+        // The footer is the status line plus the dialog's fixed action row. The
+        // row exists in the markup but starts hidden, and the footer collapses
+        // when neither has content.
         assert!(
-            !footer.contains("class=\"btn\""),
-            "the footer holds no controls: {footer}"
+            module.contains("id=\"pvFooter\" hidden"),
+            "the footer starts collapsed"
         );
-        for gone in ["id=\"pvCopySql\"", "id=\"pvExecute\""] {
+        assert!(module.contains("id=\"pvStatus\""), "the status line");
+        for id in ["pvExecute", "pvCopySql", "pvCopyClose", "pvCancel"] {
             assert!(
-                !module.contains(gone),
-                "the duplicate control {gone} is gone"
+                module.contains(&format!("id=\"{id}\"")),
+                "the dialog action {id}"
             );
         }
+        assert!(
+            module.contains("id=\"pvDialogActions\" hidden"),
+            "the dialog action row is hidden in the tab mount"
+        );
+        assert!(
+            module.contains("root.classList.toggle('pv-dialog-mode', !!dialogBridge);"),
+            "the dialog mount hides the input half and shows its action row"
+        );
+        assert!(
+            css.contains(".pv-root.pv-dialog-mode .pv-pane.pv-top"),
+            "the input half is display:none in the dialog"
+        );
+        assert!(
+            module.contains("class=\"btn pv-primary\""),
+            "copy-and-close is the primary action"
+        );
 
         // The degradation strip is closable and driven by the state's flag.
         assert!(module.contains("class=\"pv-banner\""), "the strip");
@@ -2940,6 +3109,35 @@ mod tests {
     }
 
     #[test]
+    fn copying_the_error_text_puts_the_reasons_on_the_clipboard() {
+        // The toolbar entry the reference shows only for an error render: the
+        // payload is the reason text itself, never the statement.
+        let (host, _guard) = test_host();
+        let mut model = sample();
+        model.confidence = "partial".to_string();
+        model.reason = "xml.include.not_found: refid=missing".to_string();
+        set_model(model);
+        send(json!({ "op": "preview-copy-error" }));
+        assert_eq!(
+            host.clipboard().as_deref(),
+            Some("xml.include.not_found: refid=missing")
+        );
+        assert_eq!(tab()["status"]["text"], t("view.workbench.copied"));
+    }
+
+    #[test]
+    fn copying_the_error_text_without_reasons_reports_it_and_copies_nothing() {
+        let (host, _guard) = test_host();
+        set_model(sample());
+        send(json!({ "op": "preview-copy-error" }));
+        assert!(host.clipboard().is_none());
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.copy_empty")
+        );
+    }
+
+    #[test]
     fn exporting_writes_the_sql_to_the_output_channel() {
         let (host, _guard) = test_host();
         set_model(sample());
@@ -3231,21 +3429,22 @@ mod tests {
 
     #[test]
     fn the_statement_op_keeps_the_display_state_alone() {
-        // A statement switch must not touch the two display switches, and the
-        // switches must survive the push that follows it.
+        // A statement switch must not touch the display state, and the state
+        // must survive the push that follows it.
         let (_host, _guard) = test_host();
-        send(json!({ "op": "preview-display", "keywordWrap": true, "vertical": false }));
+        send(json!({ "op": "preview-display", "mode": "keyword_wrap", "compact": true }));
         send(json!({ "op": "preview-render", "text": TWO_STATEMENTS, "kind": "xml" }));
         let before = display_prefs();
         send(json!({ "op": "preview-statement", "id": "touch" }));
         assert_eq!(display_prefs(), before);
         let state = tab();
+        assert_eq!(state["display"]["mode"], "keyword_wrap");
+        assert_eq!(state["display"]["compact"], true);
         assert_eq!(state["display"]["keywordWrap"], true);
-        assert_eq!(state["display"]["vertical"], false);
     }
 
     #[test]
-    fn the_display_op_remembers_both_switches_and_never_touches_the_sql() {
+    fn the_display_op_remembers_the_four_modes_and_never_touches_the_sql() {
         let (_host, _guard) = test_host();
         set_model(WorkbenchModel::new(
             "select a, b from t",
@@ -3254,28 +3453,44 @@ mod tests {
         ));
         let sql = model().sql;
 
-        send(json!({ "op": "preview-display", "keywordWrap": true }));
+        send(json!({ "op": "preview-display", "mode": "keyword_wrap" }));
         assert_eq!(
             display_prefs(),
             DisplayPrefs {
-                keyword_wrap: true,
-                vertical: false
+                mode: DisplayMode::KeywordWrap,
+                compact: false,
             }
         );
-        send(json!({ "op": "preview-display", "vertical": true }));
+        send(json!({ "op": "preview-display", "mode": "vertical", "compact": true }));
         assert_eq!(
             display_prefs(),
             DisplayPrefs {
-                keyword_wrap: true,
-                vertical: true
+                mode: DisplayMode::Vertical,
+                compact: true,
             }
         );
         // A partial message keeps the field it does not carry.
-        send(json!({ "op": "preview-display", "vertical": false }));
-        assert!(display_prefs().keyword_wrap);
+        send(json!({ "op": "preview-display", "compact": false }));
+        assert_eq!(
+            display_prefs(),
+            DisplayPrefs {
+                mode: DisplayMode::Vertical,
+                compact: false,
+            }
+        );
+        // An unknown mode is normal, never an error.
+        send(json!({ "op": "preview-display", "mode": "bogus" }));
+        assert_eq!(display_prefs().mode, DisplayMode::Normal);
+        // The pre-mode page's two booleans still map onto the mode.
+        send(json!({ "op": "preview-display", "keywordWrap": true }));
+        assert_eq!(display_prefs().mode, DisplayMode::KeywordWrap);
+        send(json!({ "op": "preview-display", "keywordWrap": false }));
+        assert_eq!(display_prefs().mode, DisplayMode::Normal);
 
         let state = tab();
-        assert_eq!(state["display"]["keywordWrap"], true);
+        assert_eq!(state["display"]["mode"], "normal");
+        assert_eq!(state["display"]["compact"], false);
+        assert_eq!(state["display"]["keywordWrap"], false);
         assert_eq!(state["display"]["vertical"], false);
         // Presentation only: the model's SQL is byte-identical, and the push
         // does not ask for the input box to be rewritten.
@@ -3285,10 +3500,12 @@ mod tests {
     }
 
     #[test]
-    fn the_display_state_defaults_to_off() {
+    fn the_display_state_defaults_to_normal_and_not_compact() {
         let (_host, _guard) = test_host();
         set_model(sample());
         let state = tab();
+        assert_eq!(state["display"]["mode"], "normal");
+        assert_eq!(state["display"]["compact"], false);
         assert_eq!(state["display"]["keywordWrap"], false);
         assert_eq!(state["display"]["vertical"], false);
         assert_eq!(display_prefs(), DisplayPrefs::default());
@@ -3347,6 +3564,40 @@ mod tests {
         assert!(
             module.contains("text = shapeForDisplay(text, preview.display);"),
             "only the painted text is shaped"
+        );
+    }
+
+    #[test]
+    fn the_preview_page_exposes_the_four_modes_and_the_dialog_row() {
+        let module = include_str!("../../web/preview.js");
+        for mode in ["'normal'", "'formatted'", "'keyword_wrap'", "'vertical'"] {
+            assert!(module.contains(mode), "missing display mode {mode}");
+        }
+        assert!(
+            module.contains("export function compactSql"),
+            "the compact shaper exists"
+        );
+        assert!(
+            module.contains("text = shapeForDisplay(text, preview.display);"),
+            "the display state drives the painted text"
+        );
+        assert!(
+            module.contains("preview.compact ? L('multiline') : L('compact')"),
+            "the toggle names the mode a click switches to"
+        );
+        assert!(module.contains("function postDisplay"), "the state is sent");
+        assert!(
+            module.contains("op: 'preview-display'"),
+            "the display op carries the state"
+        );
+        // The fixed action row is dialog-only: hidden in the tab mount, and the
+        // footer collapses when it has neither a status nor that row.
+        assert!(module.contains("actions.hidden = !dialogBridge;"));
+        assert!(module.contains("footer.hidden = !hasStatus && !dialogBridge;"));
+        assert!(module.contains("on('pvCopyClose', function () {"));
+        assert!(
+            module.contains("post({ op: 'preview-copy' });\n    closeDialog();"),
+            "copy-and-close copies first, then closes"
         );
     }
 
@@ -3885,7 +4136,7 @@ mod tests {
             "pvConditions",
             "pvConditionsList",
             "pvConditionsAll",
-            "pvConditionsNone",
+            "pvConditionsClear",
         ] {
             assert!(module.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
@@ -3894,8 +4145,14 @@ mod tests {
             "a checkbox posts its own op"
         );
         assert!(module.contains("model.parameters"), "the rows are named");
-        assert!(module.contains("pv-param-kind"), "the type chip exists");
-        assert!(css.contains(".pv-root .pv-param-kind"));
+        assert!(
+            module.contains("updateConditionsToggle"),
+            "all / none is one flipping toggle"
+        );
+        // The reference row is name + value + warning mark; the type is carried
+        // by the placeholder, not a chip.
+        assert!(css.contains(".pv-root .pv-param-warn"));
+        assert!(!module.contains("pv-param-kind"));
         assert!(css.contains(".pv-root .pv-cond-row"));
     }
 }

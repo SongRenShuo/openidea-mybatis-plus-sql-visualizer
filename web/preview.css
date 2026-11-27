@@ -1,15 +1,17 @@
 /*
- * The preview workbench (L23), shared by both mount points: the fifth tab of
- * `web/log-panel.html` and the standalone `web/preview.html` (kept for the
- * API 1.18 dialog). Everything is scoped to `.pv-root` — the element
- * `mountPreview()` is handed — so the log panel's own `.meta` / `.badge` /
- * `.status` rules keep working untouched.
+ * The SQL preview workbench, shared by both mount points: the fifth tab of
+ * `web/log-panel.html` and the standalone `web/preview.html` the dialog loads.
  *
- * Colours come from the host's `--openidea-*` variables. The `:root` block
- * below only supplies readable defaults so `preview.html` renders in a plain
- * browser with no host around it; in the IDE the host sets the variables
- * inline on `<html>`, which beats a `:root` rule, so these never fight the
- * theme.
+ * The layout follows the IntelliJ edition's `SqlPreviewPanel`: one meta row
+ * (dialect / type / table / source) with the text toolbar on its right, the
+ * performance-advice line under it, the parameter column at 30 % beside the SQL
+ * editor at 70 %, and a status line. The dialog adds the reference's bottom
+ * action row (Execute / Copy / Copy-and-close / Cancel).
+ *
+ * Everything is scoped to `.pv-root` — the element `mountPreview()` is handed —
+ * so the log panel's own `.meta` / `.badge` / `.status` rules keep working
+ * untouched. Colours come from the host's `--openidea-*` variables; the
+ * `:root` block below only supplies readable defaults for a plain browser.
  */
 :root {
   --openidea-bg: Canvas;
@@ -39,42 +41,54 @@
 html, body.pv-root { height: 100%; }
 body.pv-root { margin: 0; }
 
-/* Flat toolbar buttons, like the reference's ActionToolbar: icon + label on
-   one line, no border until hover. The label stays in the DOM for the
-   accessible name and is not drawn. */
+/* ---- buttons -------------------------------------------------------- */
+
+/* Flat toolbar buttons, like the reference's ActionToolbar. Text buttons draw
+   only their label; the input half keeps its icon buttons. */
 .pv-root .btn {
-  display: inline-flex; align-items: center; gap: 5px;
+  display: inline-flex; align-items: center; gap: 4px;
   background: transparent; color: var(--openidea-fg);
   border: 1px solid transparent; border-radius: 3px;
-  padding: 2px 7px; min-height: 24px; cursor: pointer;
+  padding: 2px 7px; min-height: 22px; cursor: pointer;
   font-size: 12px; white-space: nowrap;
 }
 .pv-root .btn svg { width: 14px; height: 14px; flex: 0 0 auto; display: block; fill: none; }
 .pv-root .btn [data-btnlabel] { display: none; }
-/* Text buttons (display mode / keyword wrap / vertical): the reference draws
-   these with `smallButton(text)`, so the label must be visible here too. */
-.pv-root .btn.pv-btn-text [data-btnlabel] { display: inline; }
-.pv-root .btn.pv-btn-text { min-width: 0; }
+/* Text buttons (input Copy / Close, the display toolbar, the dialog row). */
+.pv-root .btn.pv-btn-text [data-btnlabel],
+.pv-root .pv-toolbar .btn [data-btnlabel],
+.pv-root .pv-dialog-actions .btn [data-btnlabel] { display: inline; }
+.pv-root .btn.pv-btn-text, .pv-root .pv-toolbar .btn { min-width: 0; }
+.pv-root .pv-toolbar .btn { font-size: 11px; padding: 1px 8px; }
+.pv-root .pv-dialog-actions .btn { font-size: 11px; padding: 2px 12px; }
+.pv-root .btn:hover { background: var(--openidea-bg-hover); }
+/* An engaged toggle keeps the accent on its border and label, the reference's
+   `smallButton` selected look. */
+.pv-root .btn.on {
+  color: var(--openidea-accent);
+  border-color: var(--openidea-accent);
+  background: transparent;
+}
+.pv-root .btn[disabled] { opacity: 0.45; cursor: default; }
+.pv-root .btn[disabled]:hover { background: transparent; }
+/* Lane L48: "Open in Dialog" hides inside the dialog and the dialog's own
+   controls hide in the tab; `display` in `.btn` beats the UA `[hidden]` rule. */
+.pv-root .btn[hidden] { display: none; }
+/* The reference's primary action: a filled accent button. */
+.pv-root .btn.pv-primary {
+  background: var(--openidea-accent);
+  border-color: var(--openidea-accent);
+  color: var(--openidea-bg);
+}
+.pv-root .btn.pv-primary:hover { filter: brightness(0.94); }
 .pv-root select.btn {
   background: var(--openidea-bg-input); border-color: var(--openidea-border);
   padding: 2px 4px;
 }
-.pv-root .btn:hover { background: var(--openidea-bg-hover); }
-.pv-root .btn.on { background: var(--openidea-bg-selected); border-color: var(--openidea-accent); }
-.pv-root .btn[disabled] { opacity: 0.5; cursor: default; }
-/* Lane L48: "Open in Dialog" hides inside the dialog and the dialog's "Close"
-   hides in the tab. The `.btn` rule above sets `display`, which beats the
-   browser's `[hidden]` rule, so the attribute needs its own. */
-.pv-root .btn[hidden] { display: none; }
 .pv-root .muted { color: var(--openidea-fg-muted); }
-.pv-root .code {
-  margin: 0; padding: 6px; border-radius: 3px;
-  background: var(--openidea-bg-input); border: 1px solid var(--openidea-border);
-  color: var(--openidea-fg); font-family: var(--openidea-font-mono, monospace);
-  white-space: pre-wrap; word-break: break-word; font-size: 12px;
-}
+.pv-root .hint { padding: 0 8px 4px; color: var(--openidea-fg-muted); }
 
-/* ---- the workbench itself (moved verbatim from log-panel.html) ---- */
+/* ---- input half (tab mount only) ------------------------------------ */
 
 .pv-root .pv-pane {
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
@@ -82,55 +96,8 @@ body.pv-root { margin: 0; }
 /* The standalone workbench splits input/preview at 0.4 (`Splitter(true, 0.4f)`
    in the reference); the preview pane keeps the remaining height. */
 .pv-root .pv-pane.pv-top { flex: 0 0 40%; }
-.pv-root .pv-pane.pv-preview { flex: 1 1 auto; }
-/* The reference puts the meta line and the toolbar on one row (meta left,
-   actions right), the performance advice on its own row below, then the
-   banner, then the columns. Grid keeps that without wrappers. */
-.pv-root .pv-preview {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-}
-.pv-root .pv-meta { grid-column: 1; grid-row: 1; min-width: 0; }
-/* One line, like the reference's meta row: the long settings hint shrinks
-   with an ellipsis instead of wrapping into a tall column. */
-.pv-root .pv-meta { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; overflow: hidden; }
-.pv-root .pv-meta > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pv-root .pv-meta .pv-chip { flex: 0 0 auto; }
-.pv-root .pv-preview > .pv-toolbar {
-  grid-column: 2; grid-row: 1; justify-content: flex-end; flex-wrap: nowrap;
-}
-/* Performance suggestions (the reference's `perfRow`): a full-width line of
-   its own under the meta row, so the toolbar never squeezes it. */
-.pv-root .pv-perf {
-  grid-column: 1 / -1; grid-row: 2;
-  padding: 0 8px 2px; font-size: 11px;
-  color: var(--openidea-warning);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.pv-root .pv-perf[hidden] { display: none; }
-.pv-root .pv-banner { grid-column: 1 / -1; grid-row: 3; }
-.pv-root .pv-cols { grid-column: 1 / -1; grid-row: 4; }
-.pv-root .pv-toolbar {
-  display: flex; align-items: center; gap: 2px; flex-wrap: wrap; padding: 4px 8px;
-}
-/* The reference's "更多" fold (L35b): the low-frequency actions the toolbar
-   would otherwise duplicate — Export, Rollback — behind one button, the way
-   `panel.more` folds them in the IntelliJ edition. */
-.pv-root .pv-more-wrap { position: relative; display: inline-flex; }
-.pv-root .pv-more-menu {
-  position: absolute; top: 100%; right: 0; z-index: 20; margin-top: 2px;
-  display: flex; flex-direction: column; min-width: 120px; padding: 2px;
-  border: 1px solid var(--openidea-border); border-radius: 3px;
-  background: var(--openidea-bg-elevated);
-}
-.pv-root .pv-more-item {
-  padding: 3px 8px; background: transparent; border: none; border-radius: 2px;
-  cursor: pointer; text-align: left; color: var(--openidea-fg); font-size: 12px;
-  display: block; width: 100%;
-}
-.pv-root .pv-more-item:hover { background: var(--openidea-bg-selected); }
-.pv-root .pv-more-item:disabled { color: var(--openidea-fg-muted); cursor: default; }
-.pv-root .hint { padding: 0 8px 4px; color: var(--openidea-fg-muted); }
+.pv-root .pv-pane.pv-preview { flex: 1 1 auto; min-height: 0; }
+.pv-root .pv-input-toolbar { flex-wrap: wrap; }
 .pv-root #pvInput {
   flex: 1 1 auto; min-height: 0; margin: 0 8px 8px; padding: 6px 8px; resize: none;
   color: var(--openidea-fg); background: var(--openidea-bg-input);
@@ -143,9 +110,30 @@ body.pv-root { margin: 0; }
 .pv-root .pv-splitter:hover, .pv-root .pv-splitter.dragging {
   background: var(--openidea-accent); opacity: 1;
 }
-.pv-root .pv-meta {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 8px;
+/* In the dialog there is no input half: the reference's modal window shows the
+   rendered statement only. */
+.pv-root.pv-dialog-mode .pv-pane.pv-top,
+.pv-root.pv-dialog-mode .pv-splitter { display: none; }
+
+/* ---- meta row + toolbar --------------------------------------------- */
+/* The reference puts the meta line and the toolbar on one row (meta left,
+   actions right); the performance advice gets the next line, right-aligned. */
+.pv-root .pv-toprow {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; gap: 8px;
+  padding: 4px 8px 2px 8px;
 }
+.pv-root .pv-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
+  min-width: 0; overflow: hidden; font-size: 12px;
+}
+.pv-root .pv-meta > * {
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pv-root .pv-meta .pv-chip { flex: 0 0 auto; }
+.pv-root .pv-meta .pv-meta-item { flex: 0 1 auto; }
+.pv-root .pv-meta .pv-meta-label { color: var(--openidea-fg-muted); margin-right: 4px; }
+.pv-root .pv-meta .pv-source { flex: 0 1 auto; font-size: 11px; }
 .pv-root .pv-chip {
   padding: 0 6px; border: 1px solid var(--openidea-border);
   border-radius: 3px; white-space: nowrap;
@@ -154,33 +142,60 @@ body.pv-root { margin: 0; }
   padding: 0 6px; border-radius: 3px;
   background: var(--openidea-bg-selected); font-size: 11px;
 }
+.pv-root .pv-badge.partial { color: var(--openidea-warning); }
+.pv-root .pv-badge.unresolved { color: var(--openidea-danger); }
 /* Statement picker (lane L45): label beside a compact select, on the meta
-   line. The wrapper is hidden by the page whenever the render has no
-   statements to switch between. */
+   line. Hidden when the render has no statement list. */
 .pv-root .pv-statement-wrap {
   display: inline-flex; align-items: center; gap: 4px;
   min-width: 0; flex: 0 1 auto;
 }
-/* `display: inline-flex` would beat the UA rule for `hidden`, and the
-   standalone page has no panel-wide `[hidden]` rule (log-panel.html does). */
 .pv-root .pv-statement-wrap[hidden] { display: none; }
 .pv-root .pv-statement-wrap > label { flex: 0 0 auto; font-size: 11px; }
-.pv-root #pvStatement {
-  max-width: 220px; min-width: 0; font-size: 11px;
-}
+.pv-root #pvStatement { max-width: 220px; min-width: 0; font-size: 11px; }
 .pv-root #pvStatement[disabled] { opacity: 0.6; }
-.pv-root .pv-badge.partial { color: var(--openidea-warning); }
-.pv-root .pv-badge.unresolved { color: var(--openidea-danger); }
-.pv-root .pv-advice { font-size: 11px; }
-/* Degradation banner (L35b): the reference's non-modal honesty strip, worn
-   just under the toolbar while a render is `unresolved`. It sits outside
-   `.pv-cols` so it never steals width from the two columns. */
+.pv-root .pv-toolbar {
+  display: flex; align-items: center; gap: 2px; flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+/* Performance suggestions (the reference's `perfRow`): a full-width line under
+   the meta row, 11 px, one line with an ellipsis. */
+.pv-root .pv-perf {
+  padding: 0 8px 2px; font-size: 11px;
+  color: var(--openidea-warning); text-align: right;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pv-root .pv-perf[hidden] { display: none; }
+
+/* ---- "More" fold ----------------------------------------------------- */
+
+.pv-root .pv-more-wrap { position: relative; display: inline-flex; }
+.pv-root .pv-more-menu {
+  position: absolute; top: 100%; right: 0; z-index: 20; margin-top: 2px;
+  display: flex; flex-direction: column; min-width: 200px; max-width: 340px;
+  padding: 2px;
+  border: 1px solid var(--openidea-border); border-radius: 3px;
+  background: var(--openidea-bg-elevated);
+}
+.pv-root .pv-more-menu[hidden] { display: none; }
+.pv-root .pv-more-item {
+  padding: 4px 10px; background: transparent; border: none; border-radius: 2px;
+  cursor: pointer; text-align: left; color: var(--openidea-fg); font-size: 11px;
+  display: block; width: 100%; white-space: nowrap;
+}
+.pv-root .pv-more-item:hover { background: var(--openidea-bg-selected); }
+.pv-root .pv-more-item:disabled { color: var(--openidea-fg-muted); cursor: default; }
+.pv-root .pv-more-item:disabled:hover { background: transparent; }
+
+/* ---- degradation banner --------------------------------------------- */
+
 .pv-root .pv-banner {
   display: flex; align-items: flex-start; gap: 6px; margin: 0 8px 4px;
   padding: 4px 6px; border-radius: 3px;
   border: 1px solid var(--openidea-border); background: var(--openidea-bg-elevated);
   color: var(--openidea-danger); font-size: 11px;
 }
+.pv-root .pv-banner[hidden] { display: none; }
 .pv-root .pv-banner-text {
   flex: 1 1 auto; min-width: 0; white-space: pre-wrap; word-break: break-word;
 }
@@ -189,16 +204,19 @@ body.pv-root { margin: 0; }
   cursor: pointer; color: var(--openidea-fg-muted); font-size: 12px;
 }
 .pv-root .pv-banner-close:hover { color: var(--openidea-fg); }
+
+/* ---- the two columns ------------------------------------------------ */
+
 .pv-root .pv-cols {
   display: flex; flex: 1 1 auto; min-height: 0;
   border-top: 1px solid var(--openidea-border);
 }
+/* The parameter column keeps the reference's preferred 240 px (30 % of the
+   default dialog width) and never drops under 200 px. */
 .pv-root .pv-params {
   flex: 0 0 30%; display: flex; flex-direction: column;
-  min-width: 150px; min-height: 0;
+  min-width: 200px; min-height: 200px;
 }
-/* Draggable vertical divider between the parameter column and the result tabs
-   (the reference's horizontal `OnePixelSplitter`). */
 .pv-root .pv-hsplitter {
   flex: 0 0 6px; cursor: col-resize;
   background: var(--openidea-border); opacity: 0.6;
@@ -206,57 +224,46 @@ body.pv-root { margin: 0; }
 .pv-root .pv-hsplitter:hover, .pv-root .pv-hsplitter.dragging {
   background: var(--openidea-accent); opacity: 1;
 }
-.pv-root .pv-source { font-size: 11px; }
-.pv-root .pv-pane-title { padding: 4px 8px 2px; font-weight: 600; }
-/* Editable parameter values (lane L27, laid out as two columns in L35b):
-   name on the left, value input on the right, top aligned like the
-   reference's parameter pane; Rebind / Import sit under the list. */
-.pv-root .pv-params-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 2px 0 4px; }
-.pv-root .pv-params .hint { font-size: 10.5px; line-height: 1.45; }
-.pv-root .pv-param-row {
-  display: grid; grid-template-columns: minmax(48px, 38%) minmax(0, 1fr);
-  align-items: start; gap: 6px; margin-bottom: 4px;
+.pv-root .pv-scroll { flex: 1 1 auto; overflow: auto; padding: 4px 8px 8px; }
+
+/* Preset fold (the reference's HideableTitledPanel), collapsed by default. */
+.pv-root .pv-preset { margin: 0 0 4px; }
+.pv-root .pv-preset[hidden] { display: none; }
+.pv-root .pv-preset > summary {
+  cursor: pointer; font-size: 11px; color: var(--openidea-fg-muted);
+  padding: 2px 0; user-select: none;
 }
-.pv-root .pv-param-name {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--openidea-fg-muted); font-family: var(--openidea-font-mono, monospace);
-  font-size: 11px;
+.pv-root .pv-preset-row {
+  display: flex; align-items: center; gap: 4px; padding: 2px 0 4px 14px;
 }
-/* Value box + its type chip and warning mark (C06). The chip names the class
-   the statement declared (or the name heuristic guessed); the mark is a hint,
-   never a gate. */
-.pv-root .pv-param-cell {
-  display: flex; align-items: center; gap: 4px; min-width: 0;
-}
-.pv-root .pv-param-input {
-  flex: 1 1 auto; min-width: 0;
+.pv-root .pv-select {
+  flex: 1 1 auto; min-width: 0; font-size: 11px;
   background: var(--openidea-bg-input); color: var(--openidea-fg);
-  border: 1px solid var(--openidea-border); border-radius: 3px; padding: 2px 4px;
-  font-family: var(--openidea-font-mono, monospace); font-size: 12px;
+  border: 1px solid var(--openidea-border); border-radius: 3px; padding: 1px 4px;
 }
-.pv-root .pv-param-kind {
-  flex: 0 0 auto; font-size: 9.5px; line-height: 1; padding: 2px 4px;
-  border-radius: 8px; color: var(--openidea-fg-muted);
-  border: 1px solid var(--openidea-border);
+.pv-root .pv-select[disabled] { opacity: 0.6; }
+
+/* Section title: a rule above it and the text, with the batch buttons on the
+   right (the reference's TitledSeparator row). */
+.pv-root .pv-section-head {
+  display: flex; align-items: center; gap: 6px;
+  margin: 6px 0 4px; padding-top: 4px;
+  border-top: 1px solid var(--openidea-border);
 }
-.pv-root .pv-param-warn {
-  flex: 0 0 auto; color: var(--openidea-warning, #c98a00);
-  font-size: 12px; cursor: help;
+.pv-root .pv-section-head[hidden] { display: none; }
+.pv-root .pv-section-title {
+  flex: 1 1 auto; min-width: 0; font-size: 11px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* A parameter an interceptor appended (C14): marked so a simulated row is not
-   mistaken for one written in the statement. */
-.pv-root .pv-param-injected .pv-param-name { font-style: italic; }
-/* Dynamic conditions (C07): one checkbox row per `<if>` / `<when>`, above the
-   parameter rows. */
-.pv-root .pv-conditions { padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--openidea-border); }
-.pv-root .pv-pane-subtitle { font-size: 11px; font-weight: 600; padding: 2px 0; }
-.pv-root .pv-conditions-actions { display: flex; gap: 4px; padding: 2px 0 4px; }
+.pv-root .pv-section-actions { display: flex; gap: 4px; flex: 0 0 auto; }
 .pv-root .pv-mini {
   font-size: 10px; line-height: 1; padding: 2px 6px; cursor: pointer;
   background: transparent; color: var(--openidea-fg-muted);
   border: 1px solid var(--openidea-border); border-radius: 3px;
 }
 .pv-root .pv-mini:hover { color: var(--openidea-fg); border-color: var(--openidea-accent); }
+
+/* Dynamic conditions (C07): one checkbox row per `<if>` / `<when>`. */
 .pv-root .pv-cond-row {
   display: flex; align-items: flex-start; gap: 5px; padding: 1px 0;
   font-size: 11px; cursor: pointer;
@@ -267,43 +274,113 @@ body.pv-root { margin: 0; }
   font-family: var(--openidea-font-mono, monospace);
   color: var(--openidea-fg-muted);
 }
-.pv-root .pv-cond-row[data-cond-kind="when"] .pv-cond-label { color: var(--openidea-fg); }
-.pv-root .pv-params-empty { color: var(--openidea-fg-muted); font-size: 11px; }
-.pv-root .pv-scroll { flex: 1 1 auto; overflow: auto; padding: 4px 8px 8px; }
+.pv-root .pv-cond-row[data-cond-kind="when"] .pv-cond-label {
+  color: var(--openidea-fg);
+}
+
+/* Editable parameters (lane L27): the reference's row is name | value, with the
+   name column adapting between 80 and 480 px and the warning mark pinned to
+   the value box. */
+/* The label width is one budget for the whole column (set by the page from the
+   widest name, clamped to 80..480 px), as the reference sizes its label
+   column. */
+.pv-root .pv-param-row {
+  display: grid;
+  grid-template-columns: var(--pv-name-width, minmax(80px, auto)) minmax(0, 1fr);
+  align-items: center; gap: 6px; margin-bottom: 4px;
+}
+.pv-root .pv-param-name {
+  max-width: 480px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--openidea-fg-muted);
+  font-family: var(--openidea-font-mono, monospace); font-size: 11px;
+}
+.pv-root .pv-param-cell {
+  display: flex; align-items: center; gap: 4px; min-width: 0;
+}
+.pv-root .pv-param-input {
+  flex: 1 1 auto; min-width: 0;
+  background: var(--openidea-bg-input); color: var(--openidea-fg);
+  border: 1px solid var(--openidea-border); border-radius: 3px; padding: 2px 4px;
+  font-family: var(--openidea-font-mono, monospace); font-size: 12px;
+}
+.pv-root .pv-param-warn {
+  flex: 0 0 auto; color: var(--openidea-warning);
+  font-size: 12px; cursor: help;
+}
+/* A parameter an interceptor appended (C14): marked so a simulated row is not
+   mistaken for one written in the statement. */
+.pv-root .pv-param-injected .pv-param-name { font-style: italic; }
+.pv-root .pv-params-empty {
+  color: var(--openidea-fg-muted); font-size: 11px; padding: 4px 0;
+}
+.pv-root .pv-params-actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 2px 0 4px;
+}
+.pv-root .pv-params .hint { font-size: 10.5px; line-height: 1.45; padding: 0 0 4px; }
+
+/* ---- SQL side ------------------------------------------------------- */
+
 .pv-root .pv-sqlside {
   flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0;
 }
+/* Conditional tabs, as in the reference: only SQL unless there is an original
+   text (mapper XML / HQL) or column info to show. */
 .pv-root .pv-tabs {
-  display: flex; gap: 2px; padding: 4px 8px 0;
+  display: flex; gap: 2px; padding: 2px 8px 0;
   border-bottom: 1px solid var(--openidea-border);
 }
+.pv-root .pv-tabs[hidden] { display: none; }
 .pv-root .pv-tab {
-  padding: 3px 12px; background: transparent; border: 1px solid transparent;
+  padding: 2px 10px; background: transparent; border: 1px solid transparent;
   border-bottom: none; border-radius: 3px 3px 0 0; cursor: pointer;
-  color: var(--openidea-fg-muted); font-size: 12px;
+  color: var(--openidea-fg-muted); font-size: 11px;
 }
 .pv-root .pv-tab:hover { color: var(--openidea-fg); }
 .pv-root .pv-tab[aria-selected="true"] {
   background: var(--openidea-bg-elevated); border-color: var(--openidea-border);
   color: var(--openidea-fg-strong);
 }
-.pv-root .pv-tabbody {
-  flex: 1 1 auto; min-height: 0; margin: 0; overflow: auto;
-  white-space: pre-wrap; word-break: break-word;
-  border: none; border-radius: 0; background: transparent;
+.pv-root .pv-code {
+  flex: 1 1 auto; display: flex; min-height: 0; overflow: auto;
+  background: var(--openidea-bg);
 }
-/* SQL syntax colouring (lane C): the reference shows the statement in an IDE
-   editor; this read-only tab carries the same four classes of information. */
-.pv-root .pv-tok-kw { color: var(--openidea-accent); font-weight: 600; }
-.pv-root .pv-tok-fn { color: var(--openidea-link); }
-.pv-root .pv-tok-str { color: var(--openidea-success); }
-.pv-root .pv-tok-num { color: var(--openidea-info); }
-.pv-root .pv-tok-com { color: var(--openidea-fg-muted); font-style: italic; }
+.pv-root .pv-gutter {
+  flex: 0 0 auto; position: sticky; left: 0; z-index: 1;
+  padding: 4px 6px 4px 4px; text-align: right;
+  color: var(--openidea-fg-muted); background: var(--openidea-bg);
+  border-right: 1px solid var(--openidea-border);
+  font-family: var(--openidea-font-mono, monospace);
+  font-size: 12px; line-height: 18px; white-space: pre; user-select: none;
+}
+.pv-root .pv-gutter[hidden] { display: none; }
+.pv-root #pvTabBody {
+  flex: 1 1 auto; margin: 0; padding: 4px 8px;
+  min-width: max-content;
+  border: none; border-radius: 0; background: transparent;
+  color: var(--openidea-fg);
+  font-family: var(--openidea-font-mono, monospace);
+  font-size: 12px; line-height: 18px;
+  white-space: pre; tab-size: 4;
+}
+.pv-root #pvTabBody.pv-placeholder {
+  white-space: pre-wrap; word-break: break-word;
+  color: var(--openidea-fg-muted);
+}
+
+/* ---- footer --------------------------------------------------------- */
+
 .pv-root .pv-footer {
-  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  display: flex; align-items: center; gap: 8px; padding: 4px 8px;
   border-top: 1px solid var(--openidea-border);
 }
+.pv-root .pv-footer[hidden] { display: none; }
 .pv-root #pvStatus {
   flex: 1 1 auto; min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
+  text-overflow: ellipsis; white-space: nowrap; font-size: 11px;
 }
+.pv-root #pvStatus:empty { display: none; }
+.pv-root .pv-dialog-actions {
+  display: flex; align-items: center; gap: 6px; margin-left: auto;
+}
+.pv-root .pv-dialog-actions[hidden] { display: none; }
