@@ -51,6 +51,10 @@ body.pv-root { margin: 0; }
 }
 .pv-root .btn svg { width: 14px; height: 14px; flex: 0 0 auto; display: block; fill: none; }
 .pv-root .btn [data-btnlabel] { display: none; }
+/* Text buttons (display mode / keyword wrap / vertical): the reference draws
+   these with `smallButton(text)`, so the label must be visible here too. */
+.pv-root .btn.pv-btn-text [data-btnlabel] { display: inline; }
+.pv-root .btn.pv-btn-text { min-width: 0; }
 .pv-root select.btn {
   background: var(--openidea-bg-input); border-color: var(--openidea-border);
   padding: 2px 4px;
@@ -71,14 +75,16 @@ body.pv-root { margin: 0; }
 .pv-root .pv-pane {
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
 }
-.pv-root .pv-pane.pv-top { flex: 0 0 34%; }
+/* The standalone workbench splits input/preview at 0.4 (`Splitter(true, 0.4f)`
+   in the reference); the preview pane keeps the remaining height. */
+.pv-root .pv-pane.pv-top { flex: 0 0 40%; }
 .pv-root .pv-pane.pv-preview { flex: 1 1 auto; }
 /* The reference puts the meta line and the toolbar on one row (meta left,
-   actions right). Grid keeps that without a wrapper element: meta and the
-   result toolbar share row 1, the banner spans row 2, the columns fill 3. */
+   actions right), the performance advice on its own row below, then the
+   banner, then the columns. Grid keeps that without wrappers. */
 .pv-root .pv-preview {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 .pv-root .pv-meta { grid-column: 1; grid-row: 1; min-width: 0; }
 /* One line, like the reference's meta row: the long settings hint shrinks
@@ -89,8 +95,17 @@ body.pv-root { margin: 0; }
 .pv-root .pv-preview > .pv-toolbar {
   grid-column: 2; grid-row: 1; justify-content: flex-end; flex-wrap: nowrap;
 }
-.pv-root .pv-banner { grid-column: 1 / -1; grid-row: 2; }
-.pv-root .pv-cols { grid-column: 1 / -1; grid-row: 3; }
+/* Performance suggestions (the reference's `perfRow`): a full-width line of
+   its own under the meta row, so the toolbar never squeezes it. */
+.pv-root .pv-perf {
+  grid-column: 1 / -1; grid-row: 2;
+  padding: 0 8px 2px; font-size: 11px;
+  color: var(--openidea-warning);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pv-root .pv-perf[hidden] { display: none; }
+.pv-root .pv-banner { grid-column: 1 / -1; grid-row: 3; }
+.pv-root .pv-cols { grid-column: 1 / -1; grid-row: 4; }
 .pv-root .pv-toolbar {
   display: flex; align-items: center; gap: 2px; flex-wrap: wrap; padding: 4px 8px;
 }
@@ -175,9 +190,19 @@ body.pv-root { margin: 0; }
   border-top: 1px solid var(--openidea-border);
 }
 .pv-root .pv-params {
-  flex: 0 0 34%; display: flex; flex-direction: column;
-  min-width: 150px; min-height: 0; border-right: 1px solid var(--openidea-border);
+  flex: 0 0 30%; display: flex; flex-direction: column;
+  min-width: 150px; min-height: 0;
 }
+/* Draggable vertical divider between the parameter column and the result tabs
+   (the reference's horizontal `OnePixelSplitter`). */
+.pv-root .pv-hsplitter {
+  flex: 0 0 6px; cursor: col-resize;
+  background: var(--openidea-border); opacity: 0.6;
+}
+.pv-root .pv-hsplitter:hover, .pv-root .pv-hsplitter.dragging {
+  background: var(--openidea-accent); opacity: 1;
+}
+.pv-root .pv-source { font-size: 11px; }
 .pv-root .pv-pane-title { padding: 4px 8px 2px; font-weight: 600; }
 /* Editable parameter values (lane L27, laid out as two columns in L35b):
    name on the left, value input on the right, top aligned like the
@@ -223,6 +248,13 @@ body.pv-root { margin: 0; }
   white-space: pre-wrap; word-break: break-word;
   border: none; border-radius: 0; background: transparent;
 }
+/* SQL syntax colouring (lane C): the reference shows the statement in an IDE
+   editor; this read-only tab carries the same four classes of information. */
+.pv-root .pv-tok-kw { color: var(--openidea-accent); font-weight: 600; }
+.pv-root .pv-tok-fn { color: var(--openidea-link); }
+.pv-root .pv-tok-str { color: var(--openidea-success); }
+.pv-root .pv-tok-num { color: var(--openidea-info); }
+.pv-root .pv-tok-com { color: var(--openidea-fg-muted); font-style: italic; }
 .pv-root .pv-footer {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px;
   border-top: 1px solid var(--openidea-border);
