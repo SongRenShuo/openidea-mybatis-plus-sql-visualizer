@@ -2025,6 +2025,10 @@ mod tests {
             "the SQL tab is painted from tokens"
         );
         assert!(
+            module.contains("text.length <= PV_HIGHLIGHT_MAX_CHARS"),
+            "very large statements stay plain to keep the panel responsive"
+        );
+        assert!(
             css.contains(".pv-root .pv-tok-kw"),
             "the token colours have their own rules"
         );

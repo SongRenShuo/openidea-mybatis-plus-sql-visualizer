@@ -420,6 +420,11 @@ const PV_SQL_KEYWORDS = new Set([
   'WHERE', 'WITH',
 ]);
 
+/* Above this length the colouring is skipped: one span per token on a huge
+   statement costs more than the colour is worth, and the panel must stay
+   responsive (the input accepts up to 100,000 characters). */
+const PV_HIGHLIGHT_MAX_CHARS = 20000;
+
 function nextNonSpace(text, from) {
   let i = from;
   while (i < text.length && /\s/.test(text[i])) { i += 1; }
@@ -661,7 +666,8 @@ export function mountPreview(root, deps) {
     body.className = placeholder ? 'code pv-tabbody muted' : 'code pv-tabbody';
     // Only the SQL tab of a real render is coloured: the 原文 / 列信息 tabs stay
     // verbatim, and a placeholder or an unresolved reason is plain prose.
-    const highlight = preview.tab === 'sql' && !!m.sql && !placeholder;
+    const highlight = preview.tab === 'sql' && !!m.sql && !placeholder
+      && text.length <= PV_HIGHLIGHT_MAX_CHARS;
     if (highlight) {
       paintSql(body, text);
     } else {
