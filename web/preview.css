@@ -75,7 +75,9 @@ body.pv-root { margin: 0; }
 .pv-root .pv-pane {
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
 }
-.pv-root .pv-pane.pv-top { flex: 0 0 34%; }
+/* The standalone workbench splits input/preview at 0.4 (`Splitter(true, 0.4f)`
+   in the reference); the preview pane keeps the remaining height. */
+.pv-root .pv-pane.pv-top { flex: 0 0 40%; }
 .pv-root .pv-pane.pv-preview { flex: 1 1 auto; }
 /* The reference puts the meta line and the toolbar on one row (meta left,
    actions right), the performance advice on its own row below, then the
