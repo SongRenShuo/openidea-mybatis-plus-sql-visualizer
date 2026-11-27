@@ -745,6 +745,20 @@ pub fn parse_options() -> ParseOptions {
         dedupe_window_ms: (window > 0).then_some(window),
         max_sql_len: settings::get_i64("log.maxSqlLength", 20_000).max(256) as usize,
         timestamp_offset_minutes: settings::get_i64("log.timestampOffsetMinutes", 0) as i32,
+        sql_prefix: settings::string_setting("log.prefix"),
+        param_prefix: settings::string_setting("log.paramPrefix"),
+        mixed_prefix: settings::bool_setting("log.mixedPrefix"),
+        filter_keywords: settings::string_setting("log.filterKeywords")
+            .split(';')
+            .map(str::trim)
+            .filter(|keyword| !keyword.is_empty())
+            .map(str::to_string)
+            .collect(),
+        time_prefix: settings::string_setting("log.timePrefix"),
+        hibernate_enabled: settings::bool_setting("log.hibernateEnabled"),
+        hibernate_sql_prefix: settings::string_setting("log.hibernateSqlPrefix"),
+        hibernate_param_prefix: settings::string_setting("log.hibernateParamPrefix"),
+        jdbc_enabled: settings::bool_setting("log.jdbcEnabled"),
         ..ParseOptions::default()
     }
 }
@@ -1080,5 +1094,25 @@ mod tests {
         })
         .to_string()
         .into_bytes()
+    }
+
+    #[test]
+    fn parse_options_read_the_log_page_settings() {
+        let host = install();
+        host.set_setting("log.prefix", "\"SQL:\"");
+        host.set_setting("log.paramPrefix", "\"ARGS:\"");
+        host.set_setting("log.mixedPrefix", "false");
+        host.set_setting("log.filterKeywords", "\"secret; tmp_\"");
+        host.set_setting("log.timePrefix", "\"duration:\"");
+        host.set_setting("log.hibernateEnabled", "false");
+        host.set_setting("log.jdbcEnabled", "false");
+        let opts = parse_options();
+        assert_eq!(opts.sql_prefix, "SQL:");
+        assert_eq!(opts.param_prefix, "ARGS:");
+        assert!(!opts.mixed_prefix);
+        assert_eq!(opts.filter_keywords, vec!["secret", "tmp_"]);
+        assert_eq!(opts.time_prefix, "duration:");
+        assert!(!opts.hibernate_enabled);
+        assert!(!opts.jdbc_enabled);
     }
 }

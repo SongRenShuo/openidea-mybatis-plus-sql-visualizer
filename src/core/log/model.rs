@@ -206,6 +206,28 @@ pub struct ParseOptions {
     pub timestamp_offset_minutes: i32,
     /// Recognise Hibernate bare SQL rows (no `Hibernate:` prefix).
     pub recognize_bare_sql: bool,
+    /// MyBatis SQL-row prefix (`Preparing:`). Empty disables the family.
+    pub sql_prefix: String,
+    /// MyBatis parameter-row prefix (`Parameters:`). Empty disables parameter
+    /// rows.
+    pub param_prefix: String,
+    /// When true a prefix may sit anywhere in the line (`==> Preparing:`).
+    /// When false only a line that starts with the prefix is recognised.
+    pub mixed_prefix: bool,
+    /// Keywords (semicolon separated in the setting); a statement whose
+    /// restored SQL contains any of them is dropped before it reaches the
+    /// analysis.
+    pub filter_keywords: Vec<String>,
+    /// Custom duration label (`Time:`), parsed like the built-in shapes.
+    pub time_prefix: String,
+    /// Parse Hibernate / JPA rows.
+    pub hibernate_enabled: bool,
+    /// Hibernate SQL-row prefix (`Hibernate:`).
+    pub hibernate_sql_prefix: String,
+    /// Hibernate parameter-row prefix (`binding parameter`).
+    pub hibernate_param_prefix: String,
+    /// Parse Spring JdbcTemplate rows.
+    pub jdbc_enabled: bool,
 }
 
 impl Default for ParseOptions {
@@ -218,6 +240,15 @@ impl Default for ParseOptions {
             max_sql_len: 20_000,
             timestamp_offset_minutes: 0,
             recognize_bare_sql: true,
+            sql_prefix: "Preparing:".to_string(),
+            param_prefix: "Parameters:".to_string(),
+            mixed_prefix: true,
+            filter_keywords: Vec::new(),
+            time_prefix: "Time:".to_string(),
+            hibernate_enabled: true,
+            hibernate_sql_prefix: "Hibernate:".to_string(),
+            hibernate_param_prefix: "binding parameter".to_string(),
+            jdbc_enabled: true,
         }
     }
 }

@@ -36,6 +36,24 @@ pub(crate) fn after_ci(haystack: &str, needle_lower: &str) -> Option<usize> {
     find_ci(haystack, needle_lower).map(|i| i + needle_lower.len())
 }
 
+/// Byte index just after a configurable prefix.
+///
+/// `mixed` mirrors the "lenient prefix" switch: true searches the whole line
+/// (`==> Preparing:`), false requires the trimmed line to start with it.
+pub(crate) fn after_prefix(haystack: &str, needle_lower: &str, mixed: bool) -> Option<usize> {
+    if needle_lower.is_empty() {
+        return None;
+    }
+    if mixed {
+        return after_ci(haystack, needle_lower);
+    }
+    let trimmed = haystack.trim_start();
+    let start = haystack.len() - trimmed.len();
+    let head = trimmed.as_bytes().get(..needle_lower.len())?;
+    head.eq_ignore_ascii_case(needle_lower.as_bytes())
+        .then_some(start + needle_lower.len())
+}
+
 /// Console thread token, used to keep a `<== Total:` / `<== Updates:` row with
 /// the statement that produced it.
 ///

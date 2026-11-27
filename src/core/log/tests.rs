@@ -1051,3 +1051,119 @@ fn by_line_keeps_rows_that_are_not_analysis_entries() {
     assert_eq!(single.get(2), None);
     assert!(mapped.get(2).is_some());
 }
+
+// ---------------------------------------------------------------------------
+// Settings wiring (L-SettingsParity): the parser options carry the log page
+// ---------------------------------------------------------------------------
+
+#[test]
+fn configurable_prefixes_recognise_a_custom_log_shape() {
+    // `log.prefix` / `log.paramPrefix` replace the built-in `Preparing:` /
+    // `Parameters:` labels.
+    let opts = ParseOptions {
+        sql_prefix: "SQL:".to_string(),
+        param_prefix: "ARGS:".to_string(),
+        ..ParseOptions::default()
+    };
+    let analysis = parse_with(
+        &["SQL: select * from t where id = ?", "ARGS: 7(Long)"],
+        &opts,
+    );
+    assert_eq!(analysis.entries.len(), 1);
+    assert_eq!(analysis.entries[0].sql, "select * from t where id = 7");
+}
+
+#[test]
+fn an_empty_prefix_disables_that_row_shape() {
+    let opts = ParseOptions {
+        sql_prefix: String::new(),
+        ..ParseOptions::default()
+    };
+    let analysis = parse_with(&["Preparing: select 1 from t"], &opts);
+    assert!(analysis.entries.is_empty(), "empty prefix matches nothing");
+}
+
+#[test]
+fn a_strict_prefix_rejects_a_mid_line_match() {
+    // `log.mixedPrefix=false` is the reference's "exact prefix" mode: the
+    // prefix must start the line, so a logback header in front breaks it.
+    let line = "2026-11-25 DEBUG 4242 --- [main] : Preparing: select 1 from t";
+    let lenient = parse_with(&[line], &ParseOptions::default());
+    assert_eq!(lenient.entries.len(), 1);
+    let strict = parse_with(
+        &[line],
+        &ParseOptions {
+            mixed_prefix: false,
+            ..ParseOptions::default()
+        },
+    );
+    assert!(strict.entries.is_empty());
+}
+
+#[test]
+fn filter_keywords_drop_matching_statements() {
+    let opts = ParseOptions {
+        filter_keywords: vec!["secret_table".to_string()],
+        ..ParseOptions::default()
+    };
+    let analysis = parse_with(
+        &[
+            "Preparing: select * from secret_table",
+            "Parameters:",
+            "Preparing: select * from orders",
+            "Parameters:",
+        ],
+        &opts,
+    );
+    assert_eq!(analysis.entries.len(), 1);
+    assert!(analysis.entries[0].sql.contains("orders"));
+}
+
+#[test]
+fn disabling_the_hibernate_family_leaves_its_rows_unparsed() {
+    let line = "Hibernate: select 1 from dual";
+    let on = parse_with(&[line], &ParseOptions::default());
+    assert_eq!(on.entries.len(), 1);
+    let off = parse_with(
+        &[line],
+        &ParseOptions {
+            hibernate_enabled: false,
+            ..ParseOptions::default()
+        },
+    );
+    assert!(off.entries.is_empty());
+}
+
+#[test]
+fn disabling_the_jdbc_family_leaves_its_rows_unparsed() {
+    let line =
+        "2026-11-25 DEBUG o.s.j.core.JdbcTemplate : Executing prepared SQL statement [select 1]";
+    let on = parse_with(&[line], &ParseOptions::default());
+    assert_eq!(on.entries.len(), 1);
+    let off = parse_with(
+        &[line],
+        &ParseOptions {
+            jdbc_enabled: false,
+            ..ParseOptions::default()
+        },
+    );
+    assert!(off.entries.is_empty());
+}
+
+#[test]
+fn a_custom_duration_label_is_parsed() {
+    assert_eq!(
+        super::duration::extract_with_prefix("duration: 42ms", Some("duration:")),
+        Some(42.0)
+    );
+    assert_eq!(
+        super::duration::extract_with_prefix("elapsed 5 ms", Some("duration:")),
+        Some(5.0),
+        "the built-in shapes keep working under a custom label"
+    );
+    assert_eq!(
+        super::duration::extract_with_prefix("duration: 42", Some("duration:")),
+        None,
+        "a value without a ms unit is not a duration"
+    );
+}

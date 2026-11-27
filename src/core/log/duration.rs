@@ -13,6 +13,31 @@
 
 /// Extract a duration in milliseconds from one log line.
 pub(crate) fn extract(text: &str) -> Option<f64> {
+    extract_with_prefix(text, None)
+}
+
+/// Same, with the configurable `log.timePrefix` label (e.g. `duration:`).
+///
+/// The label is stripped of a trailing `:` / `=` and then parsed like the
+/// built-in `Time:` shapes (a `ms` unit is required); an empty or missing label
+/// keeps the built-in chain.
+pub(crate) fn extract_with_prefix(text: &str, custom: Option<&str>) -> Option<f64> {
+    let label = custom
+        .map(str::trim)
+        .filter(|prefix| !prefix.is_empty())
+        .map(|prefix| prefix.trim_end_matches([':', '=']).trim())
+        .filter(|label| !label.is_empty());
+    if let Some(label) = label {
+        let lower = text.to_ascii_lowercase();
+        let label = label.to_ascii_lowercase();
+        if let Some(value) = labelled_number(&lower, &label, true) {
+            return Some(value);
+        }
+    }
+    extract_builtin(text)
+}
+
+fn extract_builtin(text: &str) -> Option<f64> {
     if text.len() < 3 {
         return None;
     }
