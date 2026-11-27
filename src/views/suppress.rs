@@ -571,12 +571,12 @@ pub fn set_structure(id: &str, enabled: bool) -> Option<bool> {
 pub fn set_structure_all(enabled: bool) -> bool {
     let mut guard = store();
     let mut changed = false;
-    for index in 0..guard.rules.len() {
-        if guard.rules[index].structure == enabled {
+    for rule in &mut guard.rules {
+        if rule.structure == enabled {
             continue;
         }
-        guard.rules[index].structure = enabled;
-        guard.rules[index].recompute_key();
+        rule.structure = enabled;
+        rule.recompute_key();
         changed = true;
     }
     if !changed {
