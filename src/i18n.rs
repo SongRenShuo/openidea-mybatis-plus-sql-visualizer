@@ -20,6 +20,13 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "No SQL statements captured yet.",
         "尚未捕获到 SQL 语句。",
     ),
+    // The reference's empty state is a second guidance line under
+    // `log.panel.empty` (lane A); the panel shows both in the muted status ink.
+    (
+        "view.logs.empty.hint",
+        "SQL is captured automatically once a console with SQL logging runs (Capture). You can also paste logs manually in the \"Log to SQL\" tab; for real parameters and exact timings, enable Enhanced Capture in Settings.",
+        "点「捕捉」并运行带 SQL 日志的控制台后自动捕获；也可从「日志转 SQL」页签手动粘贴还原；想要参数实参与精确耗时，可在设置页开启增强捕获。",
+    ),
     ("view.logs.paused", "Live refresh paused", "实时刷新已暂停"),
     ("view.logs.category.normal", "Normal", "普通"),
     ("view.logs.category.duplicate", "Duplicate", "重复"),
@@ -83,6 +90,13 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "view.logs.status.agent_events_prefix",
         "Enhanced: received",
         "增强：已收事件",
+    ),
+    // Lane A: a capture start that keeps being refused while the plugin dials
+    // (the target application is not up yet). `{port}` is filled in by the page.
+    (
+        "view.logs.status.capture_waiting",
+        "Waiting for the target application (port {port})",
+        "等待目标应用启动（端口 {port}）",
     ),
     ("view.logs.status.total_prefix", "Total", "共"),
     ("view.logs.status.total_suffix", "rows", "条"),
@@ -163,6 +177,24 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "view.logs.sort.duration_title",
         "Sorted by duration (descending)",
         "按耗时降序",
+    ),
+    // Sort popup (lane A): the reference's seven `log.sort.*` menu entries, in
+    // its `sortOptions()` order, plus the `log.sort.label` tooltip prefix.
+    ("view.logs.sort.label", "Sort:", "排序："),
+    ("view.logs.sort.time_asc", "Time ↑", "时间升序"),
+    ("view.logs.sort.time_desc", "Time ↓", "时间降序"),
+    ("view.logs.sort.duration_asc", "Duration ↑", "耗时升序"),
+    ("view.logs.sort.duration_desc", "Duration ↓", "耗时降序"),
+    ("view.logs.sort.sequence", "Row #", "行号"),
+    (
+        "view.logs.sort.structure",
+        "Structure clusters",
+        "同结构聚类",
+    ),
+    (
+        "view.logs.sort.database",
+        "Group by database",
+        "按目标库分组",
     ),
     ("view.logs.button.blocked", "Blocked methods", "屏蔽的方法"),
     ("view.logs.blocked.title", "Blocked methods", "已屏蔽的方法"),
@@ -1024,6 +1056,19 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "hover.java.ambiguous_suffix",
         "candidate mapper statements; cannot choose one.",
         "处候选 Mapper 语句，无法确定唯一一条。",
+    ),
+    // Capture start (lane A): the sandbox gives the plugin a WebSocket client
+    // only, so the agent has to be running before the plugin can dial it. A
+    // refused dial is a waiting state, and `{port}` is filled in by the caller.
+    (
+        "capture.start.waiting",
+        "Capture started; waiting for the target application to start (port {port})",
+        "已开始捕获，等待目标应用启动（端口 {port}）",
+    ),
+    (
+        "capture.start.connected",
+        "Connected to the target application (port {port})",
+        "已接入目标应用（端口 {port}）",
     ),
 ];
 

@@ -5,14 +5,14 @@
 //! The panel UI is the packaged page `web/log-panel.html`
 //! (`web = "web/log-panel.html"` in `plugin.toml`, applied by the controller):
 //! the page owns the DOM and posts user actions (`ready`, `filter`, `copy-line`,
-//! `open-line`, `toggle-pause`, `clear`, `export`), and the plugin answers with
-//! the full state through [`host::post_view_message`]. No HTML is built in Rust
-//! any more, so the page always renders text with `textContent` (no injection).
+//! `open-line`, `capture-start` / `capture-stop` / `capture-retry`, `clear`,
+//! `sort`, `export`), and the plugin answers with the full state through
+//! [`host::post_view_message`]. No HTML is built in Rust any more, so the page
+//! always renders text with `textContent` (no injection).
 //!
 //! The store lives in a `OnceLock<Mutex<_>>` because `Main` belongs to the
 //! controller (wasm is single-threaded; the mutex only serialises test threads).
 
-use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -442,30 +442,209 @@ impl Default for Filter {
     }
 }
 
-/// The display order of the pushed rows (lane L26, the "sort by duration"
-/// toolbar button). `Time` keeps capture order; `Duration` orders by the
-/// statement's duration, longest first, rows without a duration last.
+/// The display order of the pushed rows (lane A), mirroring the reference's
+/// `cn.song.mybatisplus.visualizer.log.SortMode`.
+///
+/// Seven modes in the reference's `sortOptions()` order — the order its
+/// sort-down menu lists them. `TimeAsc` is the default: capture order, which is
+/// the order the statements appear in the log. Rows without a duration sink to
+/// the bottom in **both** duration directions, and the two grouping modes keep
+/// capture order inside a group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortMode {
-    Time,
-    Duration,
+    TimeAsc,
+    TimeDesc,
+    DurationAsc,
+    DurationDesc,
+    Sequence,
+    Structure,
+    Database,
 }
 
 impl SortMode {
+    /// Every mode, in the reference's menu order (`sortOptions()`).
+    pub const ALL: [SortMode; 7] = [
+        SortMode::TimeAsc,
+        SortMode::TimeDesc,
+        SortMode::DurationAsc,
+        SortMode::DurationDesc,
+        SortMode::Sequence,
+        SortMode::Structure,
+        SortMode::Database,
+    ];
+
     pub fn token(self) -> &'static str {
         match self {
-            SortMode::Time => "time",
-            SortMode::Duration => "duration",
+            SortMode::TimeAsc => "time_asc",
+            SortMode::TimeDesc => "time_desc",
+            SortMode::DurationAsc => "duration_asc",
+            SortMode::DurationDesc => "duration_desc",
+            SortMode::Sequence => "sequence",
+            SortMode::Structure => "structure",
+            SortMode::Database => "database",
         }
     }
 
+    /// Parses a token from the page.
+    ///
+    /// `time` / `duration` are the pre-lane tokens: the old button was a
+    /// two-way toggle whose duration direction sorted longest first, so they
+    /// map onto the ascending-time / descending-duration modes.
     pub fn parse(token: &str) -> Option<Self> {
         match token {
-            "duration" => Some(SortMode::Duration),
-            "time" => Some(SortMode::Time),
+            "time_asc" | "time" => Some(SortMode::TimeAsc),
+            "time_desc" => Some(SortMode::TimeDesc),
+            "duration_asc" => Some(SortMode::DurationAsc),
+            "duration_desc" | "duration" => Some(SortMode::DurationDesc),
+            "sequence" => Some(SortMode::Sequence),
+            "structure" => Some(SortMode::Structure),
+            "database" => Some(SortMode::Database),
             _ => None,
         }
     }
+}
+
+/// The row's sort timestamp. The panel has one time per row (the parsed log
+/// timestamp, which is also what the row header prints); a row that stated none
+/// sorts as `0`, exactly like the reference's `displayTimeOf` on a missing value.
+fn sort_time(row: &PanelRow) -> i64 {
+    row.timestamp_ms.unwrap_or(0)
+}
+
+/// The FNV-1a 64-bit hex fingerprint of a literal-parameterised statement.
+///
+/// This mirrors the reference's `structureFingerprint` (`LogSqlModels.kt`):
+/// whitespace is collapsed, a trailing `;` is dropped, every string literal and
+/// every bare number is folded to `?`, and the result is hashed with FNV-1a
+/// 64-bit. The port hashes the parameterised statement's UTF-8 bytes where the
+/// reference hashes its UTF-16 code units, so the two produce the same
+/// fingerprint for ASCII SQL (every realistic statement) and only diverge on
+/// non-ASCII identifiers. Nothing compares across the two plugins: the value is
+/// only ever compared with another value from this function, so equal
+/// statement shapes always land on the same fingerprint.
+///
+/// The core crate has the same text helpers in `core::log::text`, but that
+/// module is private to `core::log`, so the panel keeps its own copy rather than
+/// widening another lane's module surface. Only display ordering reads it.
+fn structure_fingerprint(sql: &str) -> String {
+    let collapsed = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    let trimmed = collapsed.trim_end_matches(';').trim();
+    let parameterised = parameterise_literals(trimmed);
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a 64-bit offset basis
+    for byte in parameterised.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3); // FNV-1a 64-bit prime
+    }
+    format!("{hash:x}")
+}
+
+/// Folds string literals (`'…'`, with `''` escapes) and bare numbers to `?`.
+///
+/// Identifiers keep their digits (`t2024`, `plan_2026001`): a digit only folds
+/// when the character before it is not a SQL word character. An unterminated
+/// literal folds to one `?` and ends the scan, the reference's defensive close.
+fn parameterise_literals(sql: &str) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let chars: Vec<char> = sql.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '\'' {
+            let mut end = index + 1;
+            while end < chars.len() {
+                if chars[end] == '\'' {
+                    if end + 1 < chars.len() && chars[end + 1] == '\'' {
+                        end += 2;
+                        continue;
+                    }
+                    break;
+                }
+                end += 1;
+            }
+            out.push('?');
+            index = if end < chars.len() {
+                end + 1
+            } else {
+                chars.len()
+            };
+        } else if ch.is_ascii_digit() && (index == 0 || !is_sql_word_char(chars[index - 1])) {
+            let mut end = index;
+            while end < chars.len() && (chars[end].is_ascii_digit() || chars[end] == '.') {
+                end += 1;
+            }
+            if end < chars.len() && is_sql_word_char(chars[end]) {
+                out.extend(&chars[index..end]); // 2024Q1-like: part of an identifier
+            } else {
+                out.push('?');
+            }
+            index = end;
+        } else {
+            out.push(ch);
+            index += 1;
+        }
+    }
+    out
+}
+
+/// A SQL word character (identifier boundary): letter, digit, `_` or `$`.
+fn is_sql_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_' || ch == '$'
+}
+
+/// Orders `rows` in place for `mode`, the reference's `applySort` (`SqlLogPanel.kt`).
+///
+/// Rust's `sort_by` is stable, so equal rows keep the order they arrived in —
+/// the same guarantee the reference gets from `sortedBy` / `sortedWith`.
+fn apply_sort(rows: &mut Vec<&PanelRow>, mode: SortMode) {
+    match mode {
+        SortMode::TimeAsc => rows.sort_by_key(|row| sort_time(row)),
+        SortMode::TimeDesc => rows.sort_by_key(|row| std::cmp::Reverse(sort_time(row))),
+        // Duration: structured duration only (the panel has no text fallback on
+        // this side); a missing duration is `MAX` ascending and `MIN`
+        // descending, so it sinks in both directions like the reference.
+        SortMode::DurationAsc => {
+            rows.sort_by(|a, b| duration_asc_key(a).total_cmp(&duration_asc_key(b)))
+        }
+        SortMode::DurationDesc => {
+            rows.sort_by(|a, b| duration_desc_key(b).total_cmp(&duration_desc_key(a)))
+        }
+        // Row number: the row's own log line, which is what the panel numbers
+        // rows by. A row without one (0) sinks to the bottom, as the reference
+        // does with its `sequenceNumber`.
+        SortMode::Sequence => rows.sort_by_key(|row| {
+            if row.line_no > 0 {
+                row.line_no
+            } else {
+                usize::MAX
+            }
+        }),
+        // Structure clusters: same fingerprint adjacent, capture order inside a
+        // group (the reference's `compareBy({structureKey}, {displayTimeOf})`).
+        SortMode::Structure => {
+            let mut keyed: Vec<(String, i64, &PanelRow)> = rows
+                .iter()
+                .map(|row| (structure_fingerprint(&row.sql), sort_time(row), *row))
+                .collect();
+            keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            rows.clear();
+            rows.extend(keyed.into_iter().map(|(_, _, row)| row));
+        }
+        // Group by target database. The reference keys on `databaseName ?:
+        // DATABASE_UNKNOWN_SORT_KEY`, so rows that state no database sink to the
+        // bottom and keep capture order. This build captures no connection name
+        // (see LIMITS: the row badge states the engine only), so every row is in
+        // that unknown group and the mode resolves to capture order — the
+        // reference behaves the same way for a log without connection names.
+        SortMode::Database => rows.sort_by_key(|row| sort_time(row)),
+    }
+}
+
+fn duration_asc_key(row: &PanelRow) -> f64 {
+    row.duration_ms.unwrap_or(f64::MAX)
+}
+
+fn duration_desc_key(row: &PanelRow) -> f64 {
+    row.duration_ms.unwrap_or(f64::MIN)
 }
 
 // ---------------------------------------------------------------------------
@@ -899,7 +1078,7 @@ struct Store {
     /// reports a flip when the user scrolls away from the bottom; the
     /// "scroll to bottom" button and scrolling back restore it.
     follow: bool,
-    /// The display order (`time` / `duration`), lane L26.
+    /// The display order (lane A: seven modes, default `time_asc`).
     sort: SortMode,
     /// The "Log → SQL" tab (lane L33): its own input pane and the last
     /// conversion, carried in `tabs.logToSql`. Independent of the log list's
@@ -1083,7 +1262,7 @@ impl Default for Store {
             filter_touched: false,
             paused: false,
             follow: true,
-            sort: SortMode::Time,
+            sort: SortMode::TimeAsc,
             log_to_sql: LogToSqlTab::default(),
             sql_to_java: SqlToJavaTab::default(),
             history: HistoryTab::default(),
@@ -1167,6 +1346,10 @@ pub(crate) fn reset_for_tests() {
     let mut state = store();
     state.log_to_sql = LogToSqlTab::default();
     state.sql_to_java = SqlToJavaTab::default();
+    // The display order is process-wide too (lane A): a test that leaves
+    // `structure` or `database` behind would make the next test's "the default
+    // is time_asc" assertion depend on which test ran before it.
+    state.sort = SortMode::TimeAsc;
 }
 
 /// Whether live refresh is paused (rows keep accumulating meanwhile).
@@ -1272,17 +1455,6 @@ fn build_state() -> Value {
 
     let filter = state.filter.clone();
     let mut filtered = filter_row_refs(&rows, &filter, slow_threshold_ms);
-    // Lane L26: `duration` orders longest first (rows without a duration last,
-    // stable so capture order survives among equals). The buffer cap then
-    // keeps the first `cap` rows of the sorted order.
-    if state.sort == SortMode::Duration {
-        filtered.sort_by(|a, b| match (a.duration_ms, b.duration_ms) {
-            (Some(x), Some(y)) => y.partial_cmp(&x).unwrap_or(Ordering::Equal),
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => Ordering::Equal,
-        });
-    }
     let total = filtered.len();
     let slow = filtered
         .iter()
@@ -1291,9 +1463,14 @@ fn build_state() -> Value {
     let n_plus_one = filtered.iter().filter(|row| row.n_plus_one).count();
     let blocked = state.blocked.len();
 
+    // The buffer cap keeps the newest `cap` rows in capture order, then the
+    // display order sorts that window. Sorting before the cap would let a
+    // descending mode drop the very rows it puts first (the old duration toggle
+    // kept the fastest rows of a longest-first list).
     let cap = buffer_cap();
     let start = total.saturating_sub(cap);
-    let shown = &filtered[start..];
+    let mut shown: Vec<&PanelRow> = filtered.drain(start..).collect();
+    apply_sort(&mut shown, state.sort);
     let truncated = total > shown.len();
 
     // The two location indexes are queried once per push, on the rows actually
@@ -1397,6 +1574,20 @@ fn build_state() -> Value {
     };
 
     let stats = crate::capture::bridge::Stats::current();
+    // A capture start whose dial was refused (the target application is not up
+    // yet) is a waiting state, not an error: the page ticks `capture-retry`
+    // every 2 s while this is set.
+    let waiting = crate::capture::bridge::waiting();
+    let capture_waiting = waiting
+        .as_ref()
+        .map(|waiting| {
+            json!({
+                "port": waiting.port,
+                "attempts": waiting.attempts,
+                "lastError": waiting.last_error,
+            })
+        })
+        .unwrap_or(Value::Null);
 
     json!({
         "op": "state",
@@ -1444,6 +1635,9 @@ fn build_state() -> Value {
             "agent_events": stats.events,
             "paused": paused,
             "follow": follow,
+            // Non-null while a refused capture start waits for the target
+            // application; `null` once it connected or capture stopped.
+            "capture_waiting": capture_waiting,
         },
         "sort": sort.token(),
         "slow_threshold_ms": slow_threshold_ms,
@@ -2374,10 +2568,17 @@ fn labels_base() -> Value {
         "regexError": t("view.logs.filter.regex_error"),
         "slowPrefix": t("view.logs.slow_prefix"),
         "empty": t("view.logs.empty"),
+        // Lane A: the reference's empty state is a two-line guidance block in
+        // the platform's muted `StatusText` ink (`log.panel.empty`), not a
+        // one-line note.
+        "emptyHint": t("view.logs.empty.hint"),
         "paused": t("view.logs.paused"),
         "statusConsolePrefix": t("view.logs.status.console_prefix"),
         "statusConsoleSuffix": t("view.logs.status.console_suffix"),
         "statusAgentOff": t("view.logs.status.agent_off"),
+        // Lane A: the status line names a refused capture start while the
+        // plugin keeps dialling; `{port}` is filled in by the page.
+        "statusCaptureWaiting": t("view.logs.status.capture_waiting"),
         "statusAgentEventsPrefix": t("view.logs.status.agent_events_prefix"),
         "totalPrefix": t("view.logs.status.total_prefix"),
         "totalSuffix": t("view.logs.status.total_suffix"),
@@ -2412,6 +2613,30 @@ fn labels_base() -> Value {
         "typeCreate": t("view.logs.type.create"),
         "typeDrop": t("view.logs.type.drop"),
     })
+}
+
+/// The seven sort options in the reference's `sortOptions()` order.
+fn sort_option_labels() -> Value {
+    Value::Array(
+        SortMode::ALL
+            .iter()
+            .map(|mode| json!({ "token": mode.token(), "label": sort_label(*mode) }))
+            .collect(),
+    )
+}
+
+/// One sort-mode label (`log.sort.*` in the reference bundle).
+fn sort_label(mode: SortMode) -> String {
+    let key = match mode {
+        SortMode::TimeAsc => "view.logs.sort.time_asc",
+        SortMode::TimeDesc => "view.logs.sort.time_desc",
+        SortMode::DurationAsc => "view.logs.sort.duration_asc",
+        SortMode::DurationDesc => "view.logs.sort.duration_desc",
+        SortMode::Sequence => "view.logs.sort.sequence",
+        SortMode::Structure => "view.logs.sort.structure",
+        SortMode::Database => "view.logs.sort.database",
+    };
+    t(key)
 }
 
 /// Tab strip and per-tab captions (lanes L22/L23), split out of
@@ -2493,10 +2718,12 @@ fn labels_actions() -> Value {
         "captureStart": t("view.logs.button.capture_start"),
         "captureStop": t("view.logs.button.capture_stop"),
         "scrollEnd": t("view.logs.button.scroll_end"),
-        "sortDuration": t("view.logs.button.sort_duration"),
-        "sortTime": t("view.logs.menu.sort_time"),
-        "sortTimeTitle": t("view.logs.sort.time_title"),
-        "sortDurationTitle": t("view.logs.sort.duration_title"),
+        // Sort menu (lane A): the reference's seven `sortOptions()` entries in
+        // menu order, and the `Sort: <current mode>` tooltip prefix. The page
+        // builds the popup from this list, so the order and the wording have a
+        // single source on the host side.
+        "sortLabel": t("view.logs.sort.label"),
+        "sortOptions": sort_option_labels(),
         "blocked": t("view.logs.button.blocked"),
         "blockedTitle": t("view.logs.blocked.title"),
         "blockedEmpty": t("view.logs.blocked.empty"),
@@ -2529,14 +2756,10 @@ pub fn render_panel() -> View {
         let _ = push_state();
     }
 
-    let pause_label = if paused {
-        t("view.logs.button.resume")
-    } else {
-        t("view.logs.button.pause")
-    };
+    // No capture-pause button: the reference's `agentPauseAction` is in the
+    // toolbar group but its `update()` hides it unconditionally (lane A), and the
+    // page owns the action row for a `web =` view.
     let mut view = View::new(Body::Html(String::new()));
-    view.toolbar
-        .push(Button::new("toggle-pause", &pause_label).icon(if paused { "run" } else { "stop" }));
     view.toolbar
         .push(Button::new("clear", &t("view.logs.button.clear")).icon("remove"));
     view.toolbar
@@ -2941,6 +3164,16 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
             let _ = crate::commands::capture_stop::run(ctx, None);
             let _ = push_state();
         }
+        // The page retries a refused capture start every 2 s (lane A): the
+        // platform has no listening socket, so the agent must be up before the
+        // plugin can dial it. A tick with nothing pending is a no-op, and a tick
+        // after `capture-stop` finds no waiting state at all.
+        "capture-retry" => {
+            if crate::capture::bridge::waiting().is_some() {
+                crate::commands::capture_start::retry(ctx)?;
+                let _ = push_state();
+            }
+        }
         // Follow (lane L26): the page reports a flip when the user scrolls
         // away from the bottom; "scroll to bottom" restores it.
         "follow" => {
@@ -2956,7 +3189,8 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
             let _ = push_state();
             host::refresh_view(VIEW_ID);
         }
-        // Display order (lane L26): the sort-by-duration button toggles.
+        // Display order (lane A): the page's sort popup posts one of the seven
+        // tokens; an unknown or legacy token is ignored rather than guessed.
         "sort" => {
             if let Some(mode) = message
                 .get("sort")
@@ -3107,6 +3341,10 @@ fn all_sql() -> String {
 }
 
 /// SQL of the visible (filtered + capped) rows, joined for the export action.
+///
+/// The rows leave in the order the list shows them (lane A): the reference's
+/// `ExportVisibleAction` exports the visible entries, so the export follows the
+/// active sort mode instead of capture order.
 pub fn visible_sql() -> String {
     let mut state = store();
     ensure_parsed(&mut state);
@@ -3121,11 +3359,14 @@ pub fn visible_sql() -> String {
         slow_threshold_ms,
     );
     let filter = state.filter.clone();
+    let sort = state.sort;
     drop(state);
     let filtered = filter_rows(&rows, &filter, slow_threshold_ms);
     let cap = buffer_cap();
     let start = filtered.len().saturating_sub(cap);
-    filtered[start..]
+    let mut shown: Vec<&PanelRow> = filtered[start..].iter().collect();
+    apply_sort(&mut shown, sort);
+    shown
         .iter()
         .filter(|row| !row.sql.is_empty())
         .map(|row| format!("{};", row.sql))
@@ -3259,6 +3500,9 @@ mod tests {
         set_paused(false);
         // The location indexes are process-wide too (lane L28).
         crate::indexer::clear_indexes();
+        // The capture session and its waiting state are process-wide (lane A):
+        // a leftover wait would make `status.capture_waiting` non-null.
+        crate::capture::bridge::reset_capture_for_tests();
         // The preview tab's model is process-wide too (lane L23).
         crate::views::workbench::clear();
         crate::views::workbench::note_page_tab();
@@ -3508,6 +3752,24 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         serde_json::from_str(&last.1).expect("state is JSON")
     }
 
+    /// The table each pushed row selects from (`FROM <table>`), in display
+    /// order — a short, stable stand-in for the whole statement.
+    fn row_tables(state: &Value) -> Vec<String> {
+        state["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| {
+                let sql = row["sql"].as_str().unwrap_or("");
+                sql.split_whitespace()
+                    .skip_while(|word| !word.eq_ignore_ascii_case("FROM"))
+                    .nth(1)
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect()
+    }
+
     #[test]
     fn ready_message_pushes_rows_and_labels_without_html() {
         let (host, _guard) = test_host();
@@ -3651,7 +3913,7 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
     #[test]
     fn the_packaged_page_draws_its_own_action_row() {
         // A `web =` view gets no host toolbar, so the page draws the reference's
-        // eleven toolbar actions itself (lane L32), in the reference order
+        // toolbar actions itself, in the reference order
         // (`SqlLogPanel.toolbarGroup`): capture, capture-pause, clear, settings,
         // block list, search, quick preview, scroll to end, sort, community,
         // help. Each is an IDE icon button: a 24×24 hit area, an inline SVG, and
@@ -3662,12 +3924,10 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         let bar_end = page.find("class=\"filterbar\"").expect("filter row");
         let actionbar = &page[bar_start..bar_end];
 
-        // The reference's `agentPause` is permanently hidden (the agent channel
-        // is the default one); this build has no agent-pause op, so that slot
-        // carries the panel's own refresh pause instead of an empty space.
+        // The reference's `agentPauseAction` sits in the group but its `update()`
+        // hides it unconditionally (方案 B), so the port draws no pause button.
         let order = [
             "captureBtn",
-            "pauseBtn",
             "clearBtn",
             "settingsBtn",
             "blockedBtn",
@@ -3695,13 +3955,16 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             !actionbar.contains("class=\"btn\""),
             "the action row has no text buttons"
         );
+        assert!(
+            !page.contains("id=\"pauseBtn\""),
+            "the reference hides its capture-pause action; no pause button"
+        );
         // The ops the entries post. The settings gear opens a popup whose items
         // post the L26 `settings` / `help` ops; "copy SQL" is not a toolbar
         // action in the reference (it lives in the row menu).
         for op in [
             "'capture-start'",
             "'capture-stop'",
-            "'toggle-pause'",
             "'clear'",
             "'settings'",
             "'clear-blocked'",
@@ -3718,15 +3981,16 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
         assert!(page.contains("openSettingsMenu($('settingsMenu').hidden)"));
-        // Both icons of the state-dependent entries are in the page.
-        for id in [
-            "pauseIcon",
-            "resumeIcon",
-            "captureRunIcon",
-            "captureStopIcon",
-        ] {
+        // Both icons of the state-dependent capture entry are in the page.
+        for id in ["captureRunIcon", "captureStopIcon"] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
+        // The sort entry is a popup opener (the reference's `sortModeAction`
+        // shows a radio menu), so it is a menu anchor with its own menu node.
+        for id in ["sortMenu"] {
+            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        assert!(page.contains("openSortMenu($('sortMenu').hidden)"));
         // The right edge, in the reference order (`SqlLogPanel.kt`): the slow
         // count, then the SQL-type selector, then the dedupe box.
         let right = actionbar.find("class=\"rightgroup\"").expect("right group");
@@ -3745,14 +4009,12 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         assert!(page.contains("node.title = label || ''"), "title binding");
         let labels = labels_json();
         for key in [
-            "pause",
-            "resume",
             "clear",
             "captureStart",
             "captureStop",
             "scrollEnd",
-            "sortDuration",
-            "sortTime",
+            "sortLabel",
+            "sortOptions",
             "blocked",
             "settings",
             "menuSettingsPage",
@@ -3766,6 +4028,30 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
         ] {
             assert!(labels.get(key).is_some(), "missing label {key}");
         }
+        // The seven sort options, in the reference's menu order.
+        let options = labels["sortOptions"].as_array().expect("sort options");
+        let tokens: Vec<&str> = options
+            .iter()
+            .map(|option| option["token"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            tokens,
+            [
+                "time_asc",
+                "time_desc",
+                "duration_asc",
+                "duration_desc",
+                "sequence",
+                "structure",
+                "database"
+            ]
+        );
+        assert!(
+            options.iter().all(|option| option["label"]
+                .as_str()
+                .is_some_and(|label| !label.is_empty())),
+            "every sort option has a label: {options:?}"
+        );
     }
 
     #[test]
@@ -4309,7 +4595,7 @@ Preparing: DELETE FROM users WHERE id = ?
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
         // The log tab's DOM (list + filters + status) must stay in place.
-        for id in ["list", "kw", "typeBtn", "statusLeft", "pauseBtn"] {
+        for id in ["list", "kw", "typeBtn", "statusLeft", "sortBtn"] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
         // Switching is `hidden` toggling only, and a state push with unchanged
@@ -5533,6 +5819,51 @@ public interface UserMapper {
     }
 
     #[test]
+    fn capture_retry_ticks_only_while_a_start_is_waiting() {
+        // Lane A: the page ticks `capture-retry` every 2 s while a refused start
+        // waits for the target application. The host must dial only while the
+        // wait exists, and `capture-stop` must end it.
+        let (host, _guard) = test_host();
+        host.set_project_root(Some("/project"));
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let pushed = host.view_messages().len();
+        handle_panel_message(&host, "{\"op\":\"capture-retry\"}").unwrap();
+        assert_eq!(
+            host.view_messages().len(),
+            pushed,
+            "a tick with nothing pending is a no-op"
+        );
+
+        handle_panel_message(&host, "{\"op\":\"capture-start\"}").unwrap();
+        let state = state_of(&host);
+        let waiting = &state["status"]["capture_waiting"];
+        assert!(waiting.is_object(), "the refused start waits: {state}");
+        assert_eq!(waiting["attempts"], 1, "{waiting}");
+        assert!(waiting["port"].as_u64().is_some(), "{waiting}");
+        assert!(
+            waiting["lastError"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty()),
+            "the refusal reason is kept: {waiting}"
+        );
+
+        handle_panel_message(&host, "{\"op\":\"capture-retry\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(
+            state["status"]["capture_waiting"]["attempts"], 2,
+            "the tick dialled once more"
+        );
+
+        handle_panel_message(&host, "{\"op\":\"capture-stop\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(
+            state["status"]["capture_waiting"],
+            Value::Null,
+            "capture-stop ends the wait so the page stops ticking"
+        );
+    }
+
+    #[test]
     fn capture_stop_message_forwards_to_the_capture_command() {
         let (host, _guard) = test_host();
         // Already holding the one test lock via `test_host()`; take only the
@@ -5575,30 +5906,46 @@ public interface UserMapper {
 1723456789014|50|statement|SELECT * FROM c
 ";
         set_log_text(text);
+        // The default is capture order (`TIME_ASC`, the reference's default).
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["sort"], "time_asc");
+
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"duration_desc\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sort"], "duration_desc");
+        assert_eq!(row_tables(&state), ["b", "a", "c"], "longest first");
+
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"duration_asc\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sort"], "duration_asc");
+        assert_eq!(row_tables(&state), ["c", "a", "b"], "shortest first");
+
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"time_desc\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sort"], "time_desc");
+        assert_eq!(row_tables(&state), ["c", "b", "a"], "newest first");
+
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"time_asc\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sort"], "time_asc");
+        assert_eq!(row_tables(&state), ["a", "b", "c"], "capture order");
+    }
+
+    #[test]
+    fn legacy_sort_tokens_still_parse() {
+        // The old two-way toggle posted `time` / `duration`; `duration` sorted
+        // longest first, so it maps onto `duration_desc`.
+        let (host, _guard) = test_host();
+        set_log_text(
+            "1723456789012|300|statement|SELECT * FROM a\n1723456789013|1000|statement|SELECT * FROM b\n",
+        );
         handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"duration\"}").unwrap();
         let state = state_of(&host);
-        assert_eq!(state["sort"], "duration");
-        let order: Vec<String> = state["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|row| row["sql"].as_str().unwrap().to_string())
-            .collect();
-        assert!(order[0].contains("FROM b"), "{order:?}");
-        assert!(order[1].contains("FROM a"), "{order:?}");
-        assert!(order[2].contains("FROM c"), "{order:?}");
+        assert_eq!(state["sort"], "duration_desc");
+        assert_eq!(row_tables(&state), ["b", "a"]);
 
         handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"time\"}").unwrap();
-        let state = state_of(&host);
-        assert_eq!(state["sort"], "time");
-        let order: Vec<String> = state["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|row| row["sql"].as_str().unwrap().to_string())
-            .collect();
-        assert!(order[0].contains("FROM a"), "{order:?}");
-        assert!(order[2].contains("FROM c"), "{order:?}");
+        assert_eq!(state_of(&host)["sort"], "time_asc");
     }
 
     #[test]
@@ -5610,11 +5957,109 @@ public interface UserMapper {
 ==> Parameters: 1(Long)
 ";
         set_log_text(text);
-        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"duration\"}").unwrap();
-        let rows = state_of(&host)["rows"].as_array().cloned().unwrap();
-        assert_eq!(rows.len(), 2, "{rows:?}");
-        assert!(rows[0]["sql"].as_str().unwrap().contains("timed"));
-        assert_eq!(rows[1]["duration_ms"], Value::Null);
+        for mode in ["duration_desc", "duration_asc"] {
+            handle_panel_message(&host, &format!("{{\"op\":\"sort\",\"sort\":\"{mode}\"}}"))
+                .unwrap();
+            let rows = state_of(&host)["rows"].as_array().cloned().unwrap();
+            assert_eq!(rows.len(), 2, "{rows:?}");
+            assert!(
+                rows[0]["sql"].as_str().unwrap().contains("timed"),
+                "{mode} keeps the timed row first: {rows:?}"
+            );
+            assert_eq!(rows[1]["duration_ms"], Value::Null, "{mode}");
+        }
+    }
+
+    #[test]
+    fn sort_sequence_restores_the_row_number_order() {
+        let (host, _guard) = test_host();
+        set_log_text(
+            "1723456789012|300|statement|SELECT * FROM a\n1723456789013|1000|statement|SELECT * FROM b\n1723456789014|50|statement|SELECT * FROM c\n",
+        );
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"duration_desc\"}").unwrap();
+        assert_eq!(row_tables(&state_of(&host)), ["b", "a", "c"]);
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"sequence\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sort"], "sequence");
+        assert_eq!(row_tables(&state), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn sort_structure_clusters_rows_of_the_same_shape() {
+        // Two calls of the same statement shape (only the literal differs) and
+        // one of a different shape: clustering must put the two same-shape rows
+        // next to each other, whatever the fingerprint's own order.
+        let (host, _guard) = test_host();
+        set_log_text(
+            "1723456789012|100|statement|SELECT * FROM users WHERE id = 1\n\
+             1723456789013|100|statement|SELECT * FROM orders WHERE id = 2\n\
+             1723456789014|100|statement|SELECT * FROM users WHERE id = 3\n",
+        );
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"structure\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sort"], "structure");
+        let tables = row_tables(&state);
+        let users: Vec<usize> = tables
+            .iter()
+            .enumerate()
+            .filter(|(_, table)| table.as_str() == "users")
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(users.len(), 2, "{tables:?}");
+        assert_eq!(
+            users[1] - users[0],
+            1,
+            "the same shape is adjacent: {tables:?}"
+        );
+        assert!(
+            !tables[users[0]..=users[1]]
+                .iter()
+                .any(|table| table == "orders")
+        );
+    }
+
+    #[test]
+    fn sort_database_group_keeps_capture_order_without_connection_names() {
+        // This build captures no connection name, so every row is in the
+        // reference's "unknown database" group, which sinks to the bottom and
+        // keeps capture order — the mode is not a no-op error, it just has one
+        // group to order.
+        let (host, _guard) = test_host();
+        set_log_text(
+            "1723456789012|300|statement|SELECT * FROM a\n1723456789013|1000|statement|SELECT * FROM b\n",
+        );
+        handle_panel_message(&host, "{\"op\":\"sort\",\"sort\":\"database\"}").unwrap();
+        let state = state_of(&host);
+        assert_eq!(state["sort"], "database");
+        assert_eq!(row_tables(&state), ["a", "b"]);
+    }
+
+    #[test]
+    fn structure_fingerprint_folds_literals_but_not_identifiers() {
+        // Same shape with different literals -> same fingerprint.
+        assert_eq!(
+            super::structure_fingerprint("SELECT * FROM t WHERE id = 1 AND name = 'a'"),
+            super::structure_fingerprint("SELECT * FROM t WHERE id = 42 AND name = 'b'")
+        );
+        // Whitespace and a trailing terminator do not change the shape.
+        assert_eq!(
+            super::structure_fingerprint("SELECT  *  FROM t WHERE id = 1;"),
+            super::structure_fingerprint("SELECT * FROM t WHERE id = 7")
+        );
+        // Different table / column / IN arity -> different fingerprints.
+        assert_ne!(
+            super::structure_fingerprint("SELECT * FROM a WHERE id = 1"),
+            super::structure_fingerprint("SELECT * FROM b WHERE id = 1")
+        );
+        assert_ne!(
+            super::structure_fingerprint("SELECT * FROM t WHERE id IN (1, 2)"),
+            super::structure_fingerprint("SELECT * FROM t WHERE id IN (1, 2, 3)")
+        );
+        // A digit inside an identifier stays: `t2024` is not a literal.
+        assert_ne!(
+            super::structure_fingerprint("SELECT * FROM t2024 WHERE id = 1"),
+            super::structure_fingerprint("SELECT * FROM t2025 WHERE id = 1")
+        );
     }
 
     #[test]
@@ -5743,10 +6188,16 @@ public interface UserMapper {
         assert!(page.contains("var follow = true;"));
         assert!(page.contains("post({ op: 'follow', follow: false })"));
         assert!(page.contains("post({ op: 'scroll-end' })"));
-        // The sort button toggles time <-> duration and shows the current mode.
-        assert!(page.contains("sortMode = sortMode === 'duration' ? 'time' : 'duration';"));
+        // The sort entry is a radio popup over the host's seven modes (lane A),
+        // not the old two-way toggle: the popup is rebuilt from
+        // `labels.sortOptions`, marks the current mode, and posts the token.
+        assert!(page.contains("var sortMode = 'time_asc';"));
+        assert!(page.contains("var mode = state.sort || 'time_asc';"));
+        assert!(page.contains("function renderSortMenu()"));
+        assert!(page.contains("L.sortOptions"));
+        assert!(page.contains("item.setAttribute('data-sort', option.token)"));
         assert!(page.contains("post({ op: 'sort', sort: sortMode })"));
-        assert!(page.contains("L.sortDurationTitle"));
+        assert!(page.contains("L.sortLabel"));
         // The blocked popup lists the keys and clears them.
         assert!(page.contains("id=\"blockedMenu\""));
         assert!(page.contains("id=\"blockedList\""));
@@ -5762,6 +6213,13 @@ public interface UserMapper {
         // The capture button is one icon button whose glyph follows the state.
         assert!(page.contains("post({ op: connected ? 'capture-stop' : 'capture-start' })"));
         assert!(page.contains("$('captureRunIcon').hidden = connected"));
+        // Lane A: a refused capture start waits for the target application and
+        // the page retries every 2 s (`on-schedule` has a 60 s floor).
+        assert!(page.contains("function syncCaptureRetry(state)"));
+        assert!(page.contains("post({ op: 'capture-retry' })"));
+        assert!(page.contains("}, 2000);"));
+        assert!(page.contains("captureRetryTimer"));
+        assert!(page.contains("s.capture_waiting"));
         // Settings and help have real feedback paths, not dead buttons.
         assert!(page.contains("post({ op: 'settings' })"));
         assert!(page.contains("post({ op: 'help' })"));

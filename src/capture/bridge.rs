@@ -44,6 +44,10 @@ pub const MAX_PAGE_SIZE: usize = 5000;
 pub const KEY_BAD_PORT: &str = "capture.port.invalid";
 pub const KEY_GUIDANCE: &str = "capture.port.guidance";
 pub const KEY_ALREADY_CONNECTED: &str = "capture.start.already_connected";
+/// A capture start that could not dial yet: the panel waits and retries.
+pub const KEY_WAITING: &str = "capture.start.waiting";
+/// A waiting capture start that finally connected.
+pub const KEY_CONNECTED: &str = "capture.start.connected";
 pub const KEY_NOT_CONNECTED: &str = "capture.status.not_connected";
 pub const KEY_FILE_HINT: &str = "capture.status.file_hint";
 pub const KEY_OPEN_LOG_LIMITED: &str = "capture.open_log.page_limited";
@@ -286,6 +290,91 @@ fn refresh_policy() -> RefreshPolicy {
     RefreshPolicy::new(interval)
 }
 
+// ---------------------------------------------------------------------------
+// Waiting for the target application
+// ---------------------------------------------------------------------------
+
+/// A capture start whose dial was refused: the agent is not running yet.
+///
+/// The reference plugin owns a `ServerSocket` on the IDE side and the agent
+/// dials in, so "click Capture, then start the application" works there. This
+/// platform has no listening socket (the sandbox gives the plugin a WebSocket
+/// *client* only), so the plugin must dial the agent — which means the target
+/// application has to be up first. Rather than failing the click, a refused
+/// dial records this state and the panel retries every 2 s (a page
+/// `setInterval`; `on-schedule` has a 60 s floor).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Waiting {
+    pub port: u16,
+    pub url: String,
+    /// How many dials have failed since the user asked to capture.
+    pub attempts: u32,
+    /// The last refusal, human-readable (`capture-start` prints it in
+    /// parentheses so a wrong port or a denied capability stays visible).
+    pub last_error: String,
+    /// The last refusal's message key (`capture.ws.host_error`, …).
+    pub last_key: String,
+}
+
+static WAITING: OnceLock<Mutex<Option<Waiting>>> = OnceLock::new();
+
+fn waiting_slot() -> MutexGuard<'static, Option<Waiting>> {
+    let mutex = WAITING.get_or_init(|| Mutex::new(None));
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The pending capture start, if the last dial was refused.
+pub fn waiting() -> Option<Waiting> {
+    waiting_slot().clone()
+}
+
+/// Records one refused dial, bumping the attempt counter.
+pub fn mark_waiting(port: u16, url: &str, error: &BridgeError) -> Waiting {
+    let mut slot = waiting_slot();
+    let attempts = slot.as_ref().map_or(0, |waiting| waiting.attempts) + 1;
+    let waiting = Waiting {
+        port,
+        url: url.to_string(),
+        attempts,
+        last_error: error.detail(),
+        last_key: error.message_key().to_string(),
+    };
+    *slot = Some(waiting.clone());
+    waiting
+}
+
+/// Forgets the pending capture start (a successful dial, or `capture-stop`).
+pub fn clear_waiting() {
+    *waiting_slot() = None;
+}
+
+/// One reconnect for the panel's 2 s tick.
+///
+/// `Ok(None)` means the connection is up (or there was nothing to retry);
+/// `Ok(Some(_))` means the dial was refused again and the returned state carries
+/// the new attempt count and reason. `Err` is reserved for a refusal retrying
+/// cannot fix (an invalid saved port), so the panel stops spinning.
+pub fn retry(project: &Project) -> Result<Option<Waiting>, BridgeError> {
+    let Some(current) = waiting() else {
+        return Ok(None);
+    };
+    match connect(project, &current.url) {
+        Ok(_) | Err(BridgeError::AlreadyConnected) => {
+            clear_waiting();
+            Ok(None)
+        }
+        Err(BridgeError::Port(error)) => {
+            // A bad port never heals by retrying: drop the wait and let the
+            // caller surface the reason.
+            clear_waiting();
+            Err(BridgeError::Port(error))
+        }
+        Err(error) => Ok(Some(mark_waiting(current.port, &current.url, &error))),
+    }
+}
+
 /// Subscribes to `websocket-ready` once per process. Returns whether this call
 /// did the subscription (so the command can say so).
 pub fn ensure_websocket_subscription() -> bool {
@@ -315,7 +404,11 @@ pub fn websocket_subscription_active() -> bool {
 }
 
 /// Asks the agent to stop, closes the socket and returns the final statistics.
+///
+/// A pending wait is dropped too: `capture-stop` while the plugin was still
+/// dialling must stop the panel's retry loop, not leave it spinning.
 pub fn disconnect() -> Result<Stats, BridgeError> {
+    clear_waiting();
     let mut guard = slot();
     let Some(mut session) = guard.take() else {
         return Err(BridgeError::NotConnected);
