@@ -23,6 +23,7 @@
 //! - the plugin never executes user SQL, so "Execute SQL" stays disabled with
 //!   the reason in its tooltip.
 
+use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use openidea_plugin::views::{Body, View, ViewEvent};
@@ -31,7 +32,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::core::perf::{self, Severity};
-use crate::core::xml::{Confidence, MapperSet, RenderOutput};
+use crate::core::xml::intercept::{self, InterceptConfig};
+use crate::core::xml::param;
+use crate::core::xml::{ConditionSwitches, Confidence, DetailedRender, MapperSet, RenderOutput};
 use crate::core::{dialect, format};
 use crate::i18n::t;
 use crate::settings;
@@ -114,6 +117,69 @@ pub struct WorkbenchModel {
     /// the render is not a mapper statement.
     #[serde(default)]
     pub statement: String,
+    /// One entry per `?` in `sql`, in the same order (C06): the `#{}` name, its
+    /// type class, the placeholder the page shows and the value the render
+    /// bound. Empty for inline SQL with no placeholders and for models built by
+    /// callers that only have the statement text.
+    #[serde(default)]
+    pub parameters: Vec<ParamView>,
+    /// The statement's `<if>` / `<when>` switches (C07), in document order.
+    /// `sql` was rendered with exactly these switches, so the page can draw the
+    /// list and re-render from it without a second lookup.
+    #[serde(default)]
+    pub conditions: Vec<ConditionView>,
+}
+
+/// One named parameter of the current render (C06).
+///
+/// `kind` is the class the parameter pane shows (`text` / `number` /
+/// `temporal` / `collection` / `object` / `unknown`), and `kind_source` says
+/// where it came from: `declared` (the `#{}` token said `jdbcType` /
+/// `javaType`), `inferred` (the reference's collection-name heuristic),
+/// `value` (the bound value's JSON type) or `none`. Warnings are hints — the
+/// value is rendered exactly as typed, never blocked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParamView {
+    /// The `#{}` property (`id`, `user.name`); for a clause an interceptor
+    /// appended, the column or `page.offset` / `page.size`.
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub kind_source: String,
+    /// The text an empty box shows, already localised (empty = no hint).
+    #[serde(default)]
+    pub placeholder: String,
+    /// The value the render bound; empty when the placeholder resolved to null.
+    #[serde(default)]
+    pub value: String,
+    /// The localised mismatch hint, empty when the value fits.
+    #[serde(default)]
+    pub warning: String,
+    /// True for a placeholder an interceptor appended (C14), so the page can
+    /// mark it as simulated rather than written in the statement.
+    #[serde(default)]
+    pub injected: bool,
+}
+
+/// One dynamic-condition switch (C07).
+///
+/// `id` is the node's position in the statement tree (the reference uses the
+/// raw `test` expression, which collides when one expression appears twice;
+/// a path cannot), `label` is that expression — what the reference's
+/// `XmlConditionView` shows — and `enabled` is the switch the SQL was rendered
+/// with.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConditionView {
+    pub id: String,
+    pub label: String,
+    pub enabled: bool,
+    /// `if` or `when`.
+    #[serde(default)]
+    pub kind: String,
+    /// The `<choose>` this branch belongs to (empty for `<if>`): branches of
+    /// one group exclude each other.
+    #[serde(default)]
+    pub group: String,
 }
 
 impl Default for WorkbenchModel {
@@ -131,6 +197,8 @@ impl Default for WorkbenchModel {
             advice: String::new(),
             statements: Vec::new(),
             statement: String::new(),
+            parameters: Vec::new(),
+            conditions: Vec::new(),
         }
     }
 }
@@ -456,6 +524,22 @@ pub(crate) fn render_mapper_statement(
     statement: Option<&str>,
     dialect_name: &str,
 ) -> WorkbenchModel {
+    render_mapper_statement_with(text, statement, dialect_name, ConditionSwitches::Defaults)
+}
+
+/// [`render_mapper_statement`] with an explicit branch policy (C07).
+///
+/// [`ConditionSwitches::Defaults`] renders the statement's shape (every
+/// condition at its default truth, so the preview shows the branches a mapper
+/// can produce); [`ConditionSwitches::Page`] applies the reader's switches on
+/// top. The model carries the effective switches back, so the page and the SQL
+/// always agree.
+pub(crate) fn render_mapper_statement_with(
+    text: &str,
+    statement: Option<&str>,
+    dialect_name: &str,
+    switched: ConditionSwitches<'_>,
+) -> WorkbenchModel {
     let mut model = WorkbenchModel::new("", Vec::new(), dialect_name);
     model.raw = text.to_string();
     model.kind = KIND_XML.to_string();
@@ -479,22 +563,195 @@ pub(crate) fn render_mapper_statement(
         return model;
     };
 
-    let out = set.render(&id, &json!({}));
-    model.confidence = confidence_str(out.confidence).to_string();
+    let detailed = set.render_detailed(&id, &json!({}), switched);
+    model.confidence = confidence_str(detailed.output.confidence).to_string();
     model.source = id.clone();
     model.statement = id;
-    if out.confidence == Confidence::Unresolved {
+    model.conditions = detailed.conditions.iter().map(condition_view).collect();
+    if detailed.output.confidence == Confidence::Unresolved {
         // `unresolved` never carries SQL: only the reason goes to the page.
         model.sql.clear();
         model.params.clear();
+        model.parameters.clear();
     } else {
-        model.sql = out.sql.trim_end().to_string();
-        model.params = out.params.iter().map(param_text).collect();
+        model.sql = detailed.output.sql.trim_end().to_string();
+        apply_parameters(&mut model, &detailed);
     }
-    reasons.extend(reason_lines(&out));
+    reasons.extend(reason_lines(&detailed.output));
+    if detailed.output.confidence != Confidence::Unresolved {
+        // C14: the MyBatis-Plus interceptors the settings page switched on.
+        reasons.extend(apply_intercepts(&mut model, dialect_name));
+    }
     model.reason = reasons.join("\n");
     model.advice = advice_text(&model.sql, dialect_name);
     model
+}
+
+/// One core condition view → the model's shape.
+fn condition_view(view: &crate::core::xml::render::ConditionView) -> ConditionView {
+    ConditionView {
+        id: view.id.clone(),
+        label: view.label.clone(),
+        enabled: view.enabled,
+        kind: view.kind.as_str().to_string(),
+        group: view.group.clone(),
+    }
+}
+
+/// Fills `params` (the legacy, value-only list) and `parameters` (C06) from one
+/// detailed render, keeping the two aligned: `parameters[i]` describes the
+/// `?` that `params[i]` binds.
+fn apply_parameters(model: &mut WorkbenchModel, detailed: &DetailedRender) {
+    let values = &detailed.output.params;
+    model.params = Vec::with_capacity(values.len());
+    model.parameters = Vec::with_capacity(detailed.params.len());
+    for (index, value) in values.iter().enumerate() {
+        // A `?` written directly in the statement (not a `#{}`) has no metadata
+        // entry; its row then shows the ordinal and an empty name. A `?` an
+        // interceptor appended is not here at all — `apply_intercepts` adds its
+        // rows after this list is complete.
+        let text = if value.is_null() {
+            String::new()
+        } else {
+            param_text(value)
+        };
+        model.params.push(text);
+        let meta = detailed.params.get(index);
+        let name = meta
+            .map(|meta| readable_parameter_name(&meta.name))
+            .unwrap_or_default();
+        model.parameters.push(param_view(
+            &name,
+            meta.and_then(|meta| meta.jdbc_type.as_deref()),
+            meta.and_then(|meta| meta.java_type.as_deref()),
+            value,
+            false,
+        ));
+    }
+}
+
+/// The name the pane shows for a `#{}` placeholder.
+///
+/// A `<foreach>` rewrites its item to `__frch_<item>_<n>` before the values are
+/// collected, and that key is a per-iteration artefact, not what the statement
+/// wrote. The prefix and the numeric suffix are dropped, so the reader sees the
+/// `<item>` name; the rows stay one per iteration, each with its own value.
+fn readable_parameter_name(name: &str) -> String {
+    let Some(rest) = name.strip_prefix("__frch_") else {
+        return name.to_string();
+    };
+    match rest.rfind('_') {
+        Some(index) => rest[..index].to_string(),
+        None => rest.to_string(),
+    }
+}
+
+/// One parameter of the pane: its class, the placeholder text and any hint.
+fn param_view(
+    name: &str,
+    jdbc_type: Option<&str>,
+    java_type: Option<&str>,
+    value: &Value,
+    injected: bool,
+) -> ParamView {
+    let classified = param::refine_with_value(param::classify(name, jdbc_type, java_type), value);
+    let text = if value.is_null() {
+        String::new()
+    } else {
+        param_text(value)
+    };
+    let placeholder = param::placeholder_key(classified.kind);
+    ParamView {
+        name: name.to_string(),
+        kind: classified.kind.as_str().to_string(),
+        kind_source: classified.source.as_str().to_string(),
+        placeholder: if placeholder.is_empty() {
+            String::new()
+        } else {
+            t(placeholder)
+        },
+        warning: param::warning_key(classified.kind, &text)
+            .map(t)
+            .unwrap_or_default(),
+        value: text,
+        injected,
+    }
+}
+
+/// The interceptor simulation the settings page asks for (C14).
+///
+/// Every switch starts off (see `settings::DEFINITIONS`): the reference decides
+/// "does this entity use logic delete / a tenant column" from the entity, and
+/// this build has no entity at preview time, so guessing would rewrite SQL for
+/// projects that do not use the interceptor at all.
+fn intercept_config() -> InterceptConfig {
+    let logic_delete =
+        settings::bool_setting("preview.injectLogicDelete").then(|| intercept::ColumnValue {
+            column: settings::string_setting("preview.logicDeleteColumn"),
+            value: settings::string_setting("preview.logicDeleteValue"),
+        });
+    let tenant =
+        settings::bool_setting("preview.injectTenantLine").then(|| intercept::ColumnValue {
+            column: settings::string_setting("preview.tenantColumnName"),
+            value: settings::string_setting("preview.tenantColumnDefault"),
+        });
+    let pagination = settings::bool_setting("preview.paginationSim").then(|| intercept::Page {
+        current: settings::integer_setting("preview.paginationCurrent"),
+        size: settings::integer_setting("preview.paginationSize"),
+    });
+    InterceptConfig {
+        logic_delete,
+        tenant,
+        pagination,
+        // An empty prefix is "off", not "prefix everything with nothing".
+        table_prefix: Some(settings::string_setting("preview.tablePrefix"))
+            .filter(|prefix| !prefix.trim().is_empty()),
+    }
+}
+
+/// Applies the switched-on interceptors to an already-rendered mapper
+/// statement and returns the reason lines the page shows for them.
+///
+/// The simulation only runs on a mapper render: an inline statement is what the
+/// user is asking about verbatim, and the reference applies its interceptors on
+/// the entity path only.
+fn apply_intercepts(model: &mut WorkbenchModel, dialect_name: &str) -> Vec<String> {
+    if model.kind != KIND_XML || !model.has_sql() {
+        return Vec::new();
+    }
+    let config = intercept_config();
+    if config.is_empty() {
+        return Vec::new();
+    }
+    let outcome = intercept::apply(&model.sql, dialect::by_name(dialect_name), &config);
+    if outcome.notes.is_empty() && outcome.sql == model.sql {
+        return Vec::new();
+    }
+    model.sql = outcome.sql;
+    for injected in &outcome.params {
+        let value = Value::String(injected.value.clone());
+        model.params.push(injected.value.clone());
+        model
+            .parameters
+            .push(param_view(&injected.name, None, None, &value, true));
+    }
+    if outcome.partial && model.confidence == "exact" {
+        // Product rule: a table name placed by a text heuristic is not `exact`.
+        model.confidence = "partial".to_string();
+    }
+    outcome
+        .notes
+        .iter()
+        .map(|note| {
+            let text = t(note.message_key);
+            let text = if note.detail.is_empty() {
+                text
+            } else {
+                text.replace("{0}", &note.detail)
+            };
+            format!("[{}] {}", note.message_key, text)
+        })
+        .collect()
 }
 
 /// The statement ids a picker may offer (lane L45).
@@ -630,6 +887,12 @@ struct PreviewStore {
     /// reader chose. Host memory only — no setting key, and the SQL itself is
     /// never touched.
     display: DisplayPrefs,
+    /// The condition switches the reader set (C07): condition id → truth. Empty
+    /// means "the statement's defaults" (see `core::xml::render::
+    /// collect_conditions`). Replaced on every render with the effective set,
+    /// so a refresh or a statement switch keeps the reader's choices while a
+    /// newly typed document starts from its own defaults.
+    conditions: BTreeMap<String, bool>,
 }
 
 static PREVIEW: OnceLock<Mutex<PreviewStore>> = OnceLock::new();
@@ -650,6 +913,8 @@ pub fn set_model(model: WorkbenchModel) {
     let mut store = preview_store();
     store.model = model;
     store.mapper_xml = None;
+    // C07: the switches belong to the document that produced them.
+    store.conditions.clear();
 }
 
 /// Hands a mapper document to the store as well as the model (lane L45).
@@ -710,6 +975,8 @@ pub fn clear() {
     store.handoff = false;
     // No statements to switch between once the render is gone.
     store.mapper_xml = None;
+    // C07: and no condition switches either.
+    store.conditions.clear();
 }
 
 /// Asks the page to open and select the "SQL 预览" tab on the next push.
@@ -822,6 +1089,10 @@ pub fn preview_tab() -> Value {
             // instead of pretending there is a choice).
             "statements": &current.statements,
             "statement": &current.statement,
+            // C06 / C07: one entry per `?` (name, class, placeholder, value)
+            // and the statement's condition switches, in document order.
+            "parameters": &current.parameters,
+            "conditions": &current.conditions,
             "tabs": {
                 "sql": &current.sql,
                 "formatted": current.formatted_sql(&dialect_name),
@@ -1094,6 +1365,11 @@ fn labels(confidence: &str) -> Value {
         "keywordWrapNote": t("view.workbench.display.keyword_wrap.note"),
         "vertical": t("view.workbench.display.vertical"),
         "verticalNote": t("view.workbench.display.vertical.note"),
+        // C07: the dynamic-condition list above the parameter rows.
+        "conditions": t("view.workbench.conditions.title"),
+        "conditionsHint": t("view.workbench.conditions.hint"),
+        "conditionsAll": t("view.workbench.conditions.all"),
+        "conditionsNone": t("view.workbench.conditions.none"),
     })
 }
 
@@ -1122,6 +1398,10 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
         "render" => {
             let input = message.get("text").and_then(Value::as_str).unwrap_or("");
             let kind = message.get("kind").and_then(Value::as_str).unwrap_or("");
+            // C07: the input box was rewritten, so the switches of the previous
+            // document must not decide the new one's branches under the same
+            // tree paths.
+            forget_conditions();
             render_input_state(input, kind);
         }
         "format" => {
@@ -1152,6 +1432,12 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
             let id = message.get("id").and_then(Value::as_str).unwrap_or("");
             select_statement_state(id);
         }
+        // Dynamic conditions (C07): the page reports `{conditions:{id:bool}}`
+        // after a checkbox changed; the host re-renders the mapper document it
+        // kept with those switches. The input box is not rewritten (a switch is
+        // not an edit) and the parameter values the reader typed are re-derived
+        // from the new render, exactly like the reference's panel.
+        "conditions" => apply_conditions(message),
         // Display switches (lane L45): the page reports the two toggles, the
         // host only remembers them so the next `state` push (and a page that
         // remounts) carries them back. Pure presentation — the model, its SQL
@@ -1248,16 +1534,106 @@ fn render_input_state(input: &str, kind: &str) {
         empty.raw = input.to_string();
         empty
     } else {
-        render_input(input, kind, &dialect_name)
+        render_with_store(input, kind, &dialect_name)
     };
     next.dialect = dialect_name;
     let status = status_for(&next);
     // Lane L45: a mapper render keeps its document, so the picker can switch.
     // Inline SQL has no statements to switch between and clears the stash.
     let mapper = (next.kind == KIND_XML).then(|| input.to_string());
+    let effective = condition_switches(&next);
     set_model(next);
     set_mapper_source(mapper);
+    // `set_model` drops the switches (they belong to the previous document);
+    // the render just computed the effective set, so put it back. Inline SQL
+    // has none, which is the "defaults" state.
+    preview_store().conditions = effective;
     set_status(status, true);
+}
+
+/// Forgets the reader's switches: the next render is a new document.
+fn forget_conditions() {
+    preview_store().conditions.clear();
+}
+
+/// The effective switches of a render, as the store keys them.
+fn condition_switches(model: &WorkbenchModel) -> BTreeMap<String, bool> {
+    model
+        .conditions
+        .iter()
+        .map(|condition| (condition.id.clone(), condition.enabled))
+        .collect()
+}
+
+/// Renders through the store's condition switches (C07).
+///
+/// The public [`render_input`] is stateless (commands use it); the panel's own
+/// renders keep whatever the reader switched, so a Refresh or a statement
+/// switch does not silently turn a branch back on.
+fn render_with_store(text: &str, kind: &str, dialect_name: &str) -> WorkbenchModel {
+    let switched = preview_store().conditions.clone();
+    let kind = match kind {
+        KIND_SQL | KIND_XML => kind,
+        _ => detect_kind(text),
+    };
+    if kind == KIND_XML {
+        let policy = if switched.is_empty() {
+            ConditionSwitches::Defaults
+        } else {
+            ConditionSwitches::Page(&switched)
+        };
+        render_mapper_statement_with(text, None, dialect_name, policy)
+    } else {
+        plain_sql(text, dialect_name)
+    }
+}
+
+/// Re-renders the current statement with the page's condition switches (C07).
+///
+/// The message carries `{op:"preview-conditions", conditions:{id: bool}}`.
+/// The host applies it to the switches it knows (an unknown id is ignored, so
+/// a stale page cannot invent a condition), re-renders the mapper document it
+/// kept, and lets the next state push carry the new SQL and the new list. The
+/// input box is left alone: a switch is not an edit of the source.
+fn apply_conditions(message: &Value) {
+    let Some(xml) = mapper_source() else {
+        return;
+    };
+    let current = model();
+    if current.conditions.is_empty() {
+        return;
+    }
+    let mut switched = condition_switches(&current);
+    if let Some(map) = message.get("conditions").and_then(Value::as_object) {
+        for (id, value) in map {
+            if switched.contains_key(id)
+                && let Some(enabled) = value.as_bool()
+            {
+                switched.insert(id.clone(), enabled);
+            }
+        }
+    }
+    if switched == condition_switches(&current) {
+        return;
+    }
+    let (dialect_name, _) = configured_dialect();
+    let mut next = render_mapper_statement_with(
+        &xml,
+        Some(current.statement.as_str()),
+        &dialect_name,
+        ConditionSwitches::Page(&switched),
+    );
+    next.dialect = dialect_name;
+    // The picker's list and the statement's own name survive a re-render: only
+    // the switches changed.
+    next.statements = current.statements;
+    next.source = current.source;
+    next.statement = current.statement;
+    let status = status_for(&next);
+    set_model(next);
+    preview_store().conditions = switched;
+    set_mapper_source(Some(xml));
+    set_status(status, false);
 }
 
 /// Re-renders the statement the picker named (lane L45).
@@ -1299,17 +1675,25 @@ fn select_statement_state(id: &str) {
     next.source = id.to_string();
     next.statement = id.to_string();
     let status = status_for(&next);
+    let effective = condition_switches(&next);
     set_model(next);
     set_mapper_source(Some(xml));
+    // A different statement brings its own conditions: the previous statement's
+    // switches must not decide which of this one's branches render.
+    preview_store().conditions = effective;
     set_status(status, true);
 }
 
 fn format_input_state(input: &str) {
     let (dialect_name, _) = configured_dialect();
     if detect_kind(input) == KIND_XML {
-        let mut next = render_input(input, KIND_XML, &dialect_name);
+        // A mapper document is not reformatted, but the re-render still has to
+        // keep the reader's switches (C07).
+        let mut next = render_with_store(input, KIND_XML, &dialect_name);
         next.dialect = dialect_name;
+        let effective = condition_switches(&next);
         set_model(next);
+        preview_store().conditions = effective;
         // The re-render is a fresh mapper document: the picker keeps working on
         // the statement the user is looking at (lane L45).
         set_mapper_source(Some(input.to_string()));
@@ -1458,6 +1842,16 @@ fn rebind_params(values: Vec<String>) {
     let mut next = current;
     next.sql = rebound;
     next.params = values;
+    // C06: the structured rows follow the same edit, so the page keeps the
+    // names and only the values change.
+    for (index, param) in next.parameters.iter_mut().enumerate() {
+        let Some(value) = next.params.get(index).cloned() else {
+            break;
+        };
+        let key = param::warning_key(param::ParamKind::parse(&param.kind), &value);
+        param.warning = key.map(t).unwrap_or_default();
+        param.value = value;
+    }
     set_model(next);
     let status = if had_placeholders {
         t("view.workbench.status.rebound")
@@ -1596,14 +1990,18 @@ fn load_file_state() -> Result<(), Error> {
         }
     };
     let (dialect_name, _) = configured_dialect();
+    // A loaded file is a new document: its conditions start at their defaults.
+    forget_conditions();
     let mut next = render_input(&text, kind_from_path(&path), &dialect_name);
     next.dialect = dialect_name;
     next.source = path.clone();
     // Lane L45: a loaded mapper file keeps its document for the statement
     // picker; a loaded .sql file has nothing to switch between.
     let mapper = (next.kind == KIND_XML).then(|| text.clone());
+    let effective = condition_switches(&next);
     set_model(next);
     set_mapper_source(mapper);
+    preview_store().conditions = effective;
     set_status(
         t("view.workbench.status.loaded").replace("{0}", &path),
         true,
@@ -3197,5 +3595,307 @@ mod tests {
         // The refusal never rewrites the SQL: nothing here guesses table names.
         assert_eq!(model().sql, "select id from user");
         assert!(host.opened_diffs().is_empty());
+    }
+
+    // C06 / C07 / C14 (lane W2-2) -----------------------------------------
+
+    /// A mapper with two plain conditions, a collection-named one and a null
+    /// check: enough to exercise names, classes and the default-truth rule.
+    const DYNAMIC_MAPPER: &str = r#"<mapper namespace="com.example.UserMapper">
+        <select id="find">
+            SELECT id, name FROM users
+            <where>
+                <if test="id != null">AND id = #{id,jdbcType=BIGINT}</if>
+                <if test="name != null">AND name = #{name}</if>
+                <if test="ids != null">AND id IN (#{ids})</if>
+                <if test="nickname == null">AND nickname IS NULL</if>
+            </where>
+        </select>
+        <delete id="remove">DELETE FROM users WHERE id = #{id}</delete>
+    </mapper>"#;
+
+    #[test]
+    fn a_mapper_render_names_its_parameters_and_lists_its_conditions() {
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": DYNAMIC_MAPPER }));
+        let current = model();
+        assert_eq!(current.kind, KIND_XML);
+        assert_eq!(current.confidence, "exact");
+        // The statement's shape is what the preview shows: the conditions that
+        // add a clause are on by default, so the placeholders exist.
+        assert_eq!(
+            compact(&current.sql),
+            "SELECT id, name FROM users WHERE id = ? AND name = ? AND id IN (?)"
+        );
+        assert_eq!(current.parameters.len(), current.params.len());
+        let names: Vec<&str> = current
+            .parameters
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["id", "name", "ids"], "the `#{{}}` names");
+        // The declared class wins; a collection name is the reference's
+        // heuristic; the rest stay unknown (there is no type information).
+        let id = &current.parameters[0];
+        assert_eq!(id.kind, "number");
+        assert_eq!(id.kind_source, "declared");
+        assert!(!id.placeholder.is_empty(), "a number hint");
+        assert_eq!(id.value, "", "a null value is an empty box");
+        let name = &current.parameters[1];
+        assert_eq!(name.kind, "unknown");
+        let ids = &current.parameters[2];
+        assert_eq!(ids.kind, "collection");
+        assert_eq!(ids.kind_source, "inferred");
+        // Four conditions, the null check off by default (the reference's
+        // defaultTruth), the rest on.
+        assert_eq!(current.conditions.len(), 4);
+        let labels: Vec<&str> = current
+            .conditions
+            .iter()
+            .map(|condition| condition.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "id != null",
+                "name != null",
+                "ids != null",
+                "nickname == null"
+            ]
+        );
+        assert!(current.conditions[..3].iter().all(|c| c.enabled));
+        assert!(!current.conditions[3].enabled, "a null check starts off");
+        assert!(current.conditions.iter().all(|c| c.kind == "if"));
+
+        let state = tab();
+        assert_eq!(state["model"]["parameters"][0]["name"], "id");
+        assert_eq!(state["model"]["conditions"][0]["enabled"], true);
+    }
+
+    #[test]
+    fn a_condition_switch_re_renders_the_statement() {
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": DYNAMIC_MAPPER }));
+        let before = model();
+        // Drain the one-shot flag the render set, so the assertion below is
+        // about the switch op and nothing else.
+        let _ = tab();
+        let target = before.conditions[0].id.clone();
+
+        let mut map = serde_json::Map::new();
+        map.insert(target.clone(), Value::Bool(false));
+        send(json!({ "op": "preview-conditions", "conditions": map }));
+        let after = model();
+        assert_eq!(
+            compact(&after.sql),
+            "SELECT id, name FROM users WHERE name = ? AND id IN (?)",
+            "the unchecked branch is gone"
+        );
+        assert_eq!(after.parameters.len(), 2);
+        assert!(
+            after.parameters.iter().all(|param| param.name != "id"),
+            "and so is its parameter"
+        );
+        let switched = after
+            .conditions
+            .iter()
+            .find(|condition| condition.id == target)
+            .expect("the condition stays listed");
+        assert!(!switched.enabled);
+        // The input box is not rewritten: a switch is not an edit.
+        assert_eq!(tab()["replaceInput"], false);
+
+        // Turning it back on restores the full shape (the host kept the
+        // document it rendered from).
+        let mut back = serde_json::Map::new();
+        back.insert(target, Value::Bool(true));
+        send(json!({ "op": "preview-conditions", "conditions": back }));
+        assert_eq!(compact(&model().sql), compact(&before.sql));
+    }
+
+    #[test]
+    fn an_unknown_condition_id_is_ignored() {
+        let (host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": DYNAMIC_MAPPER }));
+        let before = model();
+        send(json!({ "op": "preview-conditions", "conditions": { "no.such.id": false } }));
+        assert_eq!(model().sql, before.sql);
+        // Nothing was re-rendered, so nothing was pushed through the outputs.
+        assert!(!host.output().contains_key(common::CHANNEL));
+    }
+
+    #[test]
+    fn a_new_render_starts_from_the_statement_defaults() {
+        // The switches belong to the document: typing a new one must not apply
+        // the old ids to it.
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": DYNAMIC_MAPPER }));
+        let target = model().conditions[0].id.clone();
+        let mut off = serde_json::Map::new();
+        off.insert(target, Value::Bool(false));
+        send(json!({ "op": "preview-conditions", "conditions": off }));
+        assert_eq!(model().parameters.len(), 2);
+        send(json!({ "op": "preview-render", "text": DYNAMIC_MAPPER }));
+        assert_eq!(
+            model().parameters.len(),
+            3,
+            "a fresh render is back to the defaults"
+        );
+    }
+
+    #[test]
+    fn a_foreach_render_names_its_items() {
+        // The values are only collectable when the collection has entries; with
+        // the preview's empty parameter map a `<foreach>` expands to nothing,
+        // so the item naming is asserted on a render that does bind a list.
+        let _host = MockHost::install();
+        let (set, _issues) = MapperSet::load(&[(
+            "<t>",
+            "<mapper namespace=\"a\"><select id=\"s\">SELECT * FROM t WHERE id IN <foreach collection=\"ids\" item=\"x\" open=\"(\" separator=\",\" close=\")\">#{x}</foreach></select></mapper>",
+        )]);
+        let detailed =
+            set.render_detailed("s", &json!({"ids": [1, 2]}), ConditionSwitches::Defaults);
+        assert_eq!(detailed.params.len(), 2);
+        let mut model = WorkbenchModel::new("", Vec::new(), "MySQL");
+        apply_parameters(&mut model, &detailed);
+        let names: Vec<&str> = model
+            .parameters
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["x", "x"]);
+        assert_eq!(model.params, vec!["1", "2"]);
+    }
+
+    #[test]
+    fn a_foreach_parameter_shows_the_item_name() {
+        assert_eq!(readable_parameter_name("__frch_x_0"), "x");
+        assert_eq!(readable_parameter_name("__frch_criterion_12"), "criterion");
+        assert_eq!(readable_parameter_name("id"), "id");
+        assert_eq!(readable_parameter_name("user.name"), "user.name");
+        assert_eq!(readable_parameter_name("__frch_plain"), "plain");
+    }
+
+    #[test]
+    fn the_interceptors_are_off_until_the_settings_page_turns_them_on() {
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": DYNAMIC_MAPPER }));
+        let current = model();
+        assert_eq!(current.confidence, "exact");
+        assert!(!current.sql.contains("deleted"));
+        assert!(!current.sql.contains("LIMIT"));
+        assert!(
+            !current.reason.contains("preview.intercept"),
+            "nothing was simulated: {}",
+            current.reason
+        );
+    }
+
+    #[test]
+    fn the_switched_on_interceptors_rewrite_the_render() {
+        let (host, _guard) = test_host();
+        host.set_setting("preview.injectLogicDelete", "true");
+        host.set_setting("preview.injectTenantLine", "true");
+        host.set_setting("preview.paginationSim", "true");
+        host.set_setting("preview.paginationCurrent", "2");
+        host.set_setting("preview.paginationSize", "20");
+        send(json!({
+            "op": "preview-render",
+            "text": "<mapper namespace=\"a\"><select id=\"s\">SELECT id FROM user WHERE name = #{name}</select></mapper>",
+        }));
+        let current = model();
+        assert_eq!(
+            compact(&current.sql),
+            "SELECT id FROM user WHERE name = ? AND deleted = 0 AND tenant_id = ? LIMIT ?, ?"
+        );
+        // The statement's own placeholder first, then the injected ones, so
+        // the values stay aligned with the SQL.
+        assert_eq!(current.params, vec!["", "1", "20", "20"]);
+        assert_eq!(current.parameters.len(), 4);
+        assert!(current.parameters[1].injected);
+        assert_eq!(current.parameters[1].name, "tenant_id");
+        assert_eq!(current.parameters[2].name, "page.offset");
+        assert_eq!(current.parameters[3].name, "page.size");
+        assert!(
+            current.reason.contains("preview.intercept.logicDelete"),
+            "{}",
+            current.reason
+        );
+        assert!(current.reason.contains("preview.intercept.tenant"));
+        assert!(current.reason.contains("preview.intercept.pagination"));
+    }
+
+    #[test]
+    fn the_table_prefix_rewrites_tables_and_marks_the_render_partial() {
+        // Product rule: a table position found by a text heuristic is never
+        // `exact`, so the render says `partial` and the reason says why.
+        let (host, _guard) = test_host();
+        host.set_setting("preview.tablePrefix", "\"sys_\"");
+        send(json!({
+            "op": "preview-render",
+            "text": "<mapper namespace=\"a\"><select id=\"s\">SELECT u.id FROM user u JOIN dept d ON d.id = u.dept_id WHERE u.id = #{id}</select></mapper>",
+        }));
+        let current = model();
+        assert_eq!(current.confidence, "partial");
+        assert!(
+            compact(&current.sql).contains("FROM sys_user u JOIN sys_dept d"),
+            "{}",
+            current.sql
+        );
+        assert!(current.reason.contains("preview.intercept.tablePrefix"));
+        // The reason keeps its `[key]` shape, so the page's banner still shows
+        // machine-readable keys.
+        assert!(current.reason.lines().all(|line| line.starts_with('[')));
+    }
+
+    #[test]
+    fn the_parameter_and_condition_lists_round_trip_through_json() {
+        let mut model = sample();
+        model.parameters = vec![ParamView {
+            name: "id".to_string(),
+            kind: "number".to_string(),
+            kind_source: "declared".to_string(),
+            placeholder: "number".to_string(),
+            value: "1".to_string(),
+            warning: String::new(),
+            injected: false,
+        }];
+        model.conditions = vec![ConditionView {
+            id: "0.1".to_string(),
+            label: "id != null".to_string(),
+            enabled: true,
+            kind: "if".to_string(),
+            group: String::new(),
+        }];
+        let text = serde_json::to_string(&model).unwrap();
+        let back: WorkbenchModel = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, model);
+        // An older push without the two fields decodes with empty lists.
+        let decoded: WorkbenchModel =
+            serde_json::from_str(r#"{"sql":"select 1","dialect":"MySQL"}"#).unwrap();
+        assert!(decoded.parameters.is_empty());
+        assert!(decoded.conditions.is_empty());
+    }
+
+    #[test]
+    fn the_page_draws_the_named_parameter_rows_and_the_condition_list() {
+        let module = include_str!("../../web/preview.js");
+        let css = include_str!("../../web/preview.css");
+        for id in [
+            "pvConditions",
+            "pvConditionsList",
+            "pvConditionsAll",
+            "pvConditionsNone",
+        ] {
+            assert!(module.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        assert!(
+            module.contains("op: 'preview-conditions'"),
+            "a checkbox posts its own op"
+        );
+        assert!(module.contains("model.parameters"), "the rows are named");
+        assert!(module.contains("pv-param-kind"), "the type chip exists");
+        assert!(css.contains(".pv-root .pv-param-kind"));
+        assert!(css.contains(".pv-root .pv-cond-row"));
     }
 }

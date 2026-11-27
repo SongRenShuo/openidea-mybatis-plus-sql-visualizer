@@ -32,6 +32,11 @@ pub struct RenderCtx {
     pub unresolved: Option<(String, String)>,
     pub notes: Vec<Note>,
     pub dollar_substitutions: usize,
+    /// Condition switches the page set (C07): condition id → truth. An id in
+    /// this map decides its `<if>` / `<when>`; an id absent from it falls back
+    /// to the OGNL evaluation, exactly as the reference's
+    /// `DynamicContext.conditionResult(test)` does (its `n` map).
+    pub conditions: BTreeMap<String, bool>,
 }
 
 impl RenderCtx {
@@ -56,6 +61,7 @@ impl RenderCtx {
             unresolved: None,
             notes: Vec::new(),
             dollar_substitutions: 0,
+            conditions: BTreeMap::new(),
         }
     }
 
@@ -213,33 +219,48 @@ fn rewrite_name(content: &str, name: &str, replacement: &str) -> Option<String> 
 /// Applies the tree and returns the un-tokenised SQL.
 pub fn render_tree(node: &SqlNode, ctx: &mut RenderCtx) -> String {
     let mut root = RootSink { buf: String::new() };
-    render_node(node, ctx, &mut root);
+    render_node(node, ctx, &mut root, "");
     root.buf.trim().to_string()
 }
 
-fn render_node(node: &SqlNode, ctx: &mut RenderCtx, sink: &mut dyn Sink) {
+/// The id of a condition node: its position in the tree, dotted.
+///
+/// A path (not a running counter) is what makes the id stable: the collection
+/// pass and the render pass walk the same tree, but the render pass skips the
+/// contents of a false `<if>`, so a counter would drift apart between the two.
+/// See [`collect_conditions`] for the segment scheme.
+fn child_path(path: &str, segment: &str) -> String {
+    if path.is_empty() {
+        segment.to_string()
+    } else {
+        format!("{path}.{segment}")
+    }
+}
+
+fn render_node(node: &SqlNode, ctx: &mut RenderCtx, sink: &mut dyn Sink, path: &str) {
     match node {
         SqlNode::Mixed(children) => {
-            for child in children {
-                render_node(child, ctx, sink);
+            for (index, child) in children.iter().enumerate() {
+                render_node(child, ctx, sink, &child_path(path, &index.to_string()));
             }
         }
         SqlNode::StaticText(text) => sink.append(text),
         SqlNode::Text(text) => render_text(text, ctx, sink),
-        SqlNode::If { test, contents } => match evaluate_test(test, ctx) {
-            Some(true) => render_node(contents, ctx, sink),
+        SqlNode::If { test, contents } => match condition_truth(path, test, ctx) {
+            Some(true) => render_node(contents, ctx, sink, &child_path(path, "c")),
             Some(false) => {}
             None => {}
         },
         SqlNode::Choose { whens, otherwise } => {
-            for (test, contents) in whens {
-                if evaluate_test(test, ctx) == Some(true) {
-                    render_node(contents, ctx, sink);
+            for (index, (test, contents)) in whens.iter().enumerate() {
+                let branch = child_path(path, &format!("w{index}"));
+                if condition_truth(&branch, test, ctx) == Some(true) {
+                    render_node(contents, ctx, sink, &child_path(&branch, "c"));
                     return;
                 }
             }
             if let Some(default) = otherwise {
-                render_node(default, ctx, sink);
+                render_node(default, ctx, sink, &child_path(path, "o"));
             }
         }
         SqlNode::Bind { name, value } => match ognl::evaluate(value, &ctx.bindings) {
@@ -256,12 +277,21 @@ fn render_node(node: &SqlNode, ctx: &mut RenderCtx, sink: &mut dyn Sink) {
                 buf: String::new(),
                 delegate: &mut *sink,
             };
-            render_node(&trim.contents, ctx, &mut buffer);
+            render_node(&trim.contents, ctx, &mut buffer, &child_path(path, "c"));
             let result = apply_trim(&buffer.buf, trim);
             buffer.delegate.append(&result);
         }
-        SqlNode::Foreach(foreach) => render_foreach(foreach, ctx, sink),
+        SqlNode::Foreach(foreach) => render_foreach(foreach, ctx, sink, &child_path(path, "c")),
     }
+}
+
+/// The truth of one condition node: the page's switch when it set one, the
+/// expression otherwise. `None` is the fail-closed answer (unsupported OGNL).
+fn condition_truth(id: &str, test: &str, ctx: &mut RenderCtx) -> Option<bool> {
+    if let Some(switched) = ctx.conditions.get(id) {
+        return Some(*switched);
+    }
+    evaluate_test(test, ctx)
 }
 
 fn evaluate_test(test: &str, ctx: &mut RenderCtx) -> Option<bool> {
@@ -328,7 +358,7 @@ pub fn value_to_sql(value: &Value) -> String {
     }
 }
 
-fn render_foreach(foreach: &ForeachNode, ctx: &mut RenderCtx, sink: &mut dyn Sink) {
+fn render_foreach(foreach: &ForeachNode, ctx: &mut RenderCtx, sink: &mut dyn Sink, path: &str) {
     let collection = match ctx.bindings.get(&foreach.collection_expression).cloned() {
         Some(v) => v,
         None => match ognl::evaluate(&foreach.collection_expression, &ctx.bindings) {
@@ -407,7 +437,7 @@ fn render_foreach(foreach: &ForeachNode, ctx: &mut RenderCtx, sink: &mut dyn Sin
                 index: foreach.index.clone(),
                 unique,
             };
-            render_node(&foreach.contents, ctx, &mut filtered);
+            render_node(&foreach.contents, ctx, &mut filtered, path);
         }
         if first {
             first = !prefixed.applied;
@@ -481,13 +511,233 @@ fn apply_suffix(sql: &str, upper: &str, trim: &TrimNode) -> String {
 
 /// Converts `#{...}` to `?` and collects the bound values in SQL order.
 pub fn parse_parameters(sql: &str, bindings: &BTreeMap<String, Value>) -> (String, Vec<Value>) {
+    let (rendered, values, _) = parse_parameters_meta(sql, bindings);
+    (rendered, values)
+}
+
+/// One `#{}` placeholder the render consumed, in SQL order (C06).
+///
+/// The name is the property as written (`id`, `user.name`) and the two types
+/// are whatever the token declared (`#{id,jdbcType=BIGINT}`); `None` means the
+/// statement did not say. The values themselves come back from the same call,
+/// so `metas[i]` belongs to `values[i]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParameterMeta {
+    pub name: String,
+    pub jdbc_type: Option<String>,
+    pub java_type: Option<String>,
+}
+
+/// [`parse_parameters`] plus the placeholder metadata the preview pane shows.
+pub fn parse_parameters_meta(
+    sql: &str,
+    bindings: &BTreeMap<String, Value>,
+) -> (String, Vec<Value>, Vec<ParameterMeta>) {
     let mut values = Vec::new();
+    let mut metas = Vec::new();
     let rendered = parse_tokens(sql, "#{", "}", &mut |content| {
         let token = ParameterToken::parse(content);
         values.push(resolve_path(bindings, &token.property));
+        let attribute = |name: &str| {
+            token
+                .attributes
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.clone())
+        };
+        metas.push(ParameterMeta {
+            name: token.property.clone(),
+            jdbc_type: attribute("jdbcType"),
+            java_type: attribute("javaType"),
+        });
         "?".to_string()
     });
-    (rendered, values)
+    (rendered, values, metas)
+}
+
+/// How a toggleable node is tagged in the model (C07).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConditionKind {
+    /// A standalone `<if>`.
+    If,
+    /// One `<when>` of a `<choose>`.
+    When,
+}
+
+impl ConditionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::If => "if",
+            Self::When => "when",
+        }
+    }
+}
+
+/// One condition switch the preview page draws (C07).
+///
+/// `id` is the node's position in the tree (dotted path: a `Mixed` child by
+/// index, `c` for a node's contents, `wN` for the Nth `<when>`, `o` for an
+/// `<otherwise>`). A path — not a counter — is what keeps the id stable between
+/// the collection pass and a render pass that skips false branches. `label` is
+/// the `test` expression, exactly what the reference's `XmlConditionView` shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConditionView {
+    pub id: String,
+    pub label: String,
+    pub enabled: bool,
+    pub kind: ConditionKind,
+    /// The `<choose>` this branch belongs to (its own path), empty for `<if>`.
+    /// The page can then say whose branches exclude each other.
+    pub group: String,
+}
+
+/// The default truth of a `test` expression before anything is evaluated, the
+/// reference's `defaultTruth`: a null check starts off, everything else starts
+/// on. The preview's whole point is showing the statement's shape, so the
+/// branches that add clauses are on until the reader says otherwise.
+fn default_truth(test: &str) -> bool {
+    !test.contains("== null")
+}
+
+/// Collects every condition switch of `node`, in document order (C07).
+///
+/// Defaults follow the reference: each `<if>` / `<when>` starts on unless its
+/// test is a null check, and a `<choose>` with more than one branch on keeps
+/// the first branch that carries a `#{}` parameter (otherwise the first) —
+/// mutually exclusive branches must not all render at once.
+pub fn collect_conditions(node: &SqlNode) -> Vec<ConditionView> {
+    collect_conditions_with(node, &BTreeMap::new())
+}
+
+/// [`collect_conditions`] with the page's switches applied over the defaults.
+pub fn collect_conditions_with(
+    node: &SqlNode,
+    switched: &BTreeMap<String, bool>,
+) -> Vec<ConditionView> {
+    let mut collector = Collector::default();
+    collector.walk(node, "");
+    collector.settle();
+    for view in &mut collector.views {
+        if let Some(enabled) = switched.get(&view.id) {
+            view.enabled = *enabled;
+        }
+    }
+    collector.views
+}
+
+#[derive(Default)]
+struct Collector {
+    views: Vec<ConditionView>,
+    /// Per `<choose>`: `(view index, #{} count)` for each `<when>`, in branch
+    /// order. Only groups with more than one branch are recorded.
+    groups: Vec<Vec<(usize, usize)>>,
+}
+
+impl Collector {
+    fn walk(&mut self, node: &SqlNode, path: &str) {
+        match node {
+            SqlNode::Mixed(children) => {
+                for (index, child) in children.iter().enumerate() {
+                    self.walk(child, &child_path(path, &index.to_string()));
+                }
+            }
+            SqlNode::If { test, contents } => {
+                self.push(path, test, ConditionKind::If, "");
+                self.walk(contents, &child_path(path, "c"));
+            }
+            SqlNode::Choose { whens, otherwise } => {
+                let group_id = path.to_string();
+                let group = if whens.len() > 1 {
+                    self.groups.push(Vec::new());
+                    Some(self.groups.len() - 1)
+                } else {
+                    None
+                };
+                for (index, (test, contents)) in whens.iter().enumerate() {
+                    let branch = child_path(path, &format!("w{index}"));
+                    let view = self.push(&branch, test, ConditionKind::When, &group_id);
+                    if let Some(group) = group {
+                        self.groups[group].push((view, count_parameters(contents)));
+                    }
+                    self.walk(contents, &child_path(&branch, "c"));
+                }
+                if let Some(default) = otherwise {
+                    self.walk(default, &child_path(path, "o"));
+                }
+            }
+            SqlNode::Trim(trim) => self.walk(&trim.contents, &child_path(path, "c")),
+            SqlNode::Foreach(foreach) => self.walk(&foreach.contents, &child_path(path, "c")),
+            SqlNode::StaticText(_) | SqlNode::Text(_) | SqlNode::Bind { .. } => {}
+        }
+    }
+
+    fn push(&mut self, path: &str, test: &str, kind: ConditionKind, group: &str) -> usize {
+        self.views.push(ConditionView {
+            id: path.to_string(),
+            label: test.to_string(),
+            enabled: default_truth(test),
+            kind,
+            group: group.to_string(),
+        });
+        self.views.len() - 1
+    }
+
+    /// Keeps one default branch per `<choose>`: the first that carries a
+    /// `#{}` parameter, else the first. Switches the page sends are applied on
+    /// top, so this only decides where the page starts.
+    fn settle(&mut self) {
+        for members in &self.groups {
+            let on: Vec<usize> = members
+                .iter()
+                .map(|(index, _)| *index)
+                .filter(|index| self.views[*index].enabled)
+                .collect();
+            if on.len() < 2 {
+                continue;
+            }
+            let keep = members
+                .iter()
+                .find(|(index, count)| self.views[*index].enabled && *count > 0)
+                .map(|(index, _)| *index)
+                .unwrap_or(on[0]);
+            for index in on {
+                if index != keep {
+                    self.views[index].enabled = false;
+                }
+            }
+        }
+    }
+}
+
+/// How many `#{}` placeholders a node subtree carries (used to pick a
+/// `<choose>` default branch).
+///
+/// A `#{…}` does not make a text node dynamic (only `${…}` does), so the token
+/// can sit in a `StaticText` node as well; both are scanned.
+fn count_parameters(node: &SqlNode) -> usize {
+    fn count_placeholders(text: &str) -> usize {
+        let mut count = 0;
+        let _ = parse_tokens(text, "#{", "}", &mut |_| {
+            count += 1;
+            String::new()
+        });
+        count
+    }
+    match node {
+        SqlNode::Mixed(children) => children.iter().map(count_parameters).sum(),
+        SqlNode::Text(text) | SqlNode::StaticText(text) => count_placeholders(text),
+        SqlNode::If { contents, .. } => count_parameters(contents),
+        SqlNode::Trim(trim) => count_parameters(&trim.contents),
+        SqlNode::Foreach(foreach) => count_parameters(&foreach.contents),
+        SqlNode::Choose { whens, otherwise } => {
+            whens
+                .iter()
+                .map(|(_, contents)| count_parameters(contents))
+                .sum::<usize>()
+                + otherwise.as_deref().map(count_parameters).unwrap_or(0)
+        }
+        SqlNode::Bind { .. } => 0,
+    }
 }
 
 /// Resolves `a.b`, `a[0].b`, `a['k']` against the binding map.
@@ -543,9 +793,10 @@ pub fn resolve_path(bindings: &BTreeMap<String, Value>, path: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::xml::script::build;
+    use crate::core::xml::script::{SqlNode, build};
     use crate::core::xml::xmltree::parse_document;
     use serde_json::json;
+    use std::collections::BTreeMap;
 
     fn render(body: &str, params: Value) -> (String, Vec<Value>, RenderCtx) {
         let text = format!("<select id=\"s\">{body}</select>");
@@ -773,5 +1024,136 @@ mod tests {
         // `&lt;` in plain text is decoded to `<`.
         let (sql, _, _) = render("<![CDATA[a < b]]> AND x &lt; 3", json!({}));
         assert_eq!(sql, "a < b  AND x < 3");
+    }
+
+    // C07: condition views and the switches the preview page sets ----------
+
+    fn tree(body: &str) -> SqlNode {
+        let text = format!("<select id=\"s\">{body}</select>");
+        build(&parse_document(&text).unwrap()).unwrap()
+    }
+
+    /// Renders `body` with the page's switches, keyed by the `test` label.
+    fn render_switched(body: &str, params: Value, switches: &[(&str, bool)]) -> String {
+        let node = tree(body);
+        let views = collect_conditions(&node);
+        let mut map: BTreeMap<String, bool> = views
+            .iter()
+            .map(|view| (view.id.clone(), view.enabled))
+            .collect();
+        for (label, value) in switches {
+            let view = views
+                .iter()
+                .find(|view| view.label == *label)
+                .unwrap_or_else(|| panic!("no condition labelled {label}"));
+            map.insert(view.id.clone(), *value);
+        }
+        let mut ctx = RenderCtx::new(&params);
+        ctx.conditions = map;
+        let raw = render_tree(&node, &mut ctx);
+        parse_parameters(&raw, &ctx.bindings).0
+    }
+
+    #[test]
+    fn conditions_are_numbered_by_position_and_labelled_by_test() {
+        let node = tree(
+            "WHERE 1=1 <if test=\"a != null\">AND a=1</if><choose><when test=\"b != null\">AND b=1</when><when test=\"c != null\">AND c=1</when><otherwise>AND d=1</otherwise></choose>",
+        );
+        let views = collect_conditions(&node);
+        assert_eq!(views.len(), 3);
+        assert_eq!(views[0].label, "a != null");
+        assert_eq!(views[0].kind, ConditionKind::If);
+        assert_eq!(views[0].group, "");
+        // The path scheme: `<select>` is a Mixed, so its children are numbered
+        // by index; the `<choose>` branches are `wN` under the choose's path.
+        assert_eq!(views[0].id, "1");
+        assert_eq!(views[1].id, "2.w0");
+        assert_eq!(views[2].id, "2.w1");
+        assert_eq!(views[1].kind, ConditionKind::When);
+        assert_eq!(views[1].group, "2");
+        assert_eq!(views[2].group, "2");
+        // Ids are unique, which the reference's test-expression ids are not.
+        let ids: std::collections::BTreeSet<&str> =
+            views.iter().map(|view| view.id.as_str()).collect();
+        assert_eq!(ids.len(), views.len());
+    }
+
+    #[test]
+    fn a_null_check_starts_off_and_everything_else_starts_on() {
+        let node = tree(
+            "<if test=\"id != null\">A</if><if test=\"nickname == null\">B</if><if test=\"name\">C</if>",
+        );
+        let views = collect_conditions(&node);
+        assert!(views[0].enabled);
+        assert!(!views[1].enabled, "the reference's defaultTruth");
+        assert!(views[2].enabled);
+    }
+
+    #[test]
+    fn a_choose_keeps_one_default_branch_and_prefers_the_one_with_parameters() {
+        let node = tree(
+            "<choose><when test=\"kind != null\">AND kind = 1</when><when test=\"value != null\">AND value = #{value}</when><otherwise>AND 1 = 1</otherwise></choose>",
+        );
+        let views = collect_conditions(&node);
+        assert_eq!(views.len(), 2, "an `<otherwise>` is not a condition");
+        assert!(!views[0].enabled, "the branch without parameters loses");
+        assert!(views[1].enabled);
+    }
+
+    #[test]
+    fn a_switch_decides_its_branch_whatever_the_expression_says() {
+        let body = "<if test=\"id != null\">WHERE id = #{id}</if>";
+        // With an empty parameter map the expression is false, but the default
+        // truth (the statement's shape) has the branch on.
+        assert_eq!(render_switched(body, json!({}), &[]), "WHERE id = ?");
+        // The page turns it off, and the branch disappears even though the
+        // parameters would now satisfy it.
+        assert_eq!(
+            render_switched(body, json!({"id": 1}), &[("id != null", false)]),
+            ""
+        );
+        // And a null check can be turned on against its expression.
+        let body = "<if test=\"nickname == null\">WHERE nickname IS NULL</if>";
+        assert_eq!(render_switched(body, json!({}), &[]), "");
+        assert_eq!(
+            render_switched(body, json!({}), &[("nickname == null", true)]),
+            "WHERE nickname IS NULL"
+        );
+    }
+
+    #[test]
+    fn a_false_branch_does_not_desynchronise_the_ids_of_its_siblings() {
+        // The render pass skips a false branch's contents, but the collection
+        // pass walks them: a counter would drift, a path cannot. The sibling's
+        // switch must keep matching its own node.
+        let body = "<if test=\"a != null\"><if test=\"b != null\">A</if></if><if test=\"c != null\">C</if>";
+        let node = tree(body);
+        let views = collect_conditions(&node);
+        let c = views
+            .iter()
+            .find(|view| view.label == "c != null")
+            .expect("the sibling condition");
+        let mut map: BTreeMap<String, bool> =
+            views.iter().map(|v| (v.id.clone(), v.enabled)).collect();
+        map.insert(c.id.clone(), false);
+        let mut ctx = RenderCtx::new(&json!({}));
+        ctx.conditions = map;
+        assert_eq!(render_tree(&node, &mut ctx), "A");
+    }
+
+    #[test]
+    fn parameter_metas_follow_the_sql_order_and_keep_their_declared_types() {
+        let node = tree("WHERE a = #{a} AND b = #{b,jdbcType=VARCHAR,javaType=java.lang.String}");
+        let mut ctx = RenderCtx::new(&json!({"a": 1, "b": "x"}));
+        let raw = render_tree(&node, &mut ctx);
+        let (sql, values, metas) = parse_parameters_meta(&raw, &ctx.bindings);
+        assert_eq!(sql, "WHERE a = ? AND b = ?");
+        assert_eq!(values, vec![json!(1), json!("x")]);
+        assert_eq!(metas.len(), 2);
+        assert_eq!(metas[0].name, "a");
+        assert_eq!(metas[0].jdbc_type, None);
+        assert_eq!(metas[1].name, "b");
+        assert_eq!(metas[1].jdbc_type.as_deref(), Some("VARCHAR"));
+        assert_eq!(metas[1].java_type.as_deref(), Some("java.lang.String"));
     }
 }

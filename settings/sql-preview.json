@@ -10,6 +10,66 @@
       ],
       "default": "dialog"
     },
+    "preview.injectLogicDelete": {
+      "type": "boolean",
+      "title": "Simulate the logic-delete interceptor",
+      "group": "MyBatis Plus",
+      "default": false
+    },
+    "preview.logicDeleteColumn": {
+      "type": "string",
+      "title": "Logic-delete column",
+      "group": "MyBatis Plus",
+      "default": "deleted"
+    },
+    "preview.logicDeleteValue": {
+      "type": "string",
+      "title": "Logic-delete value",
+      "group": "MyBatis Plus",
+      "default": "0"
+    },
+    "preview.injectTenantLine": {
+      "type": "boolean",
+      "title": "Simulate the tenant-line interceptor",
+      "group": "MyBatis Plus",
+      "default": false
+    },
+    "preview.tenantColumnName": {
+      "type": "string",
+      "title": "Tenant column",
+      "group": "MyBatis Plus",
+      "default": "tenant_id"
+    },
+    "preview.tenantColumnDefault": {
+      "type": "string",
+      "title": "Tenant value",
+      "group": "MyBatis Plus",
+      "default": "1"
+    },
+    "preview.paginationSim": {
+      "type": "boolean",
+      "title": "Simulate the pagination interceptor",
+      "group": "MyBatis Plus",
+      "default": false
+    },
+    "preview.paginationCurrent": {
+      "type": "integer",
+      "title": "Page number",
+      "group": "MyBatis Plus",
+      "default": 1
+    },
+    "preview.paginationSize": {
+      "type": "integer",
+      "title": "Page size",
+      "group": "MyBatis Plus",
+      "default": 10
+    },
+    "preview.tablePrefix": {
+      "type": "string",
+      "title": "Table prefix",
+      "group": "MyBatis Plus",
+      "default": ""
+    },
     "dialect.mode": {
       "type": "string",
       "title": "Dialect mode",

@@ -20,7 +20,9 @@
 //!   statement sources.
 
 pub mod include;
+pub mod intercept;
 pub mod ognl;
+pub mod param;
 pub mod render;
 pub mod script;
 pub mod token;
@@ -86,7 +88,16 @@ impl RenderOutput {
         }
     }
 
-    pub(crate) fn assemble(ctx: render::RenderCtx, raw_sql: &str) -> Self {
+    /// Assembles a render plus the `#{}` placeholder metadata (C06).
+    ///
+    /// The names come from the un-tokenised SQL, which is why assembly has to
+    /// run here: once `parse_parameters` turned a placeholder into `?`, the
+    /// name is gone. `RenderOutput` keeps its public shape — the extra list is
+    /// the caller's, so no other render path has to know about it.
+    pub(crate) fn assemble_detailed(
+        ctx: render::RenderCtx,
+        raw_sql: &str,
+    ) -> (Self, Vec<render::ParameterMeta>) {
         let mut notes = ctx.notes;
         let mut message_keys: Vec<String> = Vec::new();
         fn push_key(key: &str, keys: &mut Vec<String>) {
@@ -100,30 +111,36 @@ impl RenderOutput {
                 detail,
             });
             push_key(&key, &mut message_keys);
-            return Self {
-                sql: String::new(),
-                params: Vec::new(),
-                confidence: Confidence::Unresolved,
-                notes: finalize_notes(notes),
-                message_keys,
-            };
+            return (
+                Self {
+                    sql: String::new(),
+                    params: Vec::new(),
+                    confidence: Confidence::Unresolved,
+                    notes: finalize_notes(notes),
+                    message_keys,
+                },
+                Vec::new(),
+            );
         }
         for note in &notes {
             push_key(&note.message_key, &mut message_keys);
         }
-        let (sql, params) = render::parse_parameters(raw_sql, &ctx.bindings);
+        let (sql, params, metas) = render::parse_parameters_meta(raw_sql, &ctx.bindings);
         let confidence = if ctx.partial {
             Confidence::Partial
         } else {
             Confidence::Exact
         };
-        Self {
-            sql,
-            params,
-            confidence,
-            notes: finalize_notes(notes),
-            message_keys,
-        }
+        (
+            Self {
+                sql,
+                params,
+                confidence,
+                notes: finalize_notes(notes),
+                message_keys,
+            },
+            metas,
+        )
     }
 }
 
@@ -139,6 +156,47 @@ fn finalize_notes(notes: Vec<Note>) -> Vec<Note> {
     out
 }
 
+/// What decides a statement's `<if>` / `<when>` branches during a render
+/// (C07).
+///
+/// The preview page can switch a branch on or off, and its default is the
+/// statement's *shape* (every branch that adds a clause on). Every other
+/// caller — commands, MCP, providers — must keep evaluating the expressions,
+/// because it renders the SQL a real call would produce. Three states keep the
+/// two apart instead of silently changing what the shared render means.
+#[derive(Debug, Clone, Copy)]
+pub enum ConditionSwitches<'a> {
+    /// Evaluate the `test` expressions (the historical behaviour).
+    Evaluate,
+    /// The preview's default truth (see `render::collect_conditions`).
+    Defaults,
+    /// The page's own switches: ids absent from the map keep their default.
+    Page(&'a BTreeMap<String, bool>),
+}
+
+/// A rendered statement with the two lists the preview pane draws: the
+/// `#{}` placeholders in SQL order (C06) and the condition switches of the
+/// statement's tree (C07).
+///
+/// [`RenderOutput`] keeps its public shape for every other caller; this type is
+/// what the workbench asks for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetailedRender {
+    pub output: RenderOutput,
+    pub params: Vec<render::ParameterMeta>,
+    pub conditions: Vec<render::ConditionView>,
+}
+
+impl DetailedRender {
+    fn plain(output: RenderOutput) -> Self {
+        Self {
+            output,
+            params: Vec::new(),
+            conditions: Vec::new(),
+        }
+    }
+}
+
 /// Renders one statement of one mapper document.
 ///
 /// `statement_id` accepts the bare id (`findById`) or the namespace-qualified
@@ -146,22 +204,49 @@ fn finalize_notes(notes: Vec<Note>) -> Vec<Note> {
 /// resolvable here and degrade to the missing-include placeholder; use
 /// [`MapperSet`] for that.
 pub fn render_statement(xml: &str, statement_id: &str, params: &Value) -> RenderOutput {
+    render_statement_detailed(xml, statement_id, params).output
+}
+
+/// [`render_statement`] with the placeholder and condition lists (C06/C07).
+pub fn render_statement_detailed(xml: &str, statement_id: &str, params: &Value) -> DetailedRender {
+    render_statement_detailed_with(xml, statement_id, params, ConditionSwitches::Evaluate)
+}
+
+/// [`render_statement_detailed`] with an explicit switch policy.
+pub fn render_statement_detailed_with(
+    xml: &str,
+    statement_id: &str,
+    params: &Value,
+    switched: ConditionSwitches<'_>,
+) -> DetailedRender {
     let root = match xmltree::parse_document(xml) {
         Ok(root) => root,
-        Err(e) => return RenderOutput::unresolved(KEY_PARSE_FAILED, e.message),
+        Err(e) => {
+            return DetailedRender::plain(RenderOutput::unresolved(KEY_PARSE_FAILED, e.message));
+        }
     };
     if root.name != "mapper" {
-        return RenderOutput::unresolved(
+        return DetailedRender::plain(RenderOutput::unresolved(
             KEY_ROOT_INVALID,
             format!("root element is <{}>, expected <mapper>", root.name),
-        );
+        ));
     }
     let namespace = root.attr("namespace");
     let Some(element) = find_statement(&root, namespace, statement_id) else {
-        return RenderOutput::unresolved(KEY_STATEMENT_NOT_FOUND, statement_id.to_string());
+        return DetailedRender::plain(RenderOutput::unresolved(
+            KEY_STATEMENT_NOT_FOUND,
+            statement_id.to_string(),
+        ));
     };
     let fragments = include::collect_fragments(&root);
-    render_element(&element, &fragments, &BTreeMap::new(), namespace, params)
+    render_element(
+        &element,
+        &fragments,
+        &BTreeMap::new(),
+        namespace,
+        params,
+        switched,
+    )
 }
 
 fn find_statement(root: &Element, namespace: Option<&str>, statement_id: &str) -> Option<Element> {
@@ -190,7 +275,8 @@ fn render_element(
     cross: &BTreeMap<String, Element>,
     namespace: Option<&str>,
     params: &Value,
-) -> RenderOutput {
+    switched: ConditionSwitches<'_>,
+) -> DetailedRender {
     let mut statement = element.clone();
     let expansion = include::expand_includes(&mut statement, local, cross, namespace);
     if let Some((key, detail)) = expansion.fatal {
@@ -205,19 +291,21 @@ fn render_element(
                 keys.push(note.message_key.clone());
             }
         }
-        return RenderOutput {
+        return DetailedRender::plain(RenderOutput {
             sql: String::new(),
             params: Vec::new(),
             confidence: Confidence::Unresolved,
             notes: finalize_notes(notes),
             message_keys: keys,
-        };
+        });
     }
     let node = match script::build(&statement) {
         Ok(node) => node,
-        Err(e) => return RenderOutput::unresolved(e.message_key, e.detail),
+        Err(e) => {
+            return DetailedRender::plain(RenderOutput::unresolved(e.message_key, e.detail));
+        }
     };
-    render_nodes(&node, params, expansion.partial, expansion.notes)
+    render_nodes_detailed(&node, params, expansion.partial, expansion.notes, switched)
 }
 
 /// Renders an already-built node tree (used by annotations).
@@ -227,11 +315,54 @@ pub fn render_nodes(
     partial: bool,
     notes: Vec<Note>,
 ) -> RenderOutput {
+    render_nodes_detailed(node, params, partial, notes, ConditionSwitches::Evaluate).output
+}
+
+/// [`render_nodes`] with the condition switches and the detail lists (C06/C07).
+///
+/// `switched` decides the branches: [`ConditionSwitches::Evaluate`] keeps the
+/// historical behaviour (the `test` expressions decide), `Defaults` renders the
+/// statement's shape for the preview, and `Page` layers the reader's switches
+/// on top of those defaults. Whichever way it is called, the render runs on the
+/// *effective* switches, so the SQL and the `conditions` list never disagree.
+pub fn render_nodes_detailed(
+    node: &script::SqlNode,
+    params: &Value,
+    partial: bool,
+    notes: Vec<Note>,
+    switched: ConditionSwitches<'_>,
+) -> DetailedRender {
+    // Collected before the render: the collection pass walks the whole tree,
+    // while the render pass skips false branches. Both number the nodes by
+    // position, so the two agree on every id.
+    let defaults = render::collect_conditions(node);
+    let mut effective: BTreeMap<String, bool> = BTreeMap::new();
+    match switched {
+        ConditionSwitches::Evaluate => {}
+        ConditionSwitches::Defaults => {
+            for view in &defaults {
+                effective.insert(view.id.clone(), view.enabled);
+            }
+        }
+        ConditionSwitches::Page(page) => {
+            for view in &defaults {
+                let enabled = page.get(&view.id).copied().unwrap_or(view.enabled);
+                effective.insert(view.id.clone(), enabled);
+            }
+        }
+    }
+    let conditions = render::collect_conditions_with(node, &effective);
     let mut ctx = render::RenderCtx::new(params);
     ctx.partial = partial;
     ctx.notes = notes;
+    ctx.conditions = effective;
     let raw = render::render_tree(node, &mut ctx);
-    RenderOutput::assemble(ctx, &raw)
+    let (output, params) = RenderOutput::assemble_detailed(ctx, &raw);
+    DetailedRender {
+        output,
+        params,
+        conditions,
+    }
 }
 
 /// One loaded mapper document inside a [`MapperSet`].
@@ -372,6 +503,18 @@ impl MapperSet {
 
     /// Renders `qualified_id` (`namespace.id`) or a bare id unique in the set.
     pub fn render(&self, qualified_id: &str, params: &Value) -> RenderOutput {
+        self.render_detailed(qualified_id, params, ConditionSwitches::Evaluate)
+            .output
+    }
+
+    /// [`MapperSet::render`] with the placeholder and condition lists, and an
+    /// explicit branch policy (C06/C07).
+    pub fn render_detailed(
+        &self,
+        qualified_id: &str,
+        params: &Value,
+        switched: ConditionSwitches<'_>,
+    ) -> DetailedRender {
         let exact: Vec<&StatementEntry> = self
             .statements
             .iter()
@@ -386,7 +529,10 @@ impl MapperSet {
             exact
         };
         match matches.len() {
-            0 => RenderOutput::unresolved(KEY_STATEMENT_NOT_FOUND, qualified_id.to_string()),
+            0 => DetailedRender::plain(RenderOutput::unresolved(
+                KEY_STATEMENT_NOT_FOUND,
+                qualified_id.to_string(),
+            )),
             1 => {
                 let entry = matches[0];
                 let file = &self.files[entry.file];
@@ -399,10 +545,10 @@ impl MapperSet {
                     })
                     .cloned();
                 let Some(element) = element else {
-                    return RenderOutput::unresolved(
+                    return DetailedRender::plain(RenderOutput::unresolved(
                         KEY_STATEMENT_NOT_FOUND,
                         qualified_id.to_string(),
-                    );
+                    ));
                 };
                 render_element(
                     &element,
@@ -410,9 +556,13 @@ impl MapperSet {
                     &self.fragments,
                     file.namespace.as_deref(),
                     params,
+                    switched,
                 )
             }
-            _ => RenderOutput::unresolved(KEY_STATEMENT_AMBIGUOUS, qualified_id.to_string()),
+            _ => DetailedRender::plain(RenderOutput::unresolved(
+                KEY_STATEMENT_AMBIGUOUS,
+                qualified_id.to_string(),
+            )),
         }
     }
 }
