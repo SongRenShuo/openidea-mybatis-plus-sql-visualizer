@@ -12,7 +12,7 @@ categories = ["tools"]
 # declaring `icon-dark` would swap it on a dark theme, which the original never
 # does.
 icon = "icons/pluginIcon.svg"
-engines.openidea = "^1.15"
+engines.openidea = "^1.18"
 # Built by `openidea-plugin build`. The code is loaded the first time one of its
 # commands runs; the commands below show in Find Action before that.
 wasm = "dist/plugin.wasm"

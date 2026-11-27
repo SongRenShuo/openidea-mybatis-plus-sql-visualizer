@@ -22,7 +22,7 @@ env:
   # Exactly 0.1.51: it pins the SDK tag (v0.1.51 → plugin API 1.15) that `build`
   # writes into Cargo.toml. A CLI built from `main` targets API 1.16, and no
   # released IDE loads such a component.
-  CLI_TAG: v0.1.51
+  CLI_TAG: v0.1.54
 
 jobs:
   package:
@@ -52,7 +52,7 @@ jobs:
           gunzip -c /tmp/openidea-plugin.gz > /usr/local/bin/openidea-plugin
           chmod +x /usr/local/bin/openidea-plugin
           openidea-plugin --version | tee /tmp/cli-version.txt
-          grep -F "0.1.51" /tmp/cli-version.txt
+          grep -F "0.1.54" /tmp/cli-version.txt
 
       # The tag is the release version; a mismatch would publish 0.1.0 under the
       # name v0.2.0 and make every later update decision wrong.
