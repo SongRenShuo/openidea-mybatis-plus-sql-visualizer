@@ -57,9 +57,25 @@
 6. **AI 上下文（LIMITS 第 12 条）**：本版无脱敏器与宿主 AI 会话接口；入口待脱敏能力到位后再加。
 7. **DML 影响面预演**：需要连库执行只读 `COUNT`，与「预览不连库」的边界冲突，未做。
 8. **分享（LIMITS 第 13 条）**：仍退化为本地复制。
-9. **复制错误 / 参数名 / 条件勾选** 三项属于「待文案 / 待引擎」，不是平台做不到。
+9. **导出落盘（原版「导出可移植 SQL / 回放脚本」会弹保存框写任意路径）**：平台
+   `fs.write:<path>` 只按 manifest 里写死的路径授权，装不下运行期用户选的路径；本版保持
+   写到 Output 面板，由用户自行保存。
+10. **复制错误 / 参数名 / 条件勾选** 三项属于「待文案 / 待引擎」，不是平台做不到。
 
-## 4 与 L45 的关系
+## 4 平台参考仓核对（2026-11-27，只读）
+
+- `F:\code\Java\Github\other\openidea`（`3d1769ef`，API 1.18）：
+  `docs/en/plugins/manifest.mdx:121` 明确 `dialogs` 是 **API 1.18**；本仓钉的 SDK
+  `v0.1.51` 基线是 `^1.15`，所以 LIMITS 第 22 条的「没有插件模态对话框」结论不变，
+  预览继续落在工具窗页签。
+- 同仓 `wit/database.wit` 只有 `upsert-source` / `remove-source` / `sources` /
+  `set-credential` / `connect`，**没有 query / execute**；EXPLAIN 与 DML 影响面只能走
+  sidecar 或不做，LIMITS 第 3 / 11 条结论不变。
+- `F:\code\Java\Github\other\openidea-plugins`（`f3c4a1c`）里 `jiusi.mybatis-log` /
+  `ritsu.sqltoy-navigator` / `qtvbwfn.mybatis-duo` 三个同领域插件均为工具窗/面板形态，
+  没有可借鉴的「插件模态预览弹窗」先例。
+
+## 5 与 L45 的关系
 
 L45 的「关键字换行 / 竖向排列」是**显示态**（不改模型、不影响复制）。本车道只把这两个
 开关从「更多」菜单移到工具栏直显（原版位置），语义与 `preview-display` op 完全不变；
