@@ -78,12 +78,20 @@ mod tests {
 
     /// Restores the process-wide workbench store, which the view tests share;
     /// the lock is the view tests' own, so the two modules never interleave.
+    ///
+    /// Every one-shot flag has to be restored, not just the model:
+    /// `replace_input` is consumed by the next state push (`mem::take`), so a
+    /// test that leaves it `false` makes the *next* test's assertion on
+    /// `replaceInput` fail — which is exactly how this stayed green locally
+    /// (fewer threads, friendlier order) and went red on CI.
     fn with_model_restore<T>(body: impl FnOnce() -> T) -> T {
         let _guard = workbench::test_store_lock();
         let previous = workbench::model();
+        let flags = workbench::take_oneshot_flags();
         let out = body();
         workbench::set_model(previous);
         workbench::note_page_tab();
+        workbench::restore_oneshot_flags(flags);
         out
     }
 

@@ -454,6 +454,30 @@ pub fn model() -> WorkbenchModel {
     preview_store().model.clone()
 }
 
+/// The one-shot flags a test has to restore alongside the model.
+///
+/// `replace_input` and `handoff` are consumed by the next push
+/// (`mem::take`), so they are invisible to [`model`] — a test that restores
+/// only the model leaves them as its body left them, and the next test's
+/// assertion on `replaceInput` then fails. CI found this; a local serial run
+/// did not, because the order happened to be friendly.
+#[cfg(test)]
+pub(crate) fn take_oneshot_flags() -> (bool, bool) {
+    let mut store = preview_store();
+    (
+        std::mem::replace(&mut store.replace_input, false),
+        std::mem::replace(&mut store.handoff, false),
+    )
+}
+
+/// Puts back what [`take_oneshot_flags`] took.
+#[cfg(test)]
+pub(crate) fn restore_oneshot_flags(flags: (bool, bool)) {
+    let mut store = preview_store();
+    store.replace_input = flags.0;
+    store.handoff = flags.1;
+}
+
 /// Empties the preview tab.
 pub fn clear() {
     let mut store = preview_store();
