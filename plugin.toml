@@ -6,10 +6,12 @@ authors = ["songrenshuo"]
 homepage = "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer"
 license = "Apache-2.0"
 categories = ["tools"]
-# Package logo, the same 40×40 icon the IntelliJ plugin ships (Settings › Plugins
-# and the marketplace). `icon-dark` is the real dark variant.
+# Package logo: the 40×40 icon the IntelliJ plugin ships (Settings › Plugins and
+# the marketplace). Light only on purpose — the IntelliJ edition keeps
+# `pluginIcon_dark.svg` as a spare and always shows the light artwork, so
+# declaring `icon-dark` would swap it on a dark theme, which the original never
+# does.
 icon = "icons/pluginIcon.svg"
-icon-dark = "icons/pluginIcon-dark.svg"
 engines.openidea = "^1.15"
 # Built by `openidea-plugin build`. The code is loaded the first time one of its
 # commands runs; the commands below show in Find Action before that.
@@ -250,24 +252,28 @@ schema = "settings/engine.json"
 [[contributes.markerIcons]]
 id = "sqlv-nav-xml"
 icon = "icons/toolbar/mapperStatement.svg"
-iconDark = "icons/toolbar/mapperStatement.svg"
 markers = ["java:", "type:"]
 tooltip = "MyBatis: go to mapper interface or method"
 
 [[contributes.markerIcons]]
 id = "sqlv-nav-java"
 icon = "icons/toolbar/mapperMethod.svg"
-iconDark = "icons/toolbar/mapperMethod.svg"
 markers = ["stmt:", "mapper:"]
 tooltip = "MyBatis: go to SQL statement"
 
 # The gutter preview button's icon (L35a): declared here so the package ships and
-# validates it; the button itself is a `gutter-actions` entry.
+# validates it; the button itself is a `gutter-actions` entry. `iconDark` is kept
+# because the IntelliJ edition really ships a different dark variant (the lens
+# backdrop goes from #F4EEFF to #49415A); for markers without one, leaving
+# `iconDark` out is what the original does and the host then reuses the light
+# SVG on a dark theme anyway.
 [[contributes.markerIcons]]
 id = "sql-preview"
 icon = "icons/sqlGutter.svg"
 iconDark = "icons/sqlGutter_dark.svg"
 
+# Same reasoning as `sql-preview`: the IntelliJ edition ships a genuine dark
+# variant (the accent drops from #E66D17 to #C77D55).
 [[contributes.fileIcons]]
 id = "mapper-xml"
 patterns = ["*Mapper.xml", "*mapper.xml"]
