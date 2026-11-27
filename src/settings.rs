@@ -1,11 +1,12 @@
 //! Settings schema and accessors (T2-3).
 //!
-//! The manifest declares `[contributes.settings] title` plus four pages
-//! (`settings/ui-actions.json`, `settings/sql-preview.json`,
-//! `settings/sql-log.json`, `settings/engine.json`); the IDE generates one page
-//! per file under the plugin's Settings node. [`DEFINITIONS`] mirrors them in
-//! code so callers can enumerate keys, defaults and which changes need reopening
-//! the IDE. The tests keep the two in sync.
+//! The manifest declares `[contributes.settings] title` plus eight pages
+//! (`settings/ui-actions.json`, `shortcuts.json`, `sql-preview.json`,
+//! `table-mapping.json`, `sql-log.json`, `mcp.json`, `about.json` and
+//! `engine.json`); the IDE generates one page per file under the plugin's
+//! Settings node. [`DEFINITIONS`] mirrors them in code so callers can enumerate
+//! keys, defaults and which changes need reopening the IDE. The tests keep the
+//! two in sync.
 //!
 //! Code reads values through the `get_*` helpers, which fall back to the default
 //! when a stored value has the wrong type or the user never touched the setting.
@@ -33,14 +34,18 @@ pub const DIALECTS: &[&str] = &[
 
 /// Groups share a heading on the generated page, in this order.
 pub const GROUPS: &[&str] = &[
-    "Dialect",
-    "Log",
-    "Rendering",
-    "Navigation",
+    "Gutter",
+    "XML support",
+    "Editor",
+    "Onboarding",
+    "Language",
     "Preview",
+    "Dialect",
+    "Rendering",
     "MyBatis Plus",
-    "Shortcuts",
     "Table Mapping",
+    "Log",
+    "Shortcuts",
     "MCP",
     "About",
     "Engine",
@@ -85,9 +90,10 @@ pub struct SettingDef {
     pub needs_restart: bool,
 }
 
-/// The first release's settings, the L34 parity keys, the L48 preview
-/// shell and the C14 MyBatis-Plus interceptor simulation, in page order.
-pub static DEFINITIONS: [SettingDef; 60] = [
+/// The first release's settings, the L34 parity keys, the L48 preview shell,
+/// the C14 MyBatis-Plus interceptor simulation and the L-SettingsParity
+/// expansion to the IntelliJ edition's 81 application-level fields.
+pub static DEFINITIONS: [SettingDef; 82] = [
     // Preview -------------------------------------------------------------
     // Lane L48: where the preview opens. The dialog is the IntelliJ edition's
     // `SqlPreviewDialog`; the tab is the fifth tab of the log panel, which the
@@ -423,89 +429,277 @@ pub static DEFINITIONS: [SettingDef; 60] = [
         needs_restart: false,
     },
     // Navigation and injection -------------------------------------------
+    // `nav.showLineMarkers` is the gutter master switch (the host reads it while
+    // indexing the document's markers); the six source-group switches below sit
+    // under it in the reference and are stored here for parity. This build only
+    // produces mapper XML icons, so every group but `ui.gutter.mapperXml` is
+    // stored, not wired.
     SettingDef {
         key: "nav.enabled",
-        title: "Mapper and XML navigation",
-        group: "Navigation",
+        title: "Mapper 与 XML 双向跳转",
+        group: "XML support",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
         needs_restart: true,
     },
     SettingDef {
         key: "nav.showLineMarkers",
-        title: "Gutter line markers",
-        group: "Navigation",
+        title: "在代码左侧显示预览 SQL 图标",
+        group: "Gutter",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
         needs_restart: true,
     },
     SettingDef {
         key: "injections.enabled",
-        title: "SQL injection in mapper XML",
-        group: "Navigation",
+        title: "mapper XML 内嵌 SQL 注入",
+        group: "XML support",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
         needs_restart: true,
     },
     SettingDef {
         key: "injections.language",
-        title: "Injection language id",
-        group: "Navigation",
+        title: "注入语言 ID",
+        group: "XML support",
         kind: Kind::String,
         default: DefaultValue::Str("sql"),
         needs_restart: true,
     },
     SettingDef {
         key: "inlay.enabled",
-        title: "Inlay hints",
-        group: "Navigation",
+        title: "内联提示",
+        group: "Editor",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
         needs_restart: true,
     },
     SettingDef {
         key: "inlay.insertColumns",
-        title: "Show INSERT target columns",
-        group: "Navigation",
+        title: "显示 INSERT 目标列",
+        group: "Editor",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
         needs_restart: false,
     },
     SettingDef {
         key: "diagnostics.enabled",
-        title: "Diagnostics",
-        group: "Navigation",
+        title: "诊断",
+        group: "Editor",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
         needs_restart: true,
     },
     SettingDef {
         key: "diagnostics.unknownColumn",
-        title: "Report unknown columns",
-        group: "Navigation",
+        title: "报告未知列",
+        group: "Editor",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
         needs_restart: false,
     },
     SettingDef {
         key: "diagnostics.dialectQuotes",
-        title: "Report dialect quote mismatches",
-        group: "Navigation",
+        title: "报告方言引号不匹配",
+        group: "Editor",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
         needs_restart: false,
+    },
+    // Gutter source groups, navigation yield, XML support, editor switches,
+    // onboarding tips and the interface language (L-SettingsParity, UI and
+    // Actions page). The capability behind most of these does not exist in this
+    // port yet, so the schema declares them (UI parity with the IntelliJ
+    // edition) and the panel description says so; the final report lists them.
+    SettingDef {
+        key: "ui.gutter.mapperXml",
+        title: "mapper XML 语句",
+        group: "Gutter",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.gutter.annotation",
+        title: "注解 SQL（@Select 族）",
+        group: "Gutter",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.gutter.jpaHql",
+        title: "JPA / HQL 族",
+        group: "Gutter",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.gutter.jdbc",
+        title: "JdbcTemplate 字符串 SQL",
+        group: "Gutter",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.gutter.inlineFallback",
+        title: "通用 XML 内嵌兜底",
+        group: "Gutter",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.gutter.wrapperChain",
+        title: "Wrapper 链 / 方法名字符串 SQL",
+        group: "Gutter",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.mapperNavYield",
+        title: "与同类 MyBatis 导航插件共存时让出跳转图标",
+        group: "Gutter",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.xmlInlineSql",
+        title: "识别通用 XML 内嵌 SQL（叶子标签文本 / CDATA）",
+        group: "XML support",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.ibatisXml",
+        title: "iBatis 2.x <sqlMap> 语句预览",
+        group: "XML support",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.xmlSyntaxHighlight",
+        title: "mapper XML 语法高亮（关键字 + 参数占位着色）",
+        group: "XML support",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: true,
+    },
+    SettingDef {
+        key: "ui.consolePrepMode",
+        title: "预览打开时的控制台准备方式",
+        group: "Editor",
+        kind: Kind::Enum(&["lazy", "lazy_silent", "eager"]),
+        default: DefaultValue::Str("lazy"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "ui.pagesXmlSourceMode",
+        title: "自研框架数据源语言",
+        group: "Editor",
+        kind: Kind::Enum(&["auto", "sql", "hql"]),
+        default: DefaultValue::Str("auto"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "ui.joinDiagramNative",
+        title: "使用 IDE 原生图框架渲染 JOIN 图",
+        group: "Editor",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "ui.showWhitespaces",
+        title: "在插件自建编辑器中显示空白符",
+        group: "Editor",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "ui.onboardingAnchorTip",
+        title: "首次检测到可预览 SQL 时显示一次性引导",
+        group: "Onboarding",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "ui.dialectTip",
+        title: "SQL 方言无法确定时显示一次性提示",
+        group: "Onboarding",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "ui.firstCaptureGuide",
+        title: "首次捕获 SQL 时显示一次性提示",
+        group: "Onboarding",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "ui.language",
+        title: "界面语言",
+        group: "Language",
+        kind: Kind::Enum(&["auto", "zh", "en"]),
+        default: DefaultValue::Str("auto"),
+        needs_restart: true,
     },
     // Shortcuts / Table Mapping / MCP / About ------------------------------
     // The reference keeps these as four settings pages of its own. This build
     // declares the pages (manifest order 50/45/40/30/20/15/10) and carries the
     // keys the IDE can render; keymaps stay in IDE Keymap, which is why the
     // shortcut row is a read-only reminder rather than a recorder.
+    // Shortcuts stay in IDE Keymap: the platform has no key-recording API, so
+    // these rows carry the reference's default keys as read-only text.
     SettingDef {
         key: "shortcuts.preview",
-        title: "Preview SQL shortcut (change it in Settings › Keymap)",
+        title: "预览 SQL",
         group: "Shortcuts",
         kind: Kind::String,
         default: DefaultValue::Str("Alt+Shift+Q"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "shortcuts.sqlToJava",
+        title: "SQL → Java",
+        group: "Shortcuts",
+        kind: Kind::String,
+        default: DefaultValue::Str("Alt+Shift+J"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "shortcuts.explain",
+        title: "EXPLAIN 选中表",
+        group: "Shortcuts",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "shortcuts.count",
+        title: "COUNT 选中表",
+        group: "Shortcuts",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "shortcuts.sample",
+        title: "抽样选中表",
+        group: "Shortcuts",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
         needs_restart: false,
     },
     SettingDef {

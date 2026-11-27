@@ -1,58 +1,193 @@
 {
   "properties": {
-    "nav.enabled": {
-      "type": "boolean",
-      "title": "Mapper and XML navigation",
-      "group": "Navigation",
-      "default": true
-    },
     "nav.showLineMarkers": {
       "type": "boolean",
-      "title": "Gutter line markers",
-      "group": "Navigation",
-      "default": true
+      "title": "在代码左侧显示预览 SQL 图标",
+      "group": "Gutter",
+      "default": true,
+      "description": "关闭后左侧不再出现预览图标，预览命令与右键入口不受影响。"
+    },
+    "ui.gutter.mapperXml": {
+      "type": "boolean",
+      "title": "mapper XML 语句",
+      "group": "Gutter",
+      "default": true,
+      "description": "按来源分组显示预览图标。本仓当前只有 mapper XML 语句会产出图标，这一组即其开关。"
+    },
+    "ui.gutter.annotation": {
+      "type": "boolean",
+      "title": "注解 SQL（@Select 族）",
+      "group": "Gutter",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现注解 SQL 的图标通道。"
+    },
+    "ui.gutter.jpaHql": {
+      "type": "boolean",
+      "title": "JPA / HQL 族",
+      "group": "Gutter",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现 JPA / HQL 的图标通道。"
+    },
+    "ui.gutter.jdbc": {
+      "type": "boolean",
+      "title": "JdbcTemplate 字符串 SQL",
+      "group": "Gutter",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现 JdbcTemplate 的图标通道。"
+    },
+    "ui.gutter.inlineFallback": {
+      "type": "boolean",
+      "title": "通用 XML 内嵌兜底",
+      "group": "Gutter",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现通用 XML 内嵌 SQL 的图标通道。"
+    },
+    "ui.gutter.wrapperChain": {
+      "type": "boolean",
+      "title": "Wrapper 链 / 方法名字符串 SQL",
+      "group": "Gutter",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现 Wrapper 链的图标通道。"
+    },
+    "ui.mapperNavYield": {
+      "type": "boolean",
+      "title": "与同类 MyBatis 导航插件共存时让出跳转图标",
+      "group": "Gutter",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓未做同类插件探测，跳转图标恒定显示。"
+    },
+    "ui.xmlInlineSql": {
+      "type": "boolean",
+      "title": "识别通用 XML 内嵌 SQL（叶子标签文本 / CDATA）",
+      "group": "XML support",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现通用 XML 内嵌 SQL 识别。"
+    },
+    "ui.ibatisXml": {
+      "type": "boolean",
+      "title": "iBatis 2.x <sqlMap> 语句预览",
+      "group": "XML support",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现 iBatis 2.x 语句预览。"
+    },
+    "ui.xmlSyntaxHighlight": {
+      "type": "boolean",
+      "title": "mapper XML 语法高亮（关键字 + 参数占位着色）",
+      "group": "XML support",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现 mapper XML 注入着色，关闭后仍走平台原生 XML 着色。"
     },
     "injections.enabled": {
       "type": "boolean",
-      "title": "SQL injection in mapper XML",
-      "group": "Navigation",
-      "default": true
+      "title": "mapper XML 内嵌 SQL 注入",
+      "group": "XML support",
+      "default": true,
+      "description": "在 mapper XML 的语句体内提供 SQL 语言能力。改动后需重开文件或重启 IDE。"
     },
     "injections.language": {
       "type": "string",
-      "title": "Injection language id",
-      "group": "Navigation",
-      "default": "sql"
+      "title": "注入语言 ID",
+      "group": "XML support",
+      "default": "sql",
+      "description": "注入时使用的语言标识，默认 sql。改动后需重开文件或重启 IDE。"
+    },
+    "nav.enabled": {
+      "type": "boolean",
+      "title": "Mapper 与 XML 双向跳转",
+      "group": "XML support",
+      "default": true,
+      "description": "跳转到 mapper 接口方法或对应 SQL 语句。改动后需重启 IDE。"
+    },
+    "ui.consolePrepMode": {
+      "type": "string",
+      "title": "预览打开时的控制台准备方式",
+      "group": "Editor",
+      "enum": ["lazy", "lazy_silent", "eager"],
+      "default": "lazy",
+      "description": "lazy = 不建控制台并保留入口；lazy_silent = 不建控制台也不放入口；eager = 打开即准备。仅存储，尚未接线：本仓预览直接读取编辑器，没有执行控制台准备阶段。"
+    },
+    "ui.pagesXmlSourceMode": {
+      "type": "string",
+      "title": "自研框架数据源语言",
+      "group": "Editor",
+      "enum": ["auto", "sql", "hql"],
+      "default": "auto",
+      "description": "针对 <pages> 页面 XML 的 <datasource>：自动按实体类相关性判定，或固定按 SQL / HQL 处理。仅存储，尚未接线：本仓尚未实现该解析链。"
+    },
+    "ui.joinDiagramNative": {
+      "type": "boolean",
+      "title": "使用 IDE 原生图框架渲染 JOIN 图",
+      "group": "Editor",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现 JOIN 图。"
+    },
+    "ui.showWhitespaces": {
+      "type": "boolean",
+      "title": "在插件自建编辑器中显示空白符",
+      "group": "Editor",
+      "default": false,
+      "description": "关闭时沿用 IDE 全局「显示空白符」偏好。仅存储，尚未接线：本仓面板编辑器还未读取该值。"
     },
     "inlay.enabled": {
       "type": "boolean",
-      "title": "Inlay hints",
-      "group": "Navigation",
-      "default": true
+      "title": "内联提示",
+      "group": "Editor",
+      "default": true,
+      "description": "改动后需重开文件或重启 IDE。"
     },
     "inlay.insertColumns": {
       "type": "boolean",
-      "title": "Show INSERT target columns",
-      "group": "Navigation",
+      "title": "显示 INSERT 目标列",
+      "group": "Editor",
       "default": true
     },
     "diagnostics.enabled": {
       "type": "boolean",
-      "title": "Diagnostics",
-      "group": "Navigation",
-      "default": false
+      "title": "诊断",
+      "group": "Editor",
+      "default": false,
+      "description": "默认关闭：没有列来源的工程不应收到告警。改动后需重开文件或重启 IDE。"
     },
     "diagnostics.unknownColumn": {
       "type": "boolean",
-      "title": "Report unknown columns",
-      "group": "Navigation",
+      "title": "报告未知列",
+      "group": "Editor",
       "default": true
     },
     "diagnostics.dialectQuotes": {
       "type": "boolean",
-      "title": "Report dialect quote mismatches",
-      "group": "Navigation",
+      "title": "报告方言引号不匹配",
+      "group": "Editor",
       "default": true
+    },
+    "ui.onboardingAnchorTip": {
+      "type": "boolean",
+      "title": "首次检测到可预览 SQL 时显示一次性引导",
+      "group": "Onboarding",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚无该引导通知。"
+    },
+    "ui.dialectTip": {
+      "type": "boolean",
+      "title": "SQL 方言无法确定时显示一次性提示",
+      "group": "Onboarding",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚无方言死路提示。"
+    },
+    "ui.firstCaptureGuide": {
+      "type": "boolean",
+      "title": "首次捕获 SQL 时显示一次性提示",
+      "group": "Onboarding",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚无首次捕获引导。"
+    },
+    "ui.language": {
+      "type": "string",
+      "title": "界面语言",
+      "group": "Language",
+      "enum": ["auto", "zh", "en"],
+      "default": "auto",
+      "description": "auto = 跟随系统，zh = 简体中文，en = English。本仓恒跟随系统语言，该键保留只读语义，改写不生效。"
     }
   }
 }
