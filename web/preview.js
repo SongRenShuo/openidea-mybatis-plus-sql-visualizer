@@ -88,6 +88,18 @@ const TEMPLATE = `<!-- Input half (lane L27): the reference's standalone page ac
               aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="3" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="13" cy="8" r="1.2" fill="currentColor"/></svg><span data-btnlabel></span></button>
       <div class="pv-more-menu" id="pvMoreMenu" role="menu" hidden>
         <button id="pvExport" class="pv-more-item" type="button" role="menuitem"></button>
+        <!-- Diff (lane L44): the original on the left, the rendered SQL on the
+             right, in the platform diff viewer. -->
+        <button id="pvDiff" class="pv-more-item" type="button" role="menuitem"></button>
+        <!-- Share (lane L44): no share service and no network channel, so the
+             entry copies the SQL locally. -->
+        <button id="pvShare" class="pv-more-item" type="button" role="menuitem"></button>
+        <!-- Qualify columns (lane L44): rendering `table.column` needs the
+             renderer to know each column's table; neither the core renderer nor
+             the engine has that switch, so the item stays disabled with the
+             reason in its tooltip. -->
+        <button id="pvQualify" class="pv-more-item" type="button" role="menuitem"
+                disabled></button>
         <!-- Rollback (L27): the workbench has no table/primary-key
              metadata, so the item stays disabled with the reason in its
              tooltip. -->
@@ -342,6 +354,25 @@ export function mountPreview(root, deps) {
       rollbackBtn.disabled = true;
       rollbackBtn.title = labels.rollbackNote || '';
     }
+    // Lane L44: diff works, share degrades to a local copy, and both say so in
+    // their tooltips; qualify stays disabled because the renderer, not the
+    // page, would have to resolve each column's table.
+    const diffBtn = node('pvDiff');
+    if (diffBtn) {
+      diffBtn.textContent = labels.diff || '';
+      diffBtn.title = labels.diffNote || '';
+    }
+    const shareBtn = node('pvShare');
+    if (shareBtn) {
+      shareBtn.textContent = labels.share || '';
+      shareBtn.title = labels.shareNote || '';
+    }
+    const qualifyBtn = node('pvQualify');
+    if (qualifyBtn) {
+      qualifyBtn.textContent = labels.qualify || '';
+      qualifyBtn.disabled = true;
+      qualifyBtn.title = labels.qualifyNote || '';
+    }
     updateParamsActions();
   }
 
@@ -517,6 +548,10 @@ export function mountPreview(root, deps) {
   on('pvClear', function () { post({ op: 'preview-clear' }); });
   on('pvCopy', function () { post({ op: 'preview-copy' }); });
   on('pvExport', function () { closeMore(); post({ op: 'preview-export' }); });
+  // Diff / Share (lane L44): both close the fold first, so the menu never sits
+  // over the diff tab the host opens.
+  on('pvDiff', function () { closeMore(); post({ op: 'preview-diff' }); });
+  on('pvShare', function () { closeMore(); post({ op: 'preview-share' }); });
   // Format (L35b): the reference formats the SQL the result pane shows
   // (`formatSql`), not the input box on the other half of the splitter; the
   // display-mode select below stays the separate view switch.
