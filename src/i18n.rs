@@ -1084,6 +1084,117 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "Stopped waiting for the target application",
         "已停止等待目标应用",
     ),
+    // SQL suppression rules (lane E): the declared dialog `sqlv-suppress`.
+    // Wording follows the reference bundle's `log.suppress.*` keys.
+    (
+        "view.suppress.manage",
+        "Manage suppress rules…",
+        "管理屏蔽规则…",
+    ),
+    (
+        "view.suppress.title",
+        "Manage SQL Suppress Rules",
+        "管理 SQL 屏蔽规则",
+    ),
+    ("view.suppress.list_title", "Rules", "屏蔽规则"),
+    ("view.suppress.add", "Add", "新增"),
+    ("view.suppress.add_confirm", "Confirm Add", "确认新增"),
+    ("view.suppress.cancel_add", "Cancel", "取消"),
+    ("view.suppress.delete", "Delete", "删除"),
+    ("view.suppress.clear", "Clear All", "清空"),
+    ("view.suppress.close", "Close", "关闭"),
+    (
+        "view.suppress.empty",
+        "No suppress rules yet",
+        "还没有屏蔽规则",
+    ),
+    (
+        "view.suppress.add_hint",
+        "Paste SQL on the right, then click Confirm Add (matching is on whitespace-normalized text).",
+        "在右侧粘贴 SQL 后点「确认新增」（按空白归一后的文本匹配）。",
+    ),
+    (
+        "view.suppress.selected_hint",
+        "Select a rule on the left to see its SQL.",
+        "在左侧选择一条规则查看 SQL。",
+    ),
+    (
+        "view.suppress.hit_count",
+        "Intercepted {n} time(s)",
+        "已拦截 {n} 次",
+    ),
+    (
+        "view.suppress.structure_on",
+        "Disable structure match",
+        "关闭结构匹配",
+    ),
+    (
+        "view.suppress.structure_off",
+        "Enable structure match",
+        "开启结构匹配",
+    ),
+    (
+        "view.suppress.structure_all",
+        "Structure-match all",
+        "全部按结构匹配",
+    ),
+    (
+        "view.suppress.structure_badge",
+        "structure match",
+        "结构匹配",
+    ),
+    (
+        "view.suppress.clear_confirm",
+        "Delete all {n} suppress rules?",
+        "确定删除全部 {n} 条屏蔽规则？",
+    ),
+    ("view.suppress.clear_yes", "Delete All", "确认清空"),
+    ("view.suppress.clear_no", "Cancel", "取消"),
+    (
+        "view.suppress.note",
+        "Rules apply immediately. Removing a rule brings back entries still kept in the buffer; SQL discarded while the rule was active cannot be recovered.",
+        "规则即时生效。删除规则后，仍在列表缓冲中的条目会重新显示；屏蔽期间新产生的 SQL 已被丢弃、无法恢复。",
+    ),
+    (
+        "view.suppress.status.added",
+        "Rule added.",
+        "已新增屏蔽规则。",
+    ),
+    (
+        "view.suppress.status.duplicate",
+        "A rule for this SQL already exists.",
+        "该 SQL 的屏蔽规则已存在。",
+    ),
+    (
+        "view.suppress.status.blank",
+        "Paste SQL on the right first.",
+        "请先在右侧粘贴 SQL。",
+    ),
+    (
+        "view.suppress.status.limit",
+        "Suppress rule limit reached ({n}). Remove unused rules first.",
+        "屏蔽规则已达上限（{n}），请先删除不再使用的规则。",
+    ),
+    (
+        "view.suppress.status.deleted",
+        "Rule deleted; the buffered rows it hid are shown again.",
+        "已删除规则；它隐藏的缓冲条目已重新显示。",
+    ),
+    (
+        "view.suppress.status.cleared",
+        "All suppress rules deleted.",
+        "已清空全部屏蔽规则。",
+    ),
+    (
+        "view.suppress.status.structure_on",
+        "Structure match on: SQL of the same shape with different parameter values is suppressed too.",
+        "已开启结构匹配：参数值不同的同形状 SQL 也会被屏蔽。",
+    ),
+    (
+        "view.suppress.status.structure_off",
+        "Structure match off: exact match only (whitespace and a trailing semicolon normalised).",
+        "已关闭结构匹配：仅按精确匹配（空白与尾部分号已归一）。",
+    ),
 ];
 
 /// Localised text for `key` in the IDE's current UI language.

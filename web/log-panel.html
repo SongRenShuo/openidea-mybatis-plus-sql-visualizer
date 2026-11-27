@@ -536,24 +536,18 @@
         <button id="settingsHelpItem" class="menu-item" type="button"></button>
       </div>
     </span>
-    <!-- Blocked methods popup (L26). -->
-    <span class="menuanchor">
-      <button id="blockedBtn" class="iconbtn" type="button" aria-haspopup="true" aria-expanded="false">
-        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <circle cx="8" cy="8" r="1.72" stroke="currentColor" stroke-width="1.4"/>
+    <!-- Manage suppression rules (lane E): the reference's fifth toolbar action
+         (`ManageSuppressAction`, eye-off icon) opens the `sqlv-suppress` dialog,
+         where the rules are listed, created and deleted. The session's muted
+         methods (row menu "mute this method") are cleared from the muted chip
+         in the filter row. -->
+    <button id="blockedBtn" class="iconbtn" type="button">
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <circle cx="8" cy="8" r="1.72" stroke="currentColor" stroke-width="1.4"/>
   <path d="M8.0000 12.0250C5.2670 12.0250 2.5648 10.2367 1.7105 8.0000C2.5648 5.7633 5.2670 3.9750 8.0000 3.9750C10.7330 3.9750 13.4352 5.7633 14.2895 8.0000C13.4352 10.2367 10.7330 12.0250 8.0000 12.0250Z" stroke="currentColor" stroke-width="1.4"/>
   <path d="M2.250 13.750L13.750 2.250" stroke="var(--openidea-danger)" stroke-width="1.6" stroke-linecap="round"/>
       </svg>
-      </button>
-      <div id="blockedMenu" class="menu" hidden>
-        <div id="blockedList"></div>
-        <div class="menu-sep"></div>
-        <div class="menu-footer">
-          <span id="blockedEmpty" class="muted"></span>
-          <button id="blockedClear" class="linkbtn" type="button"></button>
-        </div>
-      </div>
-    </span>
+    </button>
     <button id="searchBtn" class="iconbtn" type="button">
       <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
         <circle cx="7" cy="7" r="4.5" stroke="currentColor"/>
@@ -1142,7 +1136,7 @@
         labelIconButton($('sortBtn'), (L.sortLabel || 'Sort:') + ' ' + sortOptionLabel(sorted));
         renderSortMenu();
         labelIconButton($('scrollEndBtn'), L.scrollEnd || 'Scroll to bottom');
-        labelIconButton($('blockedBtn'), L.blocked || 'Blocked methods');
+        labelIconButton($('blockedBtn'), L.manageSuppress || 'Manage suppress rules…');
         labelIconButton($('settingsBtn'), L.settings || 'Settings');
         // The settings popup (L32): a settings-page pointer and the cheat sheet.
         setText($('settingsPageItem'), L.menuSettingsPage || 'Settings page…');
@@ -1150,8 +1144,6 @@
         labelIconButton($('previewBtn'), L.preview || 'Quick preview');
         labelIconButton($('communityBtn'), L.community || 'Community');
         labelIconButton($('helpBtn'), L.help || 'Help');
-        setText($('blockedEmpty'), L.blockedEmpty);
-        setText($('blockedClear'), L.blockedClear);
         labelIconButton($('searchBtn'), L.search || 'Search');
         setText($('dedupeLabel'), L.dedupe);
         setText($('slowOnlyLabel'), L.slowOnly);
@@ -1999,7 +1991,6 @@
         syncTypeCheckboxes();
         updateTypeButton();
         renderFocusChips(state);
-        renderBlocked(state);
         var sig = rowsSignature(state.rows || []) + '#' + (state.dialect || '') + '#' + displayKey(state);
         if (sig !== rowsSig) {
           rowsSig = sig;
@@ -2044,13 +2035,6 @@
         $('typeBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
       }
 
-      // Blocked-methods popup (L26): the eye-off button lists the muted
-      // class#method keys and offers to restore them all.
-      function openBlockedMenu(open) {
-        $('blockedMenu').hidden = !open;
-        $('blockedBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
-      }
-
       // Settings popup (L32): the gear opens a menu instead of firing the op on
       // the spot, so the settings-page pointer and the help sheet sit together.
       function openSettingsMenu(open) {
@@ -2063,26 +2047,6 @@
       function openSortMenu(open) {
         $('sortMenu').hidden = !open;
         $('sortBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
-      }
-
-      function renderBlocked(state) {
-        var list = $('blockedList');
-        while (list.firstChild) { list.removeChild(list.firstChild); }
-        var keys = (state.filter && state.filter.blocked) || [];
-        if (keys.length === 0) {
-          $('blockedEmpty').hidden = false;
-          setText($('blockedEmpty'), L.blockedEmpty || '');
-          $('blockedClear').hidden = true;
-          return;
-        }
-        $('blockedEmpty').hidden = true;
-        $('blockedClear').hidden = false;
-        for (var i = 0; i < keys.length; i++) {
-          var item = document.createElement('div');
-          item.className = 'menu-item';
-          item.textContent = keys[i];
-          list.appendChild(item);
-        }
       }
 
       // Context menu --------------------------------------------------------
@@ -2341,14 +2305,11 @@
         }
         renderSortMenu();
       });
+      // The eye-off action opens the modal suppression-rule manager (lane E);
+      // it has no popup of its own.
       $('blockedBtn').addEventListener('click', function (event) {
         event.stopPropagation();
-        openBlockedMenu($('blockedMenu').hidden);
-      });
-      $('blockedMenu').addEventListener('click', function (event) { event.stopPropagation(); });
-      $('blockedClear').addEventListener('click', function () {
-        post({ op: 'clear-blocked' });
-        openBlockedMenu(false);
+        post({ op: 'manage-suppress' });
       });
       // Settings (L32): the gear opens a popup; the items keep the L26 ops.
       $('settingsBtn').addEventListener('click', function (event) {
@@ -2417,7 +2378,7 @@
         closeCtx();
       });
 
-      document.addEventListener('click', function () { openTypeMenu(false); openBlockedMenu(false); openSettingsMenu(false); openSortMenu(false); closeCtx(); });
+      document.addEventListener('click', function () { openTypeMenu(false); openSettingsMenu(false); openSortMenu(false); closeCtx(); });
       document.addEventListener('keydown', function (event) {
         // Ctrl+Tab / Ctrl+Shift+Tab cycle the four tabs. The IDE may consume
         // this chord before the page sees it; the mouse always works.
@@ -2439,7 +2400,6 @@
         if (event.key === 'Escape') {
           if (!$('ctxMenu').hidden) { closeCtx(); return; }
           if (!$('settingsMenu').hidden) { openSettingsMenu(false); return; }
-          if (!$('blockedMenu').hidden) { openBlockedMenu(false); return; }
           if (!$('sortMenu').hidden) { openSortMenu(false); return; }
           if (!$('typeMenu').hidden) { openTypeMenu(false); return; }
           if (!$('searchRow').hidden) {

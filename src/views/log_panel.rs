@@ -32,6 +32,12 @@ use crate::i18n::t;
 use crate::indexer;
 use crate::settings;
 
+// Lane E's SQL suppression rules live in `src/views/suppress.rs`. The `#[path]`
+// keeps `views/mod.rs` (not this lane's file) untouched; the module is declared
+// here because this file is the panel whose rows it filters.
+#[path = "suppress.rs"]
+pub mod suppress;
+
 /// The id declared in `[[contributes.views]]`.
 pub const VIEW_ID: &str = "sqlv-logs";
 
@@ -516,79 +522,18 @@ fn sort_time(row: &PanelRow) -> i64 {
 /// This mirrors the reference's `structureFingerprint` (`LogSqlModels.kt`):
 /// whitespace is collapsed, a trailing `;` is dropped, every string literal and
 /// every bare number is folded to `?`, and the result is hashed with FNV-1a
-/// 64-bit. The port hashes the parameterised statement's UTF-8 bytes where the
+/// 64-bit. The implementation lives in [`suppress::structure_fingerprint`], one
+/// copy shared by the structure sort (lane A) and the suppression rules
+/// (lane E), so the two can never disagree on what "the same shape" means.
+///
+/// The port hashes the parameterised statement's UTF-8 bytes where the
 /// reference hashes its UTF-16 code units, so the two produce the same
 /// fingerprint for ASCII SQL (every realistic statement) and only diverge on
 /// non-ASCII identifiers. Nothing compares across the two plugins: the value is
 /// only ever compared with another value from this function, so equal
 /// statement shapes always land on the same fingerprint.
-///
-/// The core crate has the same text helpers in `core::log::text`, but that
-/// module is private to `core::log`, so the panel keeps its own copy rather than
-/// widening another lane's module surface. Only display ordering reads it.
 fn structure_fingerprint(sql: &str) -> String {
-    let collapsed = sql.split_whitespace().collect::<Vec<_>>().join(" ");
-    let trimmed = collapsed.trim_end_matches(';').trim();
-    let parameterised = parameterise_literals(trimmed);
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a 64-bit offset basis
-    for byte in parameterised.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3); // FNV-1a 64-bit prime
-    }
-    format!("{hash:x}")
-}
-
-/// Folds string literals (`'…'`, with `''` escapes) and bare numbers to `?`.
-///
-/// Identifiers keep their digits (`t2024`, `plan_2026001`): a digit only folds
-/// when the character before it is not a SQL word character. An unterminated
-/// literal folds to one `?` and ends the scan, the reference's defensive close.
-fn parameterise_literals(sql: &str) -> String {
-    let mut out = String::with_capacity(sql.len());
-    let chars: Vec<char> = sql.chars().collect();
-    let mut index = 0;
-    while index < chars.len() {
-        let ch = chars[index];
-        if ch == '\'' {
-            let mut end = index + 1;
-            while end < chars.len() {
-                if chars[end] == '\'' {
-                    if end + 1 < chars.len() && chars[end + 1] == '\'' {
-                        end += 2;
-                        continue;
-                    }
-                    break;
-                }
-                end += 1;
-            }
-            out.push('?');
-            index = if end < chars.len() {
-                end + 1
-            } else {
-                chars.len()
-            };
-        } else if ch.is_ascii_digit() && (index == 0 || !is_sql_word_char(chars[index - 1])) {
-            let mut end = index;
-            while end < chars.len() && (chars[end].is_ascii_digit() || chars[end] == '.') {
-                end += 1;
-            }
-            if end < chars.len() && is_sql_word_char(chars[end]) {
-                out.extend(&chars[index..end]); // 2024Q1-like: part of an identifier
-            } else {
-                out.push('?');
-            }
-            index = end;
-        } else {
-            out.push(ch);
-            index += 1;
-        }
-    }
-    out
-}
-
-/// A SQL word character (identifier boundary): letter, digit, `_` or `$`.
-fn is_sql_word_char(ch: char) -> bool {
-    ch.is_alphanumeric() || ch == '_' || ch == '$'
+    suppress::structure_fingerprint(sql)
 }
 
 /// Orders `rows` in place for `mode`, the reference's `applySort` (`SqlLogPanel.kt`).
@@ -1301,6 +1246,9 @@ pub fn set_log_text(text: &str) {
     state.text.push_str(text);
     state.removed.clear();
     state.dirty = true;
+    // A replaced buffer restarts its line numbers: the suppression cursor that
+    // belongs to the old text means nothing here (lane E).
+    suppress::reset_cursor();
 }
 
 /// Appends a chunk of log text (capture lane).
@@ -1332,6 +1280,10 @@ pub fn clear() {
     // results do not come from the buffer, so clearing the log leaves them
     // alone. The history tab searched the buffer, so it goes.
     state.history = HistoryTab::default();
+    drop(state);
+    // The buffer is empty, so no row is left for a suppression rule to count
+    // (lane E); the rules themselves are not this panel's to clear.
+    suppress::reset_cursor();
 }
 
 /// Puts the process-wide panel store back to a fresh baseline. Tests in several
@@ -1350,6 +1302,9 @@ pub(crate) fn reset_for_tests() {
     // `structure` or `database` behind would make the next test's "the default
     // is time_asc" assertion depend on which test ran before it.
     state.sort = SortMode::TimeAsc;
+    drop(state);
+    // Suppression rules and their line cursor are process-wide as well (lane E).
+    suppress::reset_for_tests();
 }
 
 /// Whether live refresh is paused (rows keep accumulating meanwhile).
@@ -1399,6 +1354,10 @@ fn ensure_parsed(state: &mut Store) {
     state.analysis = parsed.analysis;
     state.sources = parsed.sources;
     state.dirty = false;
+    // Lane E: count the rows that arrived while a suppression rule was active.
+    // The cursor makes this idempotent — a push that changes nothing counts
+    // nothing, and rows that predate a rule stay uncounted.
+    suppress::note_new_entries(&state.analysis.entries);
 }
 
 fn parse_options() -> ParseOptions {
@@ -1452,6 +1411,16 @@ fn build_state() -> Value {
         slow_threshold_ms,
         &state.expanded,
     );
+    // Lane E: a suppression rule hides the rows it matches. This is a display
+    // filter, not a buffer drop — deleting the rule brings these rows back.
+    let suppression = suppress::matcher();
+    let rows: Vec<PanelRow> = if suppression.is_empty() {
+        rows
+    } else {
+        rows.into_iter()
+            .filter(|row| !suppression.hidden(&row.sql))
+            .collect()
+    };
 
     let filter = state.filter.clone();
     let mut filtered = filter_row_refs(&rows, &filter, slow_threshold_ms);
@@ -2727,6 +2696,9 @@ fn labels_actions() -> Value {
         "blocked": t("view.logs.button.blocked"),
         "blockedTitle": t("view.logs.blocked.title"),
         "blockedEmpty": t("view.logs.blocked.empty"),
+        // Lane E: the eye-off toolbar action now opens the suppression-rule
+        // manager (the reference's fifth action), so its tooltip names that.
+        "manageSuppress": t("view.suppress.manage"),
         "settings": t("view.logs.button.settings"),
         "menuSettingsPage": t("view.logs.menu.settings_page"),
         "help": t("view.logs.button.help"),
@@ -2799,6 +2771,9 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
     if op.starts_with("history") {
         set_history_scope(ctx);
     }
+    // Suppression rules are per project too (lane E): point the rule store at
+    // this window's project before any op reads or writes it.
+    suppress::set_scope(ctx);
     match op {
         // The packaged page asks for the state once its script is ready.
         "ready" | "page" => {
@@ -3143,6 +3118,12 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
             unblock_all();
             let _ = push_state();
         }
+        // The eye-off toolbar action (the reference's fifth action,
+        // `ManageSuppressAction`) opens the suppression-rule manager (lane E).
+        // A dialog is revealed from a command or a view event — this is one.
+        "manage-suppress" => {
+            suppress::reveal(ctx)?;
+        }
         // Capture controls (lane L26): the toolbar buttons forward to the
         // existing commands, which write their own Output lines (connected /
         // already connected / the failure reason); the panel only refreshes the
@@ -3322,10 +3303,13 @@ fn filter_from_message(message: &Value) -> Filter {
 }
 
 fn all_sql() -> String {
+    // Suppressed statements were never meant to be seen again; "Copy all" and
+    // the export keep them out, like the rows themselves (lane E).
+    let suppression = suppress::matcher();
     snapshot()
         .entries
         .iter()
-        .filter(|entry| entry.has_sql())
+        .filter(|entry| entry.has_sql() && !suppression.hidden(&entry.sql))
         .map(|entry| entry.sql.as_str())
         .collect::<Vec<_>>()
         .join(";\n")
@@ -3352,6 +3336,16 @@ pub fn visible_sql() -> String {
     let filter = state.filter.clone();
     let sort = state.sort;
     drop(state);
+    // A suppressed row is not part of what the list shows, so it is not part of
+    // what "Export visible" exports either (lane E).
+    let suppression = suppress::matcher();
+    let rows: Vec<PanelRow> = if suppression.is_empty() {
+        rows
+    } else {
+        rows.into_iter()
+            .filter(|row| !suppression.hidden(&row.sql))
+            .collect()
+    };
     let filtered = filter_rows(&rows, &filter, slow_threshold_ms);
     let cap = buffer_cap();
     let start = filtered.len().saturating_sub(cap);
@@ -3463,6 +3457,10 @@ impl Views for crate::Main {
             // so the plugin answers with empty chrome (`web/preview.html`
             // builds every control).
             crate::views::workbench::DIALOG_VIEW_ID => Ok(crate::views::workbench::render_dialog()),
+            // The suppression manager's page comes from `[[contributes.dialogs]]`
+            // too, and the host still asks for the view: a `NotFound` here would
+            // leave the dialog blank. Empty chrome, like the preview dialog.
+            suppress::VIEW_ID => Ok(View::new(Body::Html(String::new()))),
             other => Err(Error::NotFound(format!("view {other}"))),
         }
     }
@@ -3476,6 +3474,9 @@ impl Views for crate::Main {
             crate::views::workbench::DIALOG_VIEW_ID => {
                 crate::views::workbench::handle_dialog_event(event, ctx)
             }
+            // The suppression manager is a declared dialog (lane E): its page's
+            // messages and `closed` event arrive here, under its own id.
+            suppress::VIEW_ID => suppress::handle_event(event, ctx),
             other => Err(Error::NotFound(format!("view {other}"))),
         }
     }
@@ -6260,12 +6261,13 @@ public interface UserMapper {
         assert!(page.contains("item.setAttribute('data-sort', option.token)"));
         assert!(page.contains("post({ op: 'sort', sort: sortMode })"));
         assert!(page.contains("L.sortLabel"));
-        // The blocked popup lists the keys and clears them.
-        assert!(page.contains("id=\"blockedMenu\""));
-        assert!(page.contains("id=\"blockedList\""));
-        assert!(page.contains("id=\"blockedClear\""));
+        // The eye-off toolbar action opens the suppression manager (lane E) —
+        // it used to drop a muted-methods popup, replaced by the dialog.
+        assert!(page.contains("id=\"blockedBtn\""));
+        assert!(page.contains("post({ op: 'manage-suppress' })"));
+        assert!(!page.contains("id=\"blockedMenu\""), "the popup is gone");
+        // The muted-methods chip still offers a restore-all action.
         assert!(page.contains("post({ op: 'clear-blocked' })"));
-        assert!(page.contains("renderBlocked(state)"));
         // The group badges are clickable and post toggle-group with the kind.
         assert!(page.contains("badgeButton(dedupeText, 'dedupe', dedupeTitle"));
         assert!(page.contains("badgeButton(groupText, 'group', groupTitle"));
@@ -6372,9 +6374,10 @@ public interface UserMapper {
 
     #[test]
     fn b5_the_blocked_entry_points_stay_wired() {
-        // B5：屏蔽方法有两个入口（右键菜单项 + 工具栏 eye-off 的列表）。拦的是
+        // B5：屏蔽方法有两个入口（右键菜单项 + 工具栏 eye-off 的管理入口）。拦的是
         // 「删掉菜单项 / 删掉按行能力的启用条件 / 删掉后端分支」——任何一处被
-        // 删，入口就变成常亮或点了没反应的死按钮。
+        // 删，入口就变成常亮或点了没反应的死按钮。eye-off 现在打开屏蔽规则
+        // 管理对话框（车道 E），不再弹方法清单。
         let (_host, _guard) = test_host();
         let page = include_str!("../../web/log-panel.html");
         assert!(
@@ -6387,10 +6390,18 @@ public interface UserMapper {
             live_line(page, "enableItem('block-method', !!(row && row.focus_key))"),
             "the block-method item no longer follows the row's focus_key"
         );
+        assert!(
+            live_line(page, "post({ op: 'manage-suppress' })"),
+            "the eye-off action no longer opens the suppression manager"
+        );
         let source = include_str!("log_panel.rs");
         assert!(
             live_line(source, &dispatch_arm("block-method")),
             "the host no longer dispatches block-method"
+        );
+        assert!(
+            live_line(source, &dispatch_arm("manage-suppress")),
+            "the host no longer dispatches manage-suppress"
         );
     }
 
