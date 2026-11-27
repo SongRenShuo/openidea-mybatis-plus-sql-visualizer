@@ -27,6 +27,8 @@
  * `openidea.onMessage`.
  */
 
+import { into as highlightInto, installStyles } from './sql-highlight.js';
+
 /* The workbench markup. One template, both mount points: the panel page and the
    standalone page show exactly the same DOM. Parsed with `DOMParser` and
    imported node by node — the markup never goes through an HTML-string sink,
@@ -350,6 +352,10 @@ const PV_LABEL_KEYS = {
 const PV_TAB_KEYS = { sql: 'tabSql', raw: 'tabRaw', columns: 'tabColumns' };
 const PV_TAB_ORDER = ['sql', 'raw', 'columns'];
 const PV_MODES = ['normal', 'formatted', 'keyword_wrap', 'vertical'];
+/* Above this length the colouring is skipped: one span per token on a huge
+   statement costs more than the colour is worth, and the panel must stay
+   responsive (the input accepts up to 100,000 characters). */
+const PV_HIGHLIGHT_MAX_CHARS = 20000;
 
 /* ---- Display-only SQL shaping (lane L45) --------------------------------
  *
@@ -647,6 +653,9 @@ export function mountPreview(root, deps) {
     parsed.body.removeChild(parsed.body.firstChild);
   }
   root.appendChild(staged);
+  // The token classes' colours are the host's semantic variables; the shared
+  // module injects the stylesheet once per document.
+  installStyles(doc);
 
   const preview = {
     model: {}, labels: {}, dialect: {}, tab: 'sql', mode: 'normal',
@@ -734,9 +743,15 @@ export function mountPreview(root, deps) {
   }
 
   /** Paints one SQL text as coloured runs. The token texts are the exact input,
-   *  so selecting or copying the rendered page yields the SQL. */
-  function paintSql(body, text) {
-    body.textContent = text;
+   *  so selecting or copying the rendered page yields the SQL. The shared
+   *  lexer is the log list's own (`sql-highlight.js`); past the limit the text
+   *  stays plain so a huge statement never builds thousands of nodes. */
+  function paintSql(body, text, highlight) {
+    if (!highlight) {
+      body.textContent = text;
+      return;
+    }
+    highlightInto(body, text, PV_HIGHLIGHT_MAX_CHARS);
   }
 
   /** Line numbers, one per painted line. The code pane never wraps, so the
@@ -744,6 +759,7 @@ export function mountPreview(root, deps) {
   function paintGutter(text) {
     const gutter = node('pvGutter');
     if (!gutter) { return; }
+    gutter.hidden = !text;
     const lines = text ? text.split('\n') : [];
     let out = '';
     for (let i = 0; i < lines.length; i++) {
@@ -792,7 +808,10 @@ export function mountPreview(root, deps) {
       }
     }
     body.className = placeholder ? 'pv-tabbody pv-placeholder' : 'pv-tabbody';
-    paintSql(body, text);
+    // Only the SQL tab of a real render is coloured: 原文 / 列信息 stay verbatim,
+    // and a placeholder or an unresolved reason is plain prose.
+    const highlight = preview.tab === 'sql' && !!m.sql && !placeholder;
+    paintSql(body, text, highlight);
     paintGutter(placeholder ? '' : text);
     body.scrollTop = 0;
     pvSig = signature();

@@ -2589,6 +2589,28 @@ mod tests {
             "the SQL area has a line-number gutter"
         );
         assert!(
+            module.contains("paintGutter(placeholder ? '' : text);"),
+            "the gutter follows the painted lines"
+        );
+        assert!(
+            module.contains(
+                "import { into as highlightInto, installStyles } from './sql-highlight.js'"
+            ),
+            "the SQL colouring is the shared lexer, not a second copy"
+        );
+        assert!(
+            module.contains("installStyles(doc);"),
+            "the token styles are injected once per document"
+        );
+        assert!(
+            module.contains("highlightInto(body, text, PV_HIGHLIGHT_MAX_CHARS)"),
+            "the SQL tab is painted from the shared tokens"
+        );
+        assert!(
+            module.contains("PV_HIGHLIGHT_MAX_CHARS"),
+            "very large statements stay plain to keep the panel responsive"
+        );
+        assert!(
             module.contains("id=\"pvTabBody\""),
             "the SQL body is the code pane"
         );
