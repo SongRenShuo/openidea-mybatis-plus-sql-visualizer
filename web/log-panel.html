@@ -37,6 +37,13 @@
     .iconbtn:focus-visible { border-color: var(--openidea-accent); outline: none; }
     .iconbtn.on { background: var(--openidea-bg-selected); color: var(--openidea-fg-strong); }
     .iconbtn.run { color: var(--openidea-success); }
+    /* A disabled action greys out like the platform's ActionToolbar: the ink
+       drops to the muted grey and the glyph fades, but the button keeps its
+       footprint so the row does not reflow. */
+    .iconbtn[disabled], .iconbtn[aria-disabled="true"] {
+      color: var(--openidea-fg-muted); opacity: 0.45; cursor: default;
+    }
+    .iconbtn[disabled]:hover, .iconbtn[aria-disabled="true"]:hover { background: none; }
     .iconbtn svg { width: 16px; height: 16px; display: block; fill: none; }
     /* Toolbar layout (L32): the icon actions on the left, then a spacer so the
        slow count, the SQL-type selector and the dedupe box keep their width at
@@ -143,6 +150,17 @@
       padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap;
     }
     .menu-item:hover { background: var(--openidea-bg-hover); }
+    /* The sort popup is a radio list, the way the reference builds it
+       (`JRadioButtonMenuItem`): the checked row carries a check mark and the
+       popup keeps the widest label's width. */
+    .radiolist { min-width: 160px; }
+    .radiolist .menu-item { padding-left: 2px; }
+    .radiolist .check {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; flex: 0 0 14px; font-size: 12px; line-height: 1;
+      color: var(--openidea-link);
+    }
+    .radiolist .menu-item.on { background: var(--openidea-bg-selected); }
     .menu-sep { height: 1px; background: var(--openidea-border); margin: 4px 2px; }
     .menu-footer { display: flex; justify-content: space-between; padding: 2px 4px; }
     .linkbtn {
@@ -232,7 +250,11 @@
       display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start;
       gap: 8px; font-size: 11px; color: var(--openidea-fg-muted);
     }
-    .meta .seq { color: var(--openidea-fg-strong); font-weight: 600; font-family: var(--openidea-font-mono, monospace); }
+    /* The whole metadata line is the reference's `secondaryAttributes`
+       (`MpvsUiColors.META_GRAY`, plain style) — including `#seq`, which the
+       reference prints grey and unbolded. Only the duration, the database badge
+       and the group badges carry their own ink. */
+    .meta .seq { font-family: var(--openidea-font-mono, monospace); }
     .meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }
     .meta .dur.hot { color: var(--openidea-warning); font-weight: 600; }
     .meta .part { white-space: nowrap; }
@@ -253,10 +275,15 @@
       margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
       font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--openidea-danger);
     }
+    /* Empty state: the platform draws a JList's `StatusText` as muted, plain,
+       centred text; lane A matches that (grey ink, no italic, no bold) and keeps
+       the reference's two lines — what to do, then the shorter guidance. */
     .empty {
-      flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
-      color: var(--openidea-fg-muted); padding: 16px;
+      flex: 1 1 auto; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 4px;
+      color: var(--openidea-fg-muted); padding: 16px; text-align: center;
     }
+    .empty .hint { font-size: 12px; opacity: 0.9; }
 
     /* Bottom status: one muted 11px line, segments separated by a middot. */
     .status {
@@ -472,27 +499,22 @@
 
   <div class="panel" id="panelLogs">
   <div class="actionbar">
-    <!-- Capture start/stop (L26): one button, the icon follows the agent
-         connection state reported by the host. First of the reference
-         actions (L32). -->
+    <!-- The reference action group (`SqlLogPanel.toolbarGroup`), in its exact
+         order: capture, [capture-pause], clear, settings, block list, search,
+         quick preview, scroll to end, sort, community, help. The icons below are
+         the reference's own `icons/toolbar/*.svg` artwork (Apache-2.0, see
+         NOTICE), inlined because the package only ships files a manifest entry
+         names and the toolbar SVGs are not (docs/registration/L19.md). Ink goes
+         through the host variables so light and dark themes both read right.
+         The capture-pause action is in the reference group but its `update()`
+         sets `isVisible = false` unconditionally (AgentPauseAction, 方案 B), so
+         there is no pause button here either. -->
     <button id="captureBtn" class="iconbtn" type="button">
       <svg id="captureRunIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/>
+        <path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="var(--openidea-success)" fill-opacity="0.12" stroke="var(--openidea-success)"/>
       </svg>
       <svg id="captureStopIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden>
-        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="var(--openidea-danger)"/>
-      </svg>
-    </button>
-    <!-- Pause / resume (L26) in the slot the reference gives its capture-pause
-         action: the only entry point to "stop refreshing while I read". -->
-    <button id="pauseBtn" class="iconbtn" type="button">
-      <svg id="pauseIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <rect x="3.5" y="2.5" width="3" height="11" rx="0.5" stroke="currentColor"/>
-<rect x="9.5" y="2.5" width="3" height="11" rx="0.5" stroke="currentColor"/>
-      </svg>
-      <svg id="resumeIcon" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden>
-        <rect x="1.5" y="2.5" width="3" height="11" rx="0.5" fill="currentColor" stroke="currentColor"/>
-<path d="M14.3563 7.2593C14.8171 7.6581 14.8171 8.37279 14.3563 8.77158L9.15752 13.2709C8.50981 13.8315 7.50312 13.3714 7.50312 12.5148L7.50312 3.51611C7.50312 2.65951 8.50982 2.1994 9.15753 2.75997L14.3563 7.2593Z" fill="currentColor" stroke="currentColor"/>
+        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="var(--openidea-danger)" fill-opacity="0.12" stroke="var(--openidea-danger)"/>
       </svg>
     </button>
     <button id="clearBtn" class="iconbtn" type="button">
@@ -557,15 +579,22 @@
 <path d="M11 7.5H14C14.2761 7.5 14.5 7.72386 14.5 8V10C14.5 10.2761 14.2761 10.5 14 10.5H11C10.7239 10.5 10.5 10.2761 10.5 10V8C10.5 7.72386 10.7239 7.5 11 7.5Z" stroke="currentColor"/>
       </svg>
     </button>
-    <!-- Sort by duration (L26): toggles time order / duration order. -->
-    <button id="sortBtn" class="iconbtn" type="button">
-      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M7.5 3.5H14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Sort (lane A): the reference's `sortModeAction` — clicking the icon
+         drops a radio popup with the seven `SortMode`s, the current one checked
+         (`JRadioButtonMenuItem`). The button itself carries no text: the tooltip
+         reads `Sort: <current mode>`, exactly like the reference action's
+         `description`. -->
+    <span class="menuanchor">
+      <button id="sortBtn" class="iconbtn" type="button" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M7.5 3.5H14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M9.5 8H14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M11.5 12.5H14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
 <path fill-rule="evenodd" clip-rule="evenodd" d="M7.85355 9.85355C8.04881 9.65829 8.04881 9.34171 7.85355 9.14645C7.65829 8.95118 7.34171 8.95118 7.14645 9.14645L5 11.2929L5 3.5C5 3.22386 4.77615 3 4.5 3C4.22386 3 4 3.22386 4 3.5L4 11.2929L1.85355 9.14645C1.65829 8.95118 1.34171 8.95118 1.14645 9.14645C0.951184 9.34171 0.951184 9.65829 1.14645 9.85355L4.14644 12.8536C4.23693 12.944 4.36193 13 4.5 13C4.63885 13 4.76447 12.9434 4.85507 12.852L7.85355 9.85355Z" fill="currentColor"/>
-      </svg>
-    </button>
+        </svg>
+      </button>
+      <div id="sortMenu" class="menu radiolist" role="menu" hidden></div>
+    </span>
     <!-- Community (L32): the reference toolbar's 交流群 entry. -->
     <button id="communityBtn" class="iconbtn" type="button">
       <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
@@ -842,8 +871,13 @@
       // produces so a re-render does not look like a user scroll.
       var follow = true;
       var suppressScroll = false;
-      // Display order (L26): 'time' (capture order) or 'duration'.
-      var sortMode = 'time';
+      // Display order (lane A): one of the seven sort tokens the host lists in
+      // `labels.sortOptions`; `time_asc` (capture order) is the default, like
+      // the reference's `SortMode.TIME_ASC`.
+      var sortMode = 'time_asc';
+      // Capture retry (lane A): the interval that re-dials a capture start the
+      // agent refused, or null when nothing is waiting.
+      var captureRetryTimer = null;
 
       function $(id) { return document.getElementById(id); }
       function post(message) {
@@ -882,6 +916,47 @@
           case 'drop': return L.typeDrop;
           default: return token;
         }
+      }
+
+      // Sort options (lane A) ----------------------------------------------
+      // The seven modes and their labels come from the host
+      // (`labels.sortOptions`), in the reference's `sortOptions()` order; the
+      // page never hard-codes the list.
+      function sortOptionLabel(token) {
+        var options = L.sortOptions || [];
+        for (var i = 0; i < options.length; i++) {
+          if (options[i].token === token) { return options[i].label || token; }
+        }
+        return token;
+      }
+      // The radio popup the reference builds from `JRadioButtonMenuItem`s: the
+      // current mode carries the check mark. Rebuilding in place keeps an open
+      // popup open across state pushes.
+      function renderSortMenu() {
+        var menu = $('sortMenu');
+        if (!menu) { return; }
+        var wasOpen = !menu.hidden;
+        while (menu.firstChild) { menu.removeChild(menu.firstChild); }
+        var options = L.sortOptions || [];
+        for (var i = 0; i < options.length; i++) {
+          (function (option) {
+            var item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'menu-item' + (option.token === sortMode ? ' on' : '');
+            item.setAttribute('role', 'menuitemradio');
+            item.setAttribute('aria-checked', option.token === sortMode ? 'true' : 'false');
+            item.setAttribute('data-sort', option.token);
+            var check = document.createElement('span');
+            check.className = 'check';
+            check.textContent = option.token === sortMode ? '\u2713' : '';
+            item.appendChild(check);
+            var text = document.createElement('span');
+            text.textContent = option.label || option.token;
+            item.appendChild(text);
+            menu.appendChild(item);
+          })(options[i]);
+        }
+        menu.hidden = !wasOpen;
       }
 
       function postFilter() {
@@ -941,15 +1016,41 @@
         $('dedupe').checked = ui.dedupe;
         $('caseBtn').classList.toggle('on', ui.matchCase);
         $('regexBtn').classList.toggle('on', ui.regex);
-        // Display preferences (L26): the host mirrors the page's last report,
-        // so a push never silently changes what the user picked.
-        sortMode = (state.sort === 'duration') ? 'duration' : 'time';
+        // Display preferences (lane A): the host mirrors the page's last report,
+        // so a push never silently changes what the user picked. A different
+        // mode re-renders the popup so its check mark follows the state (the
+        // first push also settles the menu, which updateLabels drew before this
+        // snapshot arrived).
+        var mode = state.sort || 'time_asc';
+        if (mode !== sortMode) {
+          sortMode = mode;
+          renderSortMenu();
+        }
         if (state.status && typeof state.status.follow === 'boolean') {
           follow = state.status.follow;
         }
         // The scroll-to-bottom tooltip names the follow state; the aria-label
         // (set in updateLabels) stays the action name.
         $('scrollEndBtn').title = follow ? (L.followOn || '') : (L.scrollEnd || '');
+        syncCaptureRetry(state);
+      }
+
+      // Capture retry (lane A): the platform gives the plugin a WebSocket
+      // client only, so the plugin dials the agent and the target application
+      // has to be up first (the reference IDE side owns a listening socket).
+      // A refused start is a waiting state; this ticks `capture-retry` every
+      // 2 s until the host clears it. `on-schedule` cannot do this: the host's
+      // shortest schedule is 60 s.
+      function syncCaptureRetry(state) {
+        var waiting = !!(state.status && state.status.capture_waiting);
+        if (waiting && !captureRetryTimer) {
+          captureRetryTimer = setInterval(function () {
+            post({ op: 'capture-retry' });
+          }, 2000);
+        } else if (!waiting && captureRetryTimer) {
+          clearInterval(captureRetryTimer);
+          captureRetryTimer = null;
+        }
       }
 
       // Icon buttons carry no text: the label lives in title + aria-label so
@@ -1011,15 +1112,6 @@
       }
 
       function updateLabels() {
-        var paused = !!(current && current.status && current.status.paused);
-        var pauseText = paused ? (L.resume || 'Resume') : (L.pause || 'Pause');
-        // Pause/resume: the glyph swaps between the pause and resume icons.
-        var pauseBtn = $('pauseBtn');
-        labelIconButton(pauseBtn, pauseText);
-        pauseBtn.classList.toggle('on', paused);
-        pauseBtn.classList.toggle('run', paused);
-        $('pauseIcon').hidden = paused;
-        $('resumeIcon').hidden = !paused;
         labelIconButton($('clearBtn'), L.clear || 'Clear');
         // Capture (L26): the icon follows the agent connection state — a run
         // glyph while disconnected (click starts), a stop glyph while connected.
@@ -1031,15 +1123,12 @@
         captureBtn.classList.toggle('run', !connected);
         $('captureRunIcon').hidden = connected;
         $('captureStopIcon').hidden = !connected;
-        // Sort (L26): the label names the mode the list is *going to*, the
-        // tooltip the mode it is actually in.
-        var sorted = (current && current.sort === 'duration') ? 'duration' : 'time';
-        labelIconButton($('sortBtn'), sorted === 'duration'
-          ? (L.sortTime || 'Sort by time')
-          : (L.sortDuration || 'Sort by duration'));
-        $('sortBtn').title = sorted === 'duration'
-          ? (L.sortDurationTitle || '')
-          : (L.sortTimeTitle || '');
+        // Sort (lane A): the button is a popup opener, so its tooltip states the
+        // mode the list is in — the reference action's `Sort: <label>`
+        // description. The popup itself is rebuilt from the host's label list.
+        var sorted = (current && current.sort) || sortMode || 'time_asc';
+        labelIconButton($('sortBtn'), (L.sortLabel || 'Sort:') + ' ' + sortOptionLabel(sorted));
+        renderSortMenu();
         labelIconButton($('scrollEndBtn'), L.scrollEnd || 'Scroll to bottom');
         labelIconButton($('blockedBtn'), L.blocked || 'Blocked methods');
         labelIconButton($('settingsBtn'), L.settings || 'Settings');
@@ -1073,9 +1162,27 @@
         setText($('ctxMenu').querySelector('[data-act="block-method"]'), L.menuBlockMethod);
         setText($('ctxMenu').querySelector('[data-act="send-sql-to-java"]'), L.menuSendSqlToJava);
         setText($('ctxMenu').querySelector('[data-act="send-log-to-sql"]'), L.menuSendLogToSql);
-        setText($('empty'), L.empty);
+        renderEmpty();
         updateTabLabels();
         updateTypeButton();
+      }
+
+      // Empty state (lane A): the reference's `log.panel.empty` is two lines of
+      // guidance in the platform's muted `StatusText` ink — the short line, then
+      // the longer hint. Both come from the host; nothing is hard-coded here.
+      function renderEmpty() {
+        var host = $('empty');
+        if (!host) { return; }
+        while (host.firstChild) { host.removeChild(host.firstChild); }
+        var head = document.createElement('div');
+        head.textContent = L.empty || '';
+        host.appendChild(head);
+        if (L.emptyHint) {
+          var hint = document.createElement('div');
+          hint.className = 'hint';
+          hint.textContent = L.emptyHint;
+          host.appendChild(hint);
+        }
       }
 
       function updateTabLabels() {
@@ -1515,6 +1622,11 @@
         var right;
         if (s.paused) {
           right = L.paused || '';
+        } else if (s.capture_waiting) {
+          // A refused capture start (lane A): the plugin is dialling, the target
+          // application is not up yet. The port is the actionable detail.
+          right = (L.statusCaptureWaiting || 'Waiting for the target application (port {port})')
+            .replace('{port}', String(s.capture_waiting.port || ''));
         } else if (s.follow === false) {
           right = L.followOff || '';
         } else if (s.agent_connected) {
@@ -1934,6 +2046,13 @@
         $('settingsBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
       }
 
+      // Sort popup (lane A): the reference's `sortModeAction` drops its radio
+      // menu from the action's own component.
+      function openSortMenu(open) {
+        $('sortMenu').hidden = !open;
+        $('sortBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+      }
+
       function renderBlocked(state) {
         var list = $('blockedList');
         while (list.firstChild) { list.removeChild(list.firstChild); }
@@ -2177,7 +2296,6 @@
       });
       $('caseBtn').addEventListener('click', function () { ui.matchCase = !ui.matchCase; this.classList.toggle('on', ui.matchCase); postFilter(); });
       $('regexBtn').addEventListener('click', function () { ui.regex = !ui.regex; this.classList.toggle('on', ui.regex); postFilter(); });
-      $('pauseBtn').addEventListener('click', function () { post({ op: 'toggle-pause' }); });
       $('clearBtn').addEventListener('click', function () { post({ op: 'clear' }); });
 
       // Toolbar actions (lane L26).
@@ -2190,9 +2308,23 @@
         $('list').scrollTop = $('list').scrollHeight;
         post({ op: 'scroll-end' });
       });
-      $('sortBtn').addEventListener('click', function () {
-        sortMode = sortMode === 'duration' ? 'time' : 'duration';
-        post({ op: 'sort', sort: sortMode });
+      $('sortBtn').addEventListener('click', function (event) {
+        event.stopPropagation();
+        renderSortMenu();
+        openSortMenu($('sortMenu').hidden);
+      });
+      // One radio item per mode: picking one applies it and closes the popup.
+      $('sortMenu').addEventListener('click', function (event) {
+        event.stopPropagation();
+        var item = event.target.closest('[data-sort]');
+        if (!item) { return; }
+        var next = item.getAttribute('data-sort');
+        openSortMenu(false);
+        if (next && next !== sortMode) {
+          sortMode = next;
+          post({ op: 'sort', sort: sortMode });
+        }
+        renderSortMenu();
       });
       $('blockedBtn').addEventListener('click', function (event) {
         event.stopPropagation();
@@ -2270,7 +2402,7 @@
         closeCtx();
       });
 
-      document.addEventListener('click', function () { openTypeMenu(false); openBlockedMenu(false); openSettingsMenu(false); closeCtx(); });
+      document.addEventListener('click', function () { openTypeMenu(false); openBlockedMenu(false); openSettingsMenu(false); openSortMenu(false); closeCtx(); });
       document.addEventListener('keydown', function (event) {
         // Ctrl+Tab / Ctrl+Shift+Tab cycle the four tabs. The IDE may consume
         // this chord before the page sees it; the mouse always works.
@@ -2293,6 +2425,7 @@
           if (!$('ctxMenu').hidden) { closeCtx(); return; }
           if (!$('settingsMenu').hidden) { openSettingsMenu(false); return; }
           if (!$('blockedMenu').hidden) { openBlockedMenu(false); return; }
+          if (!$('sortMenu').hidden) { openSortMenu(false); return; }
           if (!$('typeMenu').hidden) { openTypeMenu(false); return; }
           if (!$('searchRow').hidden) {
             $('searchRow').hidden = true;
