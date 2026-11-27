@@ -748,6 +748,12 @@ pub struct WsConsumer {
     queue: FrameQueue,
     bad_frames: u64,
     closed: bool,
+    /// Frames traced to the IDE log so far. The host forwards inbound frames to
+    /// plugins only as **binary** messages (`crates/ide-host/src/plugins/
+    /// websocket.rs`: `Message::Text` falls through to `_ => {}`), so a peer
+    /// that writes text is invisible here and the panel just stays empty. The
+    /// first few frames with their `cmd` make that visible instead of silent.
+    traced: usize,
 }
 
 impl WsConsumer {
@@ -770,7 +776,40 @@ impl WsConsumer {
             queue: FrameQueue::new(),
             bad_frames: 0,
             closed: false,
+            traced: 0,
         })
+    }
+
+    /// Writes the first frames of a session to the IDE log: which `cmd`, how
+    /// many bytes.
+    ///
+    /// The host hands a plugin only **binary** inbound messages, so a peer that
+    /// writes text leaves no trace in the panel and no error anywhere. Logging
+    /// the first frames makes "the socket is up and nothing arrives" read as
+    /// "frames were text, the host dropped them" instead of silence. Twelve
+    /// frames per session is enough to see the handshake; the rest stay quiet.
+    fn trace_frame(&mut self, decoded: &FrameDecode, len: usize) {
+        const TRACE_FRAMES: usize = 12;
+        if self.traced > TRACE_FRAMES {
+            return;
+        }
+        self.traced += 1;
+        if self.traced > TRACE_FRAMES {
+            host::log(
+                openidea_plugin::LogLevel::Warn,
+                "capture.ws: first 12 frames traced; later frames are not logged",
+            );
+            return;
+        }
+        let label = match decoded {
+            FrameDecode::Event(_) => "event".to_owned(),
+            FrameDecode::Control { cmd } => format!("cmd {cmd}"),
+            FrameDecode::Bad { reason } => format!("bad: {reason}"),
+        };
+        host::log(
+            openidea_plugin::LogLevel::Warn,
+            &format!("capture.ws frame #{}: {label} ({len} bytes)", self.traced),
+        );
     }
 
     pub fn endpoint(&self) -> &WsEndpoint {
@@ -792,7 +831,16 @@ impl WsConsumer {
         // still catches up inside one tick.
         let per_drain = drain_request(drain_limit);
         for _ in 0..MAX_DRAIN_ROUNDS {
-            let batch = self.socket.drain(per_drain)?;
+            let batch = match self.socket.drain(per_drain) {
+                Ok(batch) => batch,
+                Err(error) => {
+                    // The host answers `unknown WebSocket connection` once the
+                    // connection is gone. Keeping the session "open" would leave
+                    // the panel's tick polling a dead socket twice a second.
+                    self.closed = true;
+                    return Err(WsError::from(error));
+                }
+            };
             let full = batch.messages.len() as u32 >= per_drain;
             for message in batch.messages {
                 let _ = self.queue.push(message);
@@ -813,28 +861,32 @@ impl WsConsumer {
                 break;
             };
             match std::str::from_utf8(&frame) {
-                Ok(text) => match decode_frame(text) {
-                    FrameDecode::Event(event) => outcome.events.push(event),
-                    FrameDecode::Control { cmd } => {
-                        // The heartbeat carries the agent's own counters, which is
-                        // the only way to tell "hooks never fired" from "the
-                        // session stopped" when no SQL arrives.
-                        if cmd == CMD_HEARTBEAT
-                            && let Some((_, body)) = decode_envelope(text)
-                            && let Some(health) = AgentHealth::from_body(&body)
-                        {
-                            outcome.health = Some(health);
+                Ok(text) => {
+                    let decoded = decode_frame(text);
+                    self.trace_frame(&decoded, frame.len());
+                    match decoded {
+                        FrameDecode::Event(event) => outcome.events.push(event),
+                        FrameDecode::Control { cmd } => {
+                            // The heartbeat carries the agent's own counters, which is
+                            // the only way to tell "hooks never fired" from "the
+                            // session stopped" when no SQL arrives.
+                            if cmd == CMD_HEARTBEAT
+                                && let Some((_, body)) = decode_envelope(text)
+                                && let Some(health) = AgentHealth::from_body(&body)
+                            {
+                                outcome.health = Some(health);
+                            }
+                            outcome.controls.push(cmd);
                         }
-                        outcome.controls.push(cmd);
+                        FrameDecode::Bad { reason } => {
+                            self.bad_frames += 1;
+                            host::log(
+                                openidea_plugin::LogLevel::Warn,
+                                &format!("capture.ws bad frame: {reason}"),
+                            );
+                        }
                     }
-                    FrameDecode::Bad { reason } => {
-                        self.bad_frames += 1;
-                        host::log(
-                            openidea_plugin::LogLevel::Warn,
-                            &format!("capture.ws bad frame: {reason}"),
-                        );
-                    }
-                },
+                }
                 Err(err) => {
                     self.bad_frames += 1;
                     host::log(

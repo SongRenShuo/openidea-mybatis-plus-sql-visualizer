@@ -281,6 +281,13 @@ pub fn connect(project: &Project, url: &str) -> Result<u64, BridgeError> {
     session
         .consumer
         .send_control(CMD_CONFIG, "{\"disabled\":false}")?;
+    // Logged because the agent stops capture when no CONFIG arrives, and the
+    // symptom (an empty panel, a healthy socket) reads identically whether the
+    // CONFIG went out or not. This line lets a reader rule it in or out.
+    host::log(
+        LogLevel::Warn,
+        "capture: CONFIG sent (cmd 3, disabled=false)",
+    );
     let id = session.consumer.socket_id();
     *guard = Some(session);
     Ok(id)

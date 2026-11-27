@@ -596,6 +596,9 @@ pub(super) fn capture_poll() -> Result<(), Error> {
                 openidea_plugin::LogLevel::Warn,
                 &format!("capture: {} {}", error.message_key(), error.detail()),
             );
+            // Tell the page the socket is gone: its tick stops on the next
+            // state push, instead of retrying a dead connection twice a second.
+            let _ = push_state();
         }
     }
     Ok(())

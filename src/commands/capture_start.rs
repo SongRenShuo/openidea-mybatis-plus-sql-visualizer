@@ -76,6 +76,11 @@ fn start(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
                 "-- agent: start the JVM with `port={port}`; the agent does not report on port 0 [{}]",
                 bridge::KEY_GUIDANCE
             );
+            // The page starts its drain tick only once a state push tells it the
+            // socket is up. The command may be run from the palette rather than
+            // the panel's button, and then nothing else would push: frames would
+            // arrive into the host's queue with no poll asking for them.
+            let _ = crate::views::log_panel::push_state();
             Ok(out)
         }
         Err(BridgeError::AlreadyConnected) => {
@@ -165,6 +170,7 @@ mod tests {
     #[test]
     fn commands_capture_start_rejects_an_invalid_port() {
         let host = MockHost::install();
+        // `run` now pushes the panel state; `test_guard()` already holds that lock.
         let _guard = crate::capture::bridge::test_guard();
         let err = run(&host.invocation(), Some("not-a-port")).unwrap_err();
         assert!(
@@ -180,6 +186,7 @@ mod tests {
     #[test]
     fn commands_capture_start_uses_the_setting_when_no_argument_is_given() {
         let host = MockHost::install();
+        // `run` now pushes the panel state; `test_guard()` already holds that lock.
         let _guard = crate::capture::bridge::test_guard();
         host.set_setting(bridge::PORT_SETTING, "17891");
         // The mock refuses the `ws://` dial, so this is the waiting path: the
@@ -197,6 +204,7 @@ mod tests {
         // The sandbox has no listening socket and the agent has to be up first:
         // a refused dial must not turn the click into an error.
         let host = MockHost::install();
+        // `run` now pushes the panel state; `test_guard()` already holds that lock.
         let _guard = crate::capture::bridge::test_guard();
         assert!(bridge::waiting().is_none(), "a clean baseline");
 
@@ -223,6 +231,7 @@ mod tests {
     #[test]
     fn retry_bumps_the_attempt_count_and_stays_quiet() {
         let host = MockHost::install();
+        // `run` now pushes the panel state; `test_guard()` already holds that lock.
         let _guard = crate::capture::bridge::test_guard();
         run(&host.invocation(), Some("17890")).unwrap();
         let before = host.output()[common::CHANNEL].clone();
@@ -240,6 +249,7 @@ mod tests {
     #[test]
     fn retry_without_a_pending_wait_is_a_no_op() {
         let host = MockHost::install();
+        // `run` now pushes the panel state; `test_guard()` already holds that lock.
         let _guard = crate::capture::bridge::test_guard();
         assert!(bridge::waiting().is_none());
         retry(&host.invocation()).unwrap();
@@ -249,6 +259,7 @@ mod tests {
     #[test]
     fn disconnect_clears_the_wait() {
         let host = MockHost::install();
+        // `run` now pushes the panel state; `test_guard()` already holds that lock.
         let _guard = crate::capture::bridge::test_guard();
         run(&host.invocation(), Some("17890")).unwrap();
         assert!(bridge::waiting().is_some());
