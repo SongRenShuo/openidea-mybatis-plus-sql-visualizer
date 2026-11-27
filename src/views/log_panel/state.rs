@@ -26,18 +26,39 @@ const MAX_BUFFER_CAP: i64 = 100_000;
 pub(super) const DISPLAY_MODE_SETTING: &str = "logs.displayMode";
 /// `log.showDuration` (lane L34): the row header's duration segment.
 pub(super) const SHOW_DURATION_SETTING: &str = "log.showDuration";
+/// `logs.crud.style` (lane L2): how the CRUD type is marked in a list row —
+/// a 3px left bar (default), a whole-row tint, or nothing.
+pub(super) const CRUD_STYLE_SETTING: &str = "logs.crud.style";
+
+/// Normalises `logs.crud.style` to its three tokens; an unknown stored value
+/// falls back to `bar` instead of leaving the list unmarked.
+///
+/// The key is declared by the settings lane (`logs.crud.*`); until it lands the
+/// key is absent and the default applies, so this lane never waits on it.
+pub fn crud_style(value: &str) -> &'static str {
+    match value {
+        "background" => "background",
+        "off" => "off",
+        _ => "bar",
+    }
+}
 
 /// Normalises `logs.displayMode` to its three tokens; an unknown stored value
 /// falls back to `keyword_wrap` instead of guessing a fold.
 ///
-/// The mapping from mode to statement lines lives in the page (`modeLineLimit`
-/// in `web/log-panel.html`): `single` 1 line, `multi` no fold, `keyword_wrap`
-/// the reference's three lines plus `… (+N)`. The state carries the token, so
-/// the page never re-reads the setting.
+/// The tokens are the reference's `SqlListDisplayMode` values: `single` (one
+/// summary line, 160 characters at most), `keyword_wrap` (one major clause per
+/// line, three lines at most) and `formatted` (the dialect formatter's full
+/// output, no cap). `multi` is the token this schema shipped before the lane
+/// renamed it; it maps onto `formatted` because its old meaning was "no fold,
+/// the whole statement" — never onto a different fold.
+///
+/// The display text itself is prepared in `rows::list_display_sql`, so the page
+/// renders exactly what the host resolved and never re-reads the setting.
 pub fn display_mode(value: &str) -> &'static str {
     match value {
         "single" => "single",
-        "multi" => "multi",
+        "formatted" | "multi" => "formatted",
         _ => "keyword_wrap",
     }
 }
@@ -464,11 +485,25 @@ mod tests {
     #[test]
     fn display_mode_normalises_the_setting() {
         // A stored value outside the enum falls back to the default instead of
-        // guessing a fold; the three tokens are what the page branches on.
+        // guessing a fold; the three tokens are what the list renderer branches
+        // on. `multi` is the pre-lane token for "no fold" and stays an alias of
+        // `formatted`, never of a different shape.
         assert_eq!(display_mode("single"), "single");
-        assert_eq!(display_mode("multi"), "multi");
         assert_eq!(display_mode("keyword_wrap"), "keyword_wrap");
+        assert_eq!(display_mode("formatted"), "formatted");
+        assert_eq!(display_mode("multi"), "formatted");
         assert_eq!(display_mode("weird"), "keyword_wrap");
+    }
+
+    #[test]
+    fn crud_style_normalises_the_setting() {
+        // The settings lane owns the key; this lane only consumes it and never
+        // turns a typo into "no marking at all".
+        assert_eq!(crud_style("bar"), "bar");
+        assert_eq!(crud_style("background"), "background");
+        assert_eq!(crud_style("off"), "off");
+        assert_eq!(crud_style("weird"), "bar");
+        assert_eq!(crud_style(""), "bar");
     }
 
     #[test]

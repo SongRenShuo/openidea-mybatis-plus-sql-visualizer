@@ -5,16 +5,18 @@
 //! sort orders, and the pure filter matcher.
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::{Mutex, OnceLock};
 
 use crate::core::log::{
     DuplicateGroup, EntryClass, LineSource, LogAnalysis, LogEntry, LogSources, NPlusOneGroup,
     SourceRef,
 };
+use crate::core::{dialect, format};
 use crate::indexer;
 
 use super::state::{Filter, SortMode};
 use super::suppress;
-use super::{SQL_DISPLAY_CHARS, format_epoch_ms, format_ms, truncate_chars};
+use super::{format_epoch_ms, format_ms};
 
 // ---------------------------------------------------------------------------
 // Model
@@ -197,12 +199,6 @@ impl PanelRow {
         }
     }
 
-    /// SQL truncated for the list; error rows have no SQL here (see
-    /// [`PanelRow::error_text`]).
-    pub fn display_sql(&self) -> String {
-        truncate_chars(&self.sql, SQL_DISPLAY_CHARS)
-    }
-
     /// The original line shown under an error row (empty for non-error rows).
     pub fn error_text(&self) -> String {
         if self.category == RowCategory::Error {
@@ -307,6 +303,196 @@ fn duration_asc_key(row: &PanelRow) -> f64 {
 fn duration_desc_key(row: &PanelRow) -> f64 {
     row.duration_ms.unwrap_or(f64::MIN)
 }
+// ---------------------------------------------------------------------------
+// List display text (`logs.displayMode`, L2)
+// ---------------------------------------------------------------------------
+
+/// `single` mode: the summary stops at the first newline or after this many
+/// characters, whichever comes first (the reference's `MAX_SUMMARY_LENGTH`).
+pub const LIST_SINGLE_CHARS: usize = 160;
+
+/// `keyword_wrap` mode: the list shows at most this many clause lines and
+/// counts the rest in a ` … (+N)` tail on the last one.
+pub const LIST_KEYWORD_WRAP_LINES: usize = 3;
+
+/// `keyword_wrap` mode: the statement is clipped at this many characters before
+/// formatting. The cap only affects line four and later (the list shows three),
+/// but it keeps the lexer's cost from growing with an unbounded `IN` list.
+pub const LIST_KEYWORD_WRAP_BUDGET: usize = 4096;
+
+/// The list's display text for one statement, as `(text, tail)`.
+///
+/// This is the reference's `prepareSqlForList` split into three modes:
+///
+/// - `single`: the first line, capped at [`LIST_SINGLE_CHARS`], `…` appended
+///   when anything was dropped; one line, always.
+/// - `keyword_wrap` (default): one major clause per line (the formatter's
+///   clause breaks, with its indented continuation lines joined back so a
+///   clause stays one line), capped at [`LIST_KEYWORD_WRAP_LINES`]; the tail
+///   states how many lines were hidden.
+/// - `formatted`: the full formatter output, no cap.
+///
+/// The returned text is what the page tokenises for colour; the tail is
+/// appended as a muted span after it, so it is not part of the SQL text.
+pub fn list_display_sql(sql: &str, mode: &str, dialect_name: &str) -> (String, String) {
+    if sql.is_empty() {
+        return (String::new(), String::new());
+    }
+    match mode {
+        "single" => (single_line_summary(sql), String::new()),
+        "formatted" => (formatted_sql(sql, dialect_name), String::new()),
+        _ => fold_keyword_wrap(&keyword_wrap_sql(sql, dialect_name)),
+    }
+}
+
+/// `single`: the reference's `summarizeSql` — first newline before the cap,
+/// otherwise the cap itself, with `…` whenever the statement was longer.
+pub fn single_line_summary(sql: &str) -> String {
+    let chars: Vec<char> = sql.chars().collect();
+    let newline = chars.iter().position(|ch| *ch == '\n');
+    let end = match newline {
+        // Strictly before the cap, exactly like `newlineIdx in 0 until MAX`.
+        Some(index) if index < LIST_SINGLE_CHARS => index,
+        _ => chars.len().min(LIST_SINGLE_CHARS),
+    };
+    if end < chars.len() {
+        let mut summary: String = chars[..end].iter().collect();
+        summary.push('…');
+        summary
+    } else {
+        sql.to_string()
+    }
+}
+
+/// Clips the keyword-wrap source at [`LIST_KEYWORD_WRAP_BUDGET`] characters,
+/// cutting at the last whitespace so an identifier is never split, and appends
+/// the reference's `…`.
+fn clip_keyword_wrap(sql: &str) -> String {
+    let chars: Vec<char> = sql.chars().collect();
+    if chars.len() <= LIST_KEYWORD_WRAP_BUDGET {
+        return sql.to_string();
+    }
+    let mut cut = LIST_KEYWORD_WRAP_BUDGET;
+    let mut scan = LIST_KEYWORD_WRAP_BUDGET - 1;
+    while scan > 0 && !chars[scan].is_whitespace() {
+        scan -= 1;
+    }
+    if scan > 0 {
+        cut = scan;
+    }
+    let mut clipped: String = chars[..cut].iter().collect();
+    clipped = clipped.trim_end().to_string();
+    clipped.push('…');
+    clipped
+}
+
+/// `keyword_wrap`: one major clause per line, compacted to clause level.
+///
+/// The formatter already decides where clauses start and which lines are
+/// continuations (indented); joining the continuations back onto their clause
+/// gives the reference's three-line cell (`SELECT … / FROM … / WHERE …`)
+/// without re-implementing the lexer or the casing rules.
+///
+/// DDL keeps the formatter's own layout: its column definitions are the line
+/// structure the keyword wrap is meant to expose, so joining them would
+/// collapse `CREATE TABLE` into one long line.
+pub fn keyword_wrap_sql(sql: &str, dialect_name: &str) -> String {
+    let clipped = clip_keyword_wrap(sql);
+    let fallback = dialect::all();
+    let dialect = dialect::by_name(dialect_name)
+        .or_else(|| fallback.first())
+        .expect("at least one dialect");
+    let formatted = format::format(&clipped, dialect);
+    if formatted.is_empty() {
+        return clipped;
+    }
+    if matches!(
+        first_keyword(sql).as_str(),
+        "CREATE" | "ALTER" | "DROP" | "TRUNCATE" | "RENAME"
+    ) {
+        return formatted;
+    }
+    let mut out = String::with_capacity(formatted.len());
+    for line in formatted.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if line.starts_with(char::is_whitespace) {
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str(trimmed);
+        } else {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(trimmed);
+        }
+    }
+    out
+}
+
+/// Caps a keyword-wrapped statement at [`LIST_KEYWORD_WRAP_LINES`] and states
+/// the hidden count as ` … (+N)`; the tail rides the third line, exactly like
+/// the reference's `visibleSqlLines`.
+pub fn fold_keyword_wrap(text: &str) -> (String, String) {
+    let lines: Vec<&str> = text.split('\n').collect();
+    if lines.len() <= LIST_KEYWORD_WRAP_LINES {
+        return (text.to_string(), String::new());
+    }
+    let hidden = lines.len() - LIST_KEYWORD_WRAP_LINES;
+    (
+        lines[..LIST_KEYWORD_WRAP_LINES].join("\n"),
+        format!(" … (+{hidden})"),
+    )
+}
+
+/// `formatted`: the dialect's full formatter output, no line cap.
+pub fn formatted_sql(sql: &str, dialect_name: &str) -> String {
+    let fallback = dialect::all();
+    let Some(dialect) = dialect::by_name(dialect_name).or_else(|| fallback.first()) else {
+        return sql.to_string();
+    };
+    format::format(sql, dialect)
+}
+
+/// Display text is a pure function of `(sql, mode, dialect)`, but the state is
+/// rebuilt on every push (capture ticks every 500 ms) and a long buffer would
+/// re-run the lexer for every row each time. The cache is bounded so a long
+/// session cannot grow it without limit.
+const LIST_TEXT_CACHE_LIMIT: usize = 512;
+
+fn list_text_cache() -> &'static Mutex<HashMap<String, (String, String)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// [`list_display_sql`] with the per-statement memo.
+pub fn cached_list_display_sql(sql: &str, mode: &str, dialect_name: &str) -> (String, String) {
+    if sql.is_empty() {
+        return (String::new(), String::new());
+    }
+    let key = format!("{mode}\u{0}{dialect_name}\u{0}{sql}");
+    {
+        let cache = list_text_cache()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(hit) = cache.get(&key) {
+            return hit.clone();
+        }
+    }
+    let value = list_display_sql(sql, mode, dialect_name);
+    let mut cache = list_text_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if cache.len() >= LIST_TEXT_CACHE_LIMIT {
+        cache.clear();
+    }
+    cache.insert(key, value.clone());
+    value
+}
+
 // ---------------------------------------------------------------------------
 // Row assembly
 // ---------------------------------------------------------------------------
@@ -1039,5 +1225,124 @@ mod tests {
             super::structure_fingerprint("SELECT * FROM t2024 WHERE id = 1"),
             super::structure_fingerprint("SELECT * FROM t2025 WHERE id = 1")
         );
+    }
+
+    // Lane L2: the three display modes are pure functions of (text, mode,
+    // dialect); these tests pin the boundaries the page relies on.
+
+    #[test]
+    fn single_line_summary_stops_at_the_first_newline_or_160_chars() {
+        // Short statement, no newline: verbatim.
+        assert_eq!(single_line_summary("SELECT 1"), "SELECT 1");
+        // A newline inside the budget wins over the cap.
+        assert_eq!(
+            single_line_summary("SELECT 1\nFROM t"),
+            "SELECT 1…",
+            "the summary states that more followed"
+        );
+        // Exactly 160 characters: nothing was dropped, so no ellipsis.
+        let exactly: String = "a".repeat(LIST_SINGLE_CHARS);
+        assert_eq!(single_line_summary(&exactly), exactly);
+        // One character past the cap: 160 characters plus the ellipsis.
+        let longer: String = "b".repeat(LIST_SINGLE_CHARS + 1);
+        let summary = single_line_summary(&longer);
+        assert_eq!(summary.chars().count(), LIST_SINGLE_CHARS + 1);
+        assert!(summary.ends_with('…'), "{summary}");
+        // A newline at exactly the cap index is not "before the cap", so the
+        // cap wins and the newline itself is not shown.
+        let mut newline_at_cap: String = "c".repeat(LIST_SINGLE_CHARS);
+        newline_at_cap.push('\n');
+        newline_at_cap.push_str("tail");
+        let summary = single_line_summary(&newline_at_cap);
+        assert_eq!(summary.chars().count(), LIST_SINGLE_CHARS + 1);
+        assert!(!summary.contains('\n'), "{summary}");
+    }
+
+    #[test]
+    fn keyword_wrap_puts_each_major_clause_on_its_own_line() {
+        let wrapped = keyword_wrap_sql("select id,name from t where a=1", "MySQL");
+        assert!(wrapped.starts_with("SELECT "), "{wrapped}");
+        assert!(wrapped.contains("\nFROM t"), "{wrapped}");
+        assert!(wrapped.contains("\nWHERE a = 1"), "{wrapped}");
+        assert_eq!(
+            wrapped.lines().count(),
+            3,
+            "SELECT/FROM/WHERE are three clause lines: {wrapped}"
+        );
+        // A join modifier stays on the JOIN line, like the reference; SELECT,
+        // FROM, LEFT JOIN and WHERE are four clause lines.
+        let joined = keyword_wrap_sql(
+            "select a.id from t1 a left join t2 b on a.id=b.id where a.x>0",
+            "MySQL",
+        );
+        assert!(joined.contains("LEFT JOIN t2 b"), "{joined}");
+        assert_eq!(joined.lines().count(), 4, "{joined}");
+        // A string literal that contains a clause keyword is not split.
+        let literal = keyword_wrap_sql("select id from t where note='from where' and x=1", "MySQL");
+        assert!(literal.contains("'from where'"), "{literal}");
+        assert!(!literal.contains("'from\n"), "{literal}");
+    }
+
+    #[test]
+    fn keyword_wrap_passes_ddl_through_the_formatter() {
+        // DDL has no DML clause keywords, and this port's formatter keeps a
+        // definition list on one line. The DDL branch therefore returns the
+        // formatter output untouched instead of joining lines that are not
+        // continuations (the reference's column-per-line layout is a deviation
+        // recorded for the lane, not something this function invents).
+        let ddl = keyword_wrap_sql(
+            "create table t (id int, name varchar(64), created_at datetime)",
+            "MySQL",
+        );
+        assert!(ddl.starts_with("CREATE TABLE"), "{ddl}");
+        assert_eq!(
+            ddl,
+            formatted_sql(
+                "create table t (id int, name varchar(64), created_at datetime)",
+                "MySQL"
+            )
+        );
+        assert!(ddl.contains("created_at"), "{ddl}");
+    }
+
+    #[test]
+    fn keyword_wrap_folds_after_three_lines_and_counts_the_rest() {
+        assert_eq!(
+            fold_keyword_wrap("SELECT a\nFROM t"),
+            ("SELECT a\nFROM t".to_string(), String::new())
+        );
+        assert_eq!(
+            fold_keyword_wrap("SELECT a\nFROM t\nWHERE a = 1"),
+            ("SELECT a\nFROM t\nWHERE a = 1".to_string(), String::new()),
+            "three lines are shown in full"
+        );
+        assert_eq!(
+            fold_keyword_wrap("SELECT a\nFROM t\nWHERE a = 1\nGROUP BY a\nORDER BY a"),
+            (
+                "SELECT a\nFROM t\nWHERE a = 1".to_string(),
+                " … (+2)".to_string()
+            ),
+            "the tail counts every hidden clause line"
+        );
+    }
+
+    #[test]
+    fn display_sql_modes_produce_the_expected_shape() {
+        let sql = "select id,name from t where a=1";
+        let (single, tail) = list_display_sql(sql, "single", "MySQL");
+        assert_eq!(tail, "");
+        assert!(!single.contains('\n'), "{single}");
+        let (wrapped, tail) = list_display_sql(sql, "keyword_wrap", "MySQL");
+        assert_eq!(tail, "", "three clauses fit without a tail");
+        assert_eq!(wrapped.lines().count(), 3, "{wrapped}");
+        let (formatted, tail) = list_display_sql(sql, "formatted", "MySQL");
+        assert_eq!(tail, "");
+        assert!(
+            formatted.lines().count() >= 4,
+            "the full formatter breaks the column list too: {formatted}"
+        );
+        // An unknown dialect falls back rather than dropping the text.
+        let (fallback, _) = list_display_sql(sql, "keyword_wrap", "NoSuchDialect");
+        assert!(fallback.contains("SELECT"), "{fallback}");
     }
 }

@@ -54,6 +54,12 @@
       display: flex; align-items: center; gap: 8px;
       position: relative; flex: 0 0 auto;
     }
+    /* Sort entry (L2): the icon plus the current mode's name, so the list's order
+       is readable without opening the popup. The button keeps the toolbar's
+       footprint on the left and only grows for its label. */
+    #sortBtn { width: auto; padding: 0 5px; gap: 3px; }
+    #sortBtnText { font-size: 11px; color: var(--openidea-fg-muted); white-space: nowrap; }
+    .iconbtn:hover #sortBtnText, .iconbtn.on #sortBtnText { color: inherit; }
     /* A popup drops from the button that opened it, not from the row's edge. */
     .menuanchor { position: relative; display: inline-flex; flex: 0 0 auto; }
     /* The type menu hangs off the right edge of the panel, so it never runs off
@@ -231,16 +237,50 @@
     }
 
     /* List — one JBList-style row per statement: a 3px type bar, a muted
-       metadata line and the statement itself, separated by 1px rules. */
+       metadata line and the statement itself, separated by 1px rules.
+
+       No alternating row colours and no hover plate: the reference list paints
+       one flat surface and only the selected row is filled. Vertical breathing
+       room is 12px per cell (8px in single-line mode, where a row holds one
+       statement line), and the 3px gap between the metadata line and the
+       statement is the reference's `EmptyBorder` split. */
     .list { flex: 1 1 auto; overflow: auto; }
     .row {
       display: flex; align-items: stretch; min-height: 40px;
       border-bottom: 1px solid var(--openidea-border); cursor: default;
     }
-    .row:hover { background: var(--openidea-bg-hover); }
     .row.sel { background: var(--openidea-bg-selected); }
-    .row .bar { width: 3px; flex: 0 0 3px; }
-    .row .content { flex: 1 1 auto; min-width: 0; padding: 5px 8px; }
+    /* CRUD marker (`logs.crud.style`, default `bar`): the type colour arrives
+       as the row's own `--row-type` custom property, so this stylesheet never
+       names a colour value. DDL (CREATE/DROP) uses a 3px-solid / 3px-gap dash
+       pattern in the same colour — the shape, not the hue, is what tells DDL
+       from DML, exactly like the reference. */
+    .row .bar {
+      width: 3px; flex: 0 0 3px;
+      background: var(--row-type, var(--openidea-fg-muted));
+    }
+    .row .bar.ddl {
+      background: repeating-linear-gradient(
+        to bottom,
+        var(--row-type, var(--openidea-fg-muted)) 0 3px,
+        transparent 3px 6px
+      );
+    }
+    /* `background`: the whole row carries a 14% tint of its type colour. A
+       selected row keeps the platform's selection fill instead. */
+    .list[data-crud="background"] .row:not(.sel) {
+      background: color-mix(in srgb, var(--row-type, var(--openidea-fg-muted)) 14%, var(--openidea-bg));
+    }
+    .list[data-crud="background"] .row .bar,
+    .list[data-crud="off"] .row .bar { display: none; }
+    .row .content { flex: 1 1 auto; min-width: 0; padding: 12px 9px 12px 5px; }
+    .list[data-mode="single"] .row .content { padding-top: 8px; padding-bottom: 8px; }
+    /* Selection paints the row's own ink over the syntax colours, exactly like
+       the reference renderer: every fragment is re-projected with the selection
+       foreground, so keyword/string/table colours disappear while the row is
+       selected. The declaration is scoped to the row's content, not to the
+       rest of the panel. */
+    .row.sel .content span { color: inherit; }
     /* The metadata line is a plain left-to-right flow, the way the reference
        panel draws it: #seq, time, duration, [db], (rows), ⨉N, ×N, N+1,
        [file:line], [Class#method]. Nothing is pushed to the right — the only
@@ -256,7 +296,19 @@
        and the group badges carry their own ink. */
     .meta .seq { font-family: var(--openidea-font-mono, monospace); }
     .meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }
-    .meta .dur.hot { color: var(--openidea-warning); font-weight: 600; }
+    /* Duration ink, four tiers against `log.slowThresholdMs` (T): `≥T` red,
+       `≥T/2` orange, `<T/2` green, unknown grey. An approximated duration (a
+       value the parser inferred from a neighbouring line) carries a `~`
+       prefix; the tier decision is the page's single `durationTier` helper. */
+    .meta .dur.slow { color: var(--openidea-danger); }
+    .meta .dur.warn { color: var(--openidea-warning); }
+    .meta .dur.ok { color: var(--openidea-success); }
+    .meta .dur.none { color: var(--openidea-fg-muted); }
+    /* Metadata ink (the reference's fragments): the database badge is cyan, an
+       MCP-sourced row violet, the affected-row count blue-grey. */
+    .meta .db { color: var(--openidea-info); }
+    .meta .mcp { color: color-mix(in srgb, var(--openidea-link) 50%, var(--openidea-danger)); }
+    .meta .rows { color: color-mix(in srgb, var(--openidea-link) 55%, var(--openidea-fg-muted)); }
     .meta .part { white-space: nowrap; }
     /* Provenance parts that filter on click (lane L28): the class#method and the
        request id behave like links without losing the row's own click. */
@@ -264,7 +316,7 @@
     .meta .focusable:hover { color: var(--openidea-link); text-decoration: underline; }
     .meta .focusable.on { color: var(--openidea-link); font-weight: 600; }
     .sql {
-      margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
+      margin-top: 3px; font-family: var(--openidea-font-ui, sans-serif);
       font-size: 12px; line-height: 1.4;
       white-space: pre-wrap; word-break: break-word; color: var(--openidea-fg);
     }
@@ -299,6 +351,56 @@
        only named while that channel is on. */
     .status #statusMid:empty::before, .status #statusRight:empty::before {
       content: none; margin: 0;
+    }
+
+    /* In-panel sheets (L2): a dimmed backdrop and a centred card inside the log
+       panel. The platform has no API to open the settings page or a dialog from
+       a packaged page, so these three entries explain themselves in place. */
+    .sheet {
+      position: fixed; inset: 0; z-index: 60;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .sheet-backdrop {
+      position: absolute; inset: 0;
+      background: color-mix(in srgb, var(--openidea-fg) 25%, transparent);
+    }
+    .sheet-panel {
+      position: relative; display: flex; flex-direction: column;
+      width: min(460px, calc(100% - 32px)); max-height: calc(100% - 48px);
+      background: var(--openidea-bg-elevated);
+      border: 1px solid var(--openidea-border); border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+    .sheet-head {
+      display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
+      padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--openidea-border);
+    }
+    .sheet-title { flex: 1 1 auto; font-weight: 600; font-size: 13px; }
+    .sheet-close {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; padding: 0; flex: 0 0 auto;
+      background: none; border: 1px solid transparent; border-radius: 3px;
+      color: var(--openidea-fg-muted); cursor: pointer; font-size: 14px; line-height: 1;
+    }
+    .sheet-close:hover { background: var(--openidea-bg-hover); color: var(--openidea-fg); }
+    .sheet-body {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 10px 12px 14px; overflow: auto; font-size: 12px;
+    }
+    .sheet-row { display: flex; align-items: baseline; gap: 12px; }
+    .sheet-row .k { flex: 0 0 46%; color: var(--openidea-fg-muted); }
+    .sheet-row .v { flex: 1 1 auto; min-width: 0; }
+    .sheet-line { line-height: 1.55; }
+    .sheet-hint {
+      color: var(--openidea-fg-muted); line-height: 1.55;
+      border-top: 1px dashed var(--openidea-border); padding-top: 8px;
+    }
+    .sheet-qr {
+      width: 96px; height: 96px; align-self: center;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px dashed var(--openidea-border); border-radius: 4px;
+      color: var(--openidea-fg-muted); font-size: 10px; text-align: center;
+      padding: 6px;
     }
 
     /* Context menu */
@@ -522,20 +624,14 @@
         <path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/>
       </svg>
     </button>
-    <!-- Settings (L32): the button opens a popup instead of firing the op on
-         the spot. The first item points at the settings page (L26 `settings`
-         op), the second is the shortcut cheat sheet (L26 `help` op). -->
-    <span class="menuanchor">
-      <button id="settingsBtn" class="iconbtn" type="button" aria-haspopup="true" aria-expanded="false">
+    <!-- Settings (L2): the gear opens the in-panel settings sheet (current
+         values + where to change them); it also keeps posting the existing
+         `settings` op as the output-channel fallback. -->
+    <button id="settingsBtn" class="iconbtn" type="button">
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
         <path fill-rule="evenodd" clip-rule="evenodd" d="M3.22655 4.36961C2.92233 4.76924 2.66735 5.20781 2.47037 5.67626L3.30992 7.0943C3.6406 7.65283 3.6406 8.34718 3.30992 8.9057L2.47037 10.3237C2.66736 10.7922 2.92233 11.2308 3.22656 11.6304L4.87261 11.6124C5.52165 11.6053 6.12297 11.9524 6.44133 12.5181L7.24899 13.953C7.49593 13.984 7.74792 14 8.00408 14C8.2602 14 8.51214 13.984 8.75904 13.9531L9.56671 12.5181C9.88507 11.9524 10.4864 11.6053 11.1354 11.6124L12.7816 11.6304C13.0858 11.2308 13.3408 10.7923 13.5377 10.3239L12.6981 8.9057C12.3674 8.34718 12.3674 7.65283 12.6981 7.0943L13.5377 5.67613C13.3408 5.20773 13.0858 4.76921 12.7816 4.36961L11.1354 4.38764C10.4864 4.39475 9.88507 4.04758 9.56671 3.48194L8.75904 2.04693C8.51214 2.01599 8.2602 2 8.00408 2C7.74792 2 7.49594 2.016 7.24899 2.04695L6.44133 3.48194C6.12297 4.04758 5.52165 4.39475 4.87261 4.38764L3.22655 4.36961ZM10.655 8.00001C10.655 9.46412 9.46811 10.651 8.004 10.651C6.5399 10.651 5.353 9.46412 5.353 8.00001C5.353 6.53591 6.5399 5.34902 8.004 5.34902C9.46811 5.34902 10.655 6.53591 10.655 8.00001ZM4.88356 3.3877C5.16752 3.39081 5.4306 3.23892 5.56988 2.99146L6.43817 1.44875C6.54914 1.25159 6.7401 1.1101 6.96387 1.07676C7.30327 1.0262 7.65062 1 8.00408 1C8.3575 1 8.7048 1.02619 9.04414 1.07674C9.26792 1.11007 9.45889 1.25157 9.56986 1.44873L10.4382 2.99146C10.5774 3.23892 10.8405 3.39081 11.1245 3.3877L12.8938 3.36832C13.1196 3.36585 13.3372 3.46012 13.4781 3.63661C13.9099 4.17766 14.2632 4.78416 14.5207 5.43884C14.6034 5.6491 14.5763 5.88489 14.4612 6.07931L13.5586 7.60376C13.4139 7.84811 13.4139 8.15189 13.5586 8.39625L14.4612 9.92069C14.5763 10.1151 14.6034 10.3509 14.5207 10.5612C14.2632 11.2158 13.9099 11.8223 13.4781 12.3634C13.3372 12.5399 13.1196 12.6342 12.8938 12.6317L11.1245 12.6123C10.8405 12.6092 10.5774 12.7611 10.4382 13.0085L9.56986 14.5513C9.45889 14.7484 9.26792 14.8899 9.04414 14.9233C8.7048 14.9738 8.3575 15 8.00408 15C7.65062 15 7.30327 14.9738 6.96387 14.9232C6.7401 14.8899 6.54914 14.7484 6.43817 14.5512L5.56988 13.0085C5.4306 12.7611 5.16752 12.6092 4.88356 12.6123L3.1144 12.6317C2.8886 12.6342 2.67096 12.5399 2.5301 12.3634C2.09822 11.8223 1.74489 11.2158 1.48738 10.561C1.40469 10.3508 1.43184 10.115 1.54695 9.92057L2.44942 8.39625C2.5941 8.15189 2.5941 7.84811 2.44942 7.60376L1.54695 6.07944C1.43184 5.88502 1.40469 5.64924 1.48738 5.43898C1.74489 4.78425 2.09822 4.1777 2.53009 3.63661C2.67096 3.46012 2.8886 3.36585 3.1144 3.36832L4.88356 3.3877ZM9.655 8.00001C9.655 8.91183 8.91582 9.65101 8.004 9.65101C7.09218 9.65101 6.353 8.91183 6.353 8.00001C6.353 7.08819 7.09218 6.34902 8.004 6.34902C8.91582 6.34902 9.655 7.08819 9.655 8.00001Z" fill="currentColor"/>
       </svg>
-      </button>
-      <div id="settingsMenu" class="menu" hidden>
-        <button id="settingsPageItem" class="menu-item" type="button"></button>
-        <button id="settingsHelpItem" class="menu-item" type="button"></button>
-      </div>
-    </span>
+    </button>
     <!-- Manage suppression rules (lane E): the reference's fifth toolbar action
          (`ManageSuppressAction`, eye-off icon) opens the `sqlv-suppress` dialog,
          where the rules are listed, created and deleted. The session's muted
@@ -585,7 +681,7 @@
 <path d="M9.5 8H14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M11.5 12.5H14.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
 <path fill-rule="evenodd" clip-rule="evenodd" d="M7.85355 9.85355C8.04881 9.65829 8.04881 9.34171 7.85355 9.14645C7.65829 8.95118 7.34171 8.95118 7.14645 9.14645L5 11.2929L5 3.5C5 3.22386 4.77615 3 4.5 3C4.22386 3 4 3.22386 4 3.5L4 11.2929L1.85355 9.14645C1.65829 8.95118 1.34171 8.95118 1.14645 9.14645C0.951184 9.34171 0.951184 9.65829 1.14645 9.85355L4.14644 12.8536C4.23693 12.944 4.36193 13 4.5 13C4.63885 13 4.76447 12.9434 4.85507 12.852L7.85355 9.85355Z" fill="currentColor"/>
-        </svg>
+        </svg><span id="sortBtnText"></span>
       </button>
       <div id="sortMenu" class="menu radiolist" role="menu" hidden></div>
     </span>
@@ -652,6 +748,21 @@
     <span id="statusLeft"></span>
     <span id="statusMid"></span>
     <span id="statusRight"></span>
+  </div>
+
+  <!-- In-panel sheets (L2): settings, community and help open an overlay over
+       the log list instead of only writing a notification to the Output
+       channel. No new manifest surface: the content is built here from the
+       state push, and the three entries keep posting their existing ops. -->
+  <div id="sheet" class="sheet" hidden>
+    <div id="sheetBackdrop" class="sheet-backdrop"></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <div class="sheet-head">
+        <span id="sheetTitle" class="sheet-title"></span>
+        <button id="sheetClose" class="sheet-close" type="button"></button>
+      </div>
+      <div id="sheetBody" class="sheet-body"></div>
+    </div>
   </div>
   </div>
 
@@ -812,15 +923,20 @@
 
   <script type="module">
     import { mountPreview } from './preview.js';
+    // Shared lexer (L2 list lane): the list rows colour their statement with the
+    // same token set the preview uses, so the two surfaces cannot drift. The
+    // module writes spans with textContent only, which keeps Ctrl+C on a row
+    // yielding the plain statement text.
+    import { into as highlightInto, installStyles } from './sql-highlight.js';
 
     (function () {
+      installStyles();
       var TYPE_TOKENS = ['select', 'insert', 'update', 'delete', 'create', 'drop'];
-      // Statement lines the list shows before it folds the rest behind `(+N)`
-      // (L32, the reference's three-line cell).
-      var SQL_MAX_LINES = 3;
-      // Lane L34: `logs.displayMode` arrives as `state.displayMode`; the three
-      // modes map to a line limit here, `0` meaning "no fold" (`multi`).
-      var sqlLineLimit = SQL_MAX_LINES;
+      // Lane L2: `logs.displayMode` arrives as `state.displayMode`. The host
+      // prepares the display text (`single` summary / `keyword_wrap` clause
+      // lines capped at three / `formatted` full formatter output) and sends
+      // the muted `(+N)` tail next to it, so the page only colours and lays
+      // out what it is given — there is no second folding implementation here.
       var showDuration = true;
       var TYPE_COLORS = {
         select: 'var(--openidea-link)',
@@ -1156,13 +1272,14 @@
         // description. The popup itself is rebuilt from the host's label list.
         var sorted = (current && current.sort) || sortMode || 'time_asc';
         labelIconButton($('sortBtn'), (L.sortLabel || 'Sort:') + ' ' + sortOptionLabel(sorted));
+        // The button also names the mode: the tooltip states the dimension, the
+        // visible label states which option is active.
+        setText($('sortBtnText'), sortOptionLabel(sorted));
         renderSortMenu();
         labelIconButton($('scrollEndBtn'), L.scrollEnd || 'Scroll to bottom');
         labelIconButton($('blockedBtn'), L.manageSuppress || 'Manage suppress rules…');
         labelIconButton($('settingsBtn'), L.settings || 'Settings');
-        // The settings popup (L32): a settings-page pointer and the cheat sheet.
-        setText($('settingsPageItem'), L.menuSettingsPage || 'Settings page…');
-        setText($('settingsHelpItem'), L.help || 'Help');
+        // Quick preview hands the selected row to the preview workbench.
         labelIconButton($('previewBtn'), L.preview || 'Quick preview');
         labelIconButton($('communityBtn'), L.community || 'Community');
         labelIconButton($('helpBtn'), L.help || 'Help');
@@ -1359,10 +1476,17 @@
         var el = document.createElement('div');
         el.className = 'row';
         el.setAttribute('data-line', String(row.line));
+        // The CRUD marker colour rides a custom property: the stylesheet picks
+        // it up for the bar, the DDL dash pattern and the background tint, so
+        // no colour literal is ever written into this page.
+        el.style.setProperty('--row-type', TYPE_COLORS[row.sql_type] || TYPE_COLORS.other);
 
         var bar = document.createElement('div');
         bar.className = 'bar';
-        bar.style.background = TYPE_COLORS[row.sql_type] || TYPE_COLORS.other;
+        // DDL is marked by the line's shape (dashed), not by a separate hue.
+        if (row.sql_type === 'create' || row.sql_type === 'drop') {
+          bar.classList.add('ddl');
+        }
 
         var content = document.createElement('div');
         content.className = 'content';
@@ -1382,12 +1506,13 @@
         if (showDuration) {
           var dur = document.createElement('span');
           dur.className = 'dur';
+          // `~` marks a duration the parser approximated from a neighbouring
+          // line rather than read from the statement's own close line.
+          var approx = row.duration_approx ? '~' : '';
           dur.textContent = row.duration_ms == null
             ? '—'
-            : formatMs(row.duration_ms) + (L.durationUnit || 'ms');
-          if (row.duration_ms != null && slowThreshold != null && row.duration_ms >= slowThreshold) {
-            dur.classList.add('hot');
-          }
+            : approx + formatMs(row.duration_ms) + (L.durationUnit || 'ms');
+          dur.classList.add(durationTier(row.duration_ms, slowThreshold));
           meta.appendChild(dur);
         }
         var dbText = dbBadge(row.db, dialect);
@@ -1407,7 +1532,11 @@
           }
         }
         if (row.group_count > 1) {
-          var groupText = (L.groupBadgePrefix || '') + row.group_count;
+          // The reference's phrase form (`同结构 N 条`); the old `×N` prefix
+          // stays as the fallback for a label set that predates the key.
+          var groupText = L.groupBadge
+            ? L.groupBadge.replace('{n}', String(row.group_count))
+            : (L.groupBadgePrefix || '') + row.group_count;
           var groupTitle = row.expanded ? (L.groupCollapse || '') : (L.groupExpand || '');
           if (row.n_plus_one_key) {
             meta.appendChild(badgeButton(groupText, 'group', groupTitle, function () {
@@ -1456,25 +1585,29 @@
         if (row.sql) {
           var sql = document.createElement('div');
           sql.className = 'sql';
-          var fold = foldSql(row.sql);
-          sql.appendChild(document.createTextNode(fold.text));
-          if (fold.tail) {
+          // Only the statement fragment is tokenised; the metadata line keeps
+          // its own hand-written colours. `into` writes text, never markup, and
+          // the concatenation of its spans is the statement itself, so copying
+          // a row still yields plain SQL.
+          highlightInto(sql, row.sql);
+          if (row.sqlTail) {
             // The dropped-line counter is muted, the way the reference draws
-            // `… (+N)` at the end of the third line (L32).
+            // `… (+N)` at the end of the third line (L2).
             var tail = document.createElement('span');
             tail.className = 'sqlTail';
-            tail.textContent = fold.tail;
+            tail.textContent = row.sqlTail;
             sql.appendChild(tail);
           }
-          // The list folds the statement (`sql-lines-3`); the whole of it stays
-          // one hover away.
+          // The whole prepared statement stays one hover away.
           sql.title = row.sql;
           content.appendChild(sql);
         }
         if (row.error_text) {
           var err = document.createElement('div');
           err.className = 'err';
-          err.textContent = row.error_text;
+          // The reference prefixes a failed statement with a warning sign so it
+          // reads as an error even before the red ink is noticed.
+          err.textContent = '⛔ ' + row.error_text;
           content.appendChild(err);
         }
 
@@ -1500,6 +1633,18 @@
         return ms.toFixed(1);
       }
 
+      // Duration tiers against the slow threshold T (`log.slowThresholdMs`):
+      // `≥T` red, `≥T/2` orange, `<T/2` green; an unknown duration is grey.
+      // A threshold of zero makes every measured duration a slow one, which is
+      // what `ms >= T` means — never a guess at another cut-off.
+      function durationTier(ms, threshold) {
+        if (ms == null) { return 'none'; }
+        if (threshold == null || threshold <= 0) { return 'slow'; }
+        if (ms >= threshold) { return 'slow'; }
+        if (ms >= threshold / 2) { return 'warn'; }
+        return 'ok';
+      }
+
       // The database badge (L32). The reference draws `[MySQL · conn-3]`; this
       // build captures no connection name, so it states the engine configured
       // in the settings and appends the database only when the row carries one
@@ -1512,32 +1657,10 @@
         return '[' + (engine ? engine + ' · ' : '') + name + ']';
       }
 
-      // `sql-lines-3`: the list shows at most three statement lines and states
-      // how many it dropped at the end of the third one, the way the reference
-      // row ends with `… (+1)`.
-      // Lane L34: `logs.displayMode` — one line, no fold, or the reference's
-      // three-line cell (`SQL_MAX_LINES`).
-      function modeLineLimit(mode) {
-        if (mode === 'single') { return 1; }
-        if (mode === 'multi') { return 0; }
-        return SQL_MAX_LINES;
-      }
-
-      function foldSql(text) {
-        var lines = String(text || '').split(/\r?\n/);
-        // `0` is `multi`: the whole statement, no fold and no tail.
-        var limit = sqlLineLimit;
-        if (limit <= 0 || lines.length <= limit) {
-          return { text: lines.join('\n'), tail: '' };
-        }
-        var rest = lines.length - limit;
-        var shown = lines.slice(0, limit);
-        return {
-          text: shown.join('\n'),
-          tail: ' … (+' + rest + ')'
-        };
-      }
-
+      // `sql-lines-3`: the host caps the keyword-wrap text at three clause lines and
+      // states how many it dropped in `row.sqlTail`, the way the reference row
+      // ends with `… (+1)`. Single-line rows are already one line and formatted
+      // rows are uncapped, so the page never folds anything itself.
       function selectLine(line) {
         selectedLine = line;
         var rows = $('list').querySelectorAll('.row');
@@ -1563,10 +1686,16 @@
         // The engine half of the row's database badge (L32): what the settings
         // page configured, so a row never claims a connection it does not know.
         var dialect = state.dialect || '';
-        // Lane L34: `logs.displayMode` picks the line limit and `log.showDuration`
-        // the header flag; the page only applies what the host pushed.
-        sqlLineLimit = modeLineLimit(state.displayMode);
+        // Lane L34: `log.showDuration`; the hand-written folding that used to live
+        // here moved to the host (`rows::list_display_sql`), so the page renders
+        // the prepared text and the row's own tail.
         showDuration = state.showDuration !== false;
+        // The cell padding follows the mode (single-line rows are 8px, not 12px);
+        // CSS keys off this attribute so no per-row class has to be set.
+        list.dataset.mode = state.displayMode || 'keyword_wrap';
+        // `logs.crud.style` (bar / background / off) is a list-level switch: the
+        // bars are always built, the stylesheet decides whether they draw.
+        list.dataset.crud = state.crudStyle || 'bar';
         var wasAtBottom = atBottom();
 
         while (list.firstChild) { list.removeChild(list.firstChild); }
@@ -1713,12 +1842,17 @@
       }
 
       // A cheap identity for the pushed rows: same signature => same list, so
-      // the DOM is not rebuilt and scroll/selection survive.
+      // the DOM is not rebuilt and scroll/selection survive. The duration and
+      // the affected-row count are part of it: the parser can attach them on a
+      // later push (a close line arriving behind the statement), and a stale
+      // `—` or the wrong duration tier would otherwise stay on screen.
       function rowsSignature(rows) {
         var parts = [];
         for (var i = 0; i < rows.length; i++) {
           var r = rows[i];
           parts.push(r.line + '/' + r.seq + '/' + r.sql_type + '/' + r.category + '/' +
+            (r.duration_ms == null ? '' : r.duration_ms) + '/' +
+            (r.rows_affected == null ? '' : r.rows_affected) + '/' +
             r.dedupe_count + '/' + r.group_count + '/' + (r.n_plus_one ? 1 : 0) + '/' +
             (r.dedupe_key || '') + '/' + (r.n_plus_one_key || '') + '/' + (r.expanded ? 1 : 0) + '/' +
             (r.class_simple || '') + '#' + (r.method || '') + '/' +
@@ -1734,7 +1868,8 @@
       // captured rows themselves did not move.
       function displayKey(state) {
         return (state.displayMode || 'keyword_wrap') + '/' +
-          (state.showDuration === false ? '0' : '1');
+          (state.showDuration === false ? '0' : '1') + '/' +
+          (state.crudStyle || 'bar');
       }
 
       // "Log → SQL" (L33) ---------------------------------------------------
@@ -2071,19 +2206,99 @@
         $('typeBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
       }
 
-      // Settings popup (L32): the gear opens a menu instead of firing the op on
-      // the spot, so the settings-page pointer and the help sheet sit together.
-      function openSettingsMenu(open) {
-        $('settingsMenu').hidden = !open;
-        $('settingsBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
-      }
-
       // Sort popup (lane A): the reference's `sortModeAction` drops its radio
       // menu from the action's own component.
       function openSortMenu(open) {
         $('sortMenu').hidden = !open;
         $('sortBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
       }
+
+      // In-panel sheets (L2) ----------------------------------------------
+      // Settings, community and help render here instead of only writing to the
+      // Output channel. Everything is built with textContent: the state push
+      // carries the current values, and the sheet never turns them into markup.
+      function sheetRow(label, value) {
+        var row = document.createElement('div');
+        row.className = 'sheet-row';
+        row.appendChild(makePart('k', label || ''));
+        row.appendChild(makePart('v', value == null ? '' : String(value)));
+        return row;
+      }
+
+      function sheetLine(text) {
+        var line = document.createElement('div');
+        line.className = 'sheet-line';
+        line.textContent = text || '';
+        return line;
+      }
+
+      function displayModeLabel(token) {
+        if (token === 'single') { return L.displayModeSingle || 'single'; }
+        if (token === 'formatted') { return L.displayModeFormatted || 'formatted'; }
+        return L.displayModeKeywordWrap || 'keyword_wrap';
+      }
+
+      function crudStyleLabel(token) {
+        if (token === 'background') { return L.crudStyleBackground || 'background'; }
+        if (token === 'off') { return L.crudStyleOff || 'off'; }
+        return L.crudStyleBar || 'bar';
+      }
+
+      function renderSettingsSheet(body) {
+        var state = current || {};
+        body.appendChild(sheetRow(L.settingsDisplayMode,
+          displayModeLabel(state.displayMode || 'keyword_wrap')));
+        body.appendChild(sheetRow(L.settingsShowDuration,
+          state.showDuration === false ? (L.settingsOff || 'Off') : (L.settingsOn || 'On')));
+        var threshold = state.slow_threshold_ms;
+        body.appendChild(sheetRow(L.settingsSlowThreshold,
+          threshold == null ? '—' : threshold + ' ms'));
+        body.appendChild(sheetRow(L.settingsCrudStyle,
+          crudStyleLabel(state.crudStyle || 'bar')));
+        var hint = document.createElement('div');
+        hint.className = 'sheet-hint';
+        hint.textContent = L.settingsPathHint || '';
+        body.appendChild(hint);
+      }
+
+      function renderHelpSheet(body) {
+        var lines = [L.helpSearch, L.helpTab, L.helpDblclick, L.helpMenu,
+          L.helpScroll, L.helpSort, L.helpBlocked];
+        for (var i = 0; i < lines.length; i++) {
+          if (lines[i]) { body.appendChild(sheetLine(lines[i])); }
+        }
+      }
+
+      function renderCommunitySheet(body) {
+        body.appendChild(sheetLine(L.communityGuide || ''));
+        var qr = document.createElement('div');
+        qr.className = 'sheet-qr';
+        qr.textContent = L.communityQrPlaceholder || '';
+        body.appendChild(qr);
+      }
+
+      function openSheet(kind) {
+        var title = '';
+        var body = $('sheetBody');
+        while (body.firstChild) { body.removeChild(body.firstChild); }
+        if (kind === 'settings') {
+          title = L.settings || 'Settings';
+          renderSettingsSheet(body);
+        } else if (kind === 'help') {
+          title = L.helpTitle || L.help || 'Help';
+          renderHelpSheet(body);
+        } else {
+          title = L.community || 'Community';
+          renderCommunitySheet(body);
+        }
+        setText($('sheetTitle'), title);
+        setText($('sheetClose'), '×');
+        $('sheetClose').title = L.sheetClose || 'Close';
+        $('sheetClose').setAttribute('aria-label', L.sheetClose || 'Close');
+        $('sheet').hidden = false;
+      }
+
+      function closeSheet() { $('sheet').hidden = true; }
 
       // Context menu --------------------------------------------------------
       // The menu acts on the row that opened it. An item whose dimension the
@@ -2349,22 +2564,24 @@
         event.stopPropagation();
         post({ op: 'manage-suppress' });
       });
-      // Settings (L32): the gear opens a popup; the items keep the L26 ops.
+      // In-panel sheets (L2): the gear, the community entry and the help entry
+      // open their overlay and keep posting the existing op, so the Output
+      // channel still records the request for anyone reading it.
+      $('sheetClose').addEventListener('click', closeSheet);
+      $('sheetBackdrop').addEventListener('click', closeSheet);
       $('settingsBtn').addEventListener('click', function (event) {
         event.stopPropagation();
-        openSettingsMenu($('settingsMenu').hidden);
-      });
-      $('settingsMenu').addEventListener('click', function (event) { event.stopPropagation(); });
-      $('settingsPageItem').addEventListener('click', function () {
-        openSettingsMenu(false);
+        openSheet('settings');
         post({ op: 'settings' });
       });
-      $('settingsHelpItem').addEventListener('click', function () {
-        openSettingsMenu(false);
+      $('helpBtn').addEventListener('click', function () {
+        openSheet('help');
         post({ op: 'help' });
       });
-      $('helpBtn').addEventListener('click', function () { post({ op: 'help' }); });
-      $('communityBtn').addEventListener('click', function () { post({ op: 'community' }); });
+      $('communityBtn').addEventListener('click', function () {
+        openSheet('community');
+        post({ op: 'community' });
+      });
       // Quick preview (L32, L42): the selected row is handed to the preview
       // workbench as a cross-view message — the panel names the line, the host
       // resolves it and `preview_target()` decides where it lands, so neither
@@ -2417,7 +2634,7 @@
         closeCtx();
       });
 
-      document.addEventListener('click', function () { openTypeMenu(false); openSettingsMenu(false); openSortMenu(false); closeCtx(); });
+      document.addEventListener('click', function () { openTypeMenu(false); openSortMenu(false); closeCtx(); });
       document.addEventListener('keydown', function (event) {
         // Ctrl+Tab / Ctrl+Shift+Tab cycle the four tabs. The IDE may consume
         // this chord before the page sees it; the mouse always works.
@@ -2437,8 +2654,8 @@
           return;
         }
         if (event.key === 'Escape') {
+          if (!$('sheet').hidden) { closeSheet(); return; }
           if (!$('ctxMenu').hidden) { closeCtx(); return; }
-          if (!$('settingsMenu').hidden) { openSettingsMenu(false); return; }
           if (!$('sortMenu').hidden) { openSortMenu(false); return; }
           if (!$('typeMenu').hidden) { openTypeMenu(false); return; }
           if (!$('searchRow').hidden) {

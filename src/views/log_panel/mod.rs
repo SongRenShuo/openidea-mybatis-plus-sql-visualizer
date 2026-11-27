@@ -51,11 +51,12 @@ pub use self::state::{
 use self::history::history_state;
 use self::logs::all_sql;
 use self::rows::{
-    apply_sort, dedupe_key_token, display_rows, java_target, n_plus_one_key_token, xml_target,
+    apply_sort, cached_list_display_sql, dedupe_key_token, display_rows, java_target,
+    n_plus_one_key_token, xml_target,
 };
 use self::state::{
-    DISPLAY_MODE_SETTING, SHOW_DURATION_SETTING, buffer_cap, dedupe_active, ensure_parsed,
-    slow_threshold, store,
+    CRUD_STYLE_SETTING, DISPLAY_MODE_SETTING, SHOW_DURATION_SETTING, buffer_cap, crud_style,
+    dedupe_active, ensure_parsed, slow_threshold, store,
 };
 use self::tabs::{log_to_sql_state, sql_to_java_state};
 
@@ -104,6 +105,13 @@ fn agent_health_json() -> Value {
 fn build_state() -> Value {
     let mut state = store();
     ensure_parsed(&mut state);
+
+    // Lane L2: the list display mode and the configured dialect decide how a
+    // row's statement text is prepared. Both are read before the rows are
+    // serialised, so the page only renders what the host resolved (the folding
+    // and the formatter's casing never disagree between push and render).
+    let display = display_mode(&settings::get_string(DISPLAY_MODE_SETTING, "keyword_wrap"));
+    let (list_dialect, _) = crate::views::workbench::configured_dialect();
 
     let slow_threshold_ms = slow_threshold();
     let dedupe = dedupe_active(&state);
@@ -165,6 +173,11 @@ fn build_state() -> Value {
         .map(|(index, row)| {
             let jump = java_targets.get(index).and_then(Option::as_ref);
             let xml = xml_targets.get(index).and_then(Option::as_ref);
+            // `logs.displayMode`: the display text for this row and the muted
+            // `(+N)` tail (empty outside the folded keyword-wrap mode). The full
+            // statement stays in the store — copy, export and the row actions
+            // never read this field.
+            let (sql_text, sql_tail) = cached_list_display_sql(&row.sql, display, &list_dialect);
             json!({
                 "line": row.line_no,
                 "seq": start + index + 1,
@@ -189,7 +202,8 @@ fn build_state() -> Value {
                 "jump_line": jump.map(|(_, line)| line + 1),
                 "xml_file": xml.map(|(file, _)| file.clone()),
                 "xml_line": xml.map(|(_, line)| line + 1),
-                "sql": row.display_sql(),
+                "sql": sql_text,
+                "sqlTail": sql_tail,
                 "error_text": row.error_text(),
                 "category": row.category.token(),
                 "sql_type": row.sql_type.token(),
@@ -214,12 +228,13 @@ fn build_state() -> Value {
     let send_to_tab = state.send_to_tab.clone();
     drop(state);
 
-    // Lane L34: the two log-list display settings. Both are read on every push,
-    // so a change lands with the next state and needs no restart. The page owns
-    // the folding, so it receives the resolved mode and its line limit rather
-    // than re-implementing the mapping.
-    let display = display_mode(&settings::get_string(DISPLAY_MODE_SETTING, "keyword_wrap"));
+    // Lane L34: the duration segment switch. Read on every push, so a change
+    // lands with the next state and needs no restart.
     let show_duration = settings::get_bool(SHOW_DURATION_SETTING, true);
+    // Lane L2: `logs.crud.style` — bar / background / off. The settings lane
+    // declares the key; an absent key resolves to the default, so this lane
+    // never waits on it.
+    let crud = crud_style(&settings::get_string(CRUD_STYLE_SETTING, "bar"));
 
     // The fifth tab (lane L23) is the preview workbench: the model and the
     // ops live in `views::workbench`, the state, the page and the push channel
@@ -229,15 +244,11 @@ fn build_state() -> Value {
     let preview = crate::views::workbench::preview_tab();
     let select_tab = crate::views::workbench::select_tab();
     // The engine half of the row's database badge (lane L32). It is the same
-    // configured dialect the preview tab states, so the two never disagree; a
-    // row that states no database still gets the engine only — this build
-    // captures no connection name and never invents one.
-    let dialect_name = preview
-        .get("dialect")
-        .and_then(|dialect| dialect.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    // configured dialect the preview tab states (`list_dialect`, resolved
+    // before the rows), so the two never disagree; a row that states no
+    // database still gets the engine only — this build captures no connection
+    // name and never invents one.
+    let dialect_name = list_dialect.clone();
     let send_to_tab_json = match &send_to_tab {
         Some(send) => json!({
             "tab": send.tab,
@@ -322,6 +333,8 @@ fn build_state() -> Value {
         // Lane L34: `logs.displayMode` / `log.showDuration`.
         "displayMode": display,
         "showDuration": show_duration,
+        // Lane L2: `logs.crud.style` (bar / background / off).
+        "crudStyle": crud,
         "labels": labels_json(),
     })
 }
@@ -344,7 +357,7 @@ pub fn push_state() -> Result<(), Error> {
 /// single `labels` object.
 fn labels_json() -> Value {
     let mut base = labels_base();
-    for extra in [labels_actions(), labels_tabs()] {
+    for extra in [labels_actions(), labels_tabs(), labels_sheets()] {
         if let (Some(target), Value::Object(extra)) = (base.as_object_mut(), extra) {
             target.extend(extra);
         }
@@ -401,7 +414,7 @@ fn labels_base() -> Value {
         "totalPrefix": t("view.logs.status.total_prefix"),
         "totalSuffix": t("view.logs.status.total_suffix"),
         "truncatedPrefix": t("view.logs.status.truncated_prefix"),
-        "nPlusOne": t("view.logs.badge.n_plus_one"),
+        "nPlusOne": t("view.logs.badge.n_plus_one_suspect"),
         "dedupeBadgePrefix": t("view.logs.badge.dedupe_prefix"),
         "groupBadgePrefix": t("view.logs.badge.group_prefix"),
         "menuCopySql": t("view.logs.menu.copy_sql"),
@@ -431,6 +444,44 @@ fn labels_base() -> Value {
         "typeDelete": t("view.logs.type.delete"),
         "typeCreate": t("view.logs.type.create"),
         "typeDrop": t("view.logs.type.drop"),
+    })
+}
+
+/// In-panel sheets and the phrase badges (lane L2), split out for the same
+/// macro-budget reason as [`labels_tabs`]: the settings/community/help
+/// overlays and the `同结构 N 条` phrase added enough entries to outgrow one
+/// `json!` call.
+fn labels_sheets() -> Value {
+    json!({
+        // The reference prints the template count as a phrase (`同结构 N 条`),
+        // with `{n}` filled by the page.
+        "groupBadge": t("view.logs.badge.group"),
+        // The settings sheet names the four settings this panel consumes and
+        // the page they live on; help reuses the cheat-sheet lines.
+        "sheetClose": t("view.logs.sheet.close"),
+        "settingsDisplayMode": t("view.logs.settings.display_mode"),
+        "settingsShowDuration": t("view.logs.settings.show_duration"),
+        "settingsSlowThreshold": t("view.logs.settings.slow_threshold"),
+        "settingsCrudStyle": t("view.logs.settings.crud_style"),
+        "settingsPathHint": t("view.logs.settings.path_hint"),
+        "settingsOn": t("view.logs.settings.on"),
+        "settingsOff": t("view.logs.settings.off"),
+        "displayModeSingle": t("view.logs.display_mode.single"),
+        "displayModeKeywordWrap": t("view.logs.display_mode.keyword_wrap"),
+        "displayModeFormatted": t("view.logs.display_mode.formatted"),
+        "crudStyleBar": t("view.logs.crud.bar"),
+        "crudStyleBackground": t("view.logs.crud.background"),
+        "crudStyleOff": t("view.logs.crud.off"),
+        "helpTitle": t("view.logs.help.title"),
+        "helpSearch": t("view.logs.help.search"),
+        "helpTab": t("view.logs.help.tab"),
+        "helpDblclick": t("view.logs.help.dblclick"),
+        "helpMenu": t("view.logs.help.menu"),
+        "helpScroll": t("view.logs.help.scroll"),
+        "helpSort": t("view.logs.help.sort"),
+        "helpBlocked": t("view.logs.help.blocked"),
+        "communityQrPlaceholder": t("view.logs.community.qr_placeholder"),
+        "communityGuide": t("view.logs.community.guide"),
     })
 }
 
@@ -1009,8 +1060,11 @@ mod tests {
         // host only normalises the setting; every push carries it.
         for (stored, mode) in [
             ("single", "single"),
-            ("multi", "multi"),
             ("keyword_wrap", "keyword_wrap"),
+            ("formatted", "formatted"),
+            // The pre-lane token for "no fold" still resolves to the mode that
+            // means the same thing.
+            ("multi", "formatted"),
         ] {
             let (host, _guard) = test_host();
             host.set_setting("logs.displayMode", &format!("\"{stored}\""));
@@ -1036,22 +1090,69 @@ mod tests {
     }
 
     #[test]
+    fn the_state_carries_the_crud_marker_style() {
+        // `logs.crud.*` belongs to the settings lane; this panel only consumes
+        // it, so an absent key resolves to the default instead of blocking.
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["crudStyle"], "bar");
+        for stored in ["background", "off"] {
+            host.set_setting("logs.crud.style", &format!("\"{stored}\""));
+            handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+            assert_eq!(state_of(&host)["crudStyle"], stored);
+        }
+        // An unknown stored value falls back to the bar, never to "no marker".
+        host.set_setting("logs.crud.style", "\"weird\"");
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["crudStyle"], "bar");
+        let page = PAGE;
+        // The three styles are list-level switches; the type colour rides the
+        // row's custom property and DDL is drawn as a dash pattern.
+        assert!(page.contains("list.dataset.crud = state.crudStyle || 'bar';"));
+        assert!(page.contains(".list[data-crud=\"background\"] .row:not(.sel)"));
+        assert!(page.contains(".list[data-crud=\"off\"] .row .bar { display: none; }"));
+        assert!(page.contains("el.style.setProperty('--row-type'"));
+        assert!(page.contains("bar.classList.add('ddl');"));
+        assert!(
+            page.contains("repeating-linear-gradient("),
+            "DDL uses a dashed bar"
+        );
+    }
+
+    #[test]
     fn the_page_applies_the_display_mode_and_the_duration_flag() {
         let (_host, _guard) = test_host();
         let page = PAGE;
-        // Lane L34: the three modes map to the statement lines a row shows —
-        // one, none (0 = unfold), or the reference's three-line cell.
-        assert!(page.contains("sqlLineLimit = modeLineLimit(state.displayMode);"));
-        assert!(page.contains("function modeLineLimit(mode)"));
-        assert!(page.contains("if (mode === 'single') { return 1; }"));
-        assert!(page.contains("if (mode === 'multi') { return 0; }"));
-        assert!(page.contains("return SQL_MAX_LINES;"));
-        assert!(page.contains("var limit = sqlLineLimit;"));
-        assert!(page.contains("if (limit <= 0 || lines.length <= limit)"));
-        assert!(page.contains("var SQL_MAX_LINES = 3;"));
-        // The duration segment (and the slow tint on it) is dropped when the
-        // flag is off; the rest of the header stays.
+        // Lane L2: the host prepares the display text; the page only colours
+        // `row.sql` and appends the muted `row.sqlTail`. There is no second
+        // folding implementation in the page.
+        assert!(
+            page.contains("list.dataset.mode = state.displayMode || 'keyword_wrap';"),
+            "the cell padding follows the mode"
+        );
+        assert!(
+            page.contains("highlightInto(sql, row.sql);"),
+            "the prepared statement is what gets coloured"
+        );
+        assert!(
+            page.contains("if (row.sqlTail) {"),
+            "the host states the hidden-line count"
+        );
+        assert!(
+            !page.contains("function foldSql("),
+            "the page must not fold a second time"
+        );
+        assert!(
+            !page.contains("modeLineLimit"),
+            "the line cap moved to the host"
+        );
+        // The duration segment (and its tint) is dropped when the flag is off;
+        // the rest of the header stays.
         assert!(page.contains("showDuration = state.showDuration !== false;"));
+        // A duration attached on a later push must repaint the row: without it
+        // the tier (and the `—`) would stay at whatever the first push drew.
+        assert!(page.contains("(r.duration_ms == null ? '' : r.duration_ms)"));
         // The segment is only built when the flag is on, so hiding it cannot
         // leave an empty `.dur` node behind.
         let guard = page
@@ -1130,11 +1231,24 @@ mod tests {
         ] {
             assert!(page.contains(op), "missing op {op}");
         }
-        // The gear opens the L32 popup rather than firing the op on the spot.
-        for id in ["settingsMenu", "settingsPageItem", "settingsHelpItem"] {
+        // The gear opens the in-panel settings sheet (L2); the old two-item popup
+        // is gone, so the entry explains itself in place instead of only
+        // writing to the Output channel. The sheet is one overlay reused by the
+        // community and help entries too.
+        assert!(page.contains("id=\"sheet\""), "missing the in-panel sheet");
+        assert!(
+            !page.contains("id=\"settingsMenu\""),
+            "the gear opens the sheet, not a popup menu"
+        );
+        for kind in ["settings", "community", "help"] {
+            assert!(
+                page.contains(&format!("openSheet('{kind}')")),
+                "missing sheet {kind}"
+            );
+        }
+        for id in ["sheetBackdrop", "sheetClose", "sheetTitle", "sheetBody"] {
             assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
-        assert!(page.contains("openSettingsMenu($('settingsMenu').hidden)"));
         // Both icons of the state-dependent capture entry are in the page, and
         // the glyph follows "capture is on" — connected *or* waiting for the
         // target application — so a refused start still flips to the stop glyph
@@ -1184,6 +1298,33 @@ mod tests {
             "followOff",
             "groupExpand",
             "groupCollapse",
+            // In-panel sheets (L2): settings values, mode/style labels and the
+            // three sheet bodies.
+            "sheetClose",
+            "settingsDisplayMode",
+            "settingsShowDuration",
+            "settingsSlowThreshold",
+            "settingsCrudStyle",
+            "settingsPathHint",
+            "settingsOn",
+            "settingsOff",
+            "displayModeSingle",
+            "displayModeKeywordWrap",
+            "displayModeFormatted",
+            "crudStyleBar",
+            "crudStyleBackground",
+            "crudStyleOff",
+            "helpTitle",
+            "helpSearch",
+            "helpTab",
+            "helpDblclick",
+            "helpMenu",
+            "helpScroll",
+            "helpSort",
+            "helpBlocked",
+            "communityQrPlaceholder",
+            "communityGuide",
+            "groupBadge",
         ] {
             assert!(labels.get(key).is_some(), "missing label {key}");
         }
@@ -1211,6 +1352,58 @@ mod tests {
                 .is_some_and(|label| !label.is_empty())),
             "every sort option has a label: {options:?}"
         );
+    }
+
+    #[test]
+    fn the_settings_community_and_help_entries_render_in_panel_sheets() {
+        // L2: the three fallback entries now explain themselves inside the
+        // panel. The settings sheet lists the values this panel actually
+        // consumes (mode, duration flag, slow threshold, CRUD style) and names
+        // the settings page; help reuses the cheat-sheet lines; community draws
+        // a QR placeholder (no asset ships with the plugin).
+        let (_host, _guard) = test_host();
+        let page = PAGE;
+        for needle in [
+            "function openSheet(kind)",
+            "renderSettingsSheet(body)",
+            "renderHelpSheet(body)",
+            "renderCommunitySheet(body)",
+            "displayModeLabel(state.displayMode || 'keyword_wrap')",
+            "state.showDuration === false",
+            "state.slow_threshold_ms",
+            "crudStyleLabel(state.crudStyle || 'bar')",
+            "L.settingsPathHint",
+            "L.helpMenu",
+            "L.communityQrPlaceholder",
+            "while (body.firstChild) { body.removeChild(body.firstChild); }",
+        ] {
+            assert!(page.contains(needle), "missing sheet wiring {needle}");
+        }
+        // The popped-up two-item settings menu is gone; nothing references it.
+        for stale in ["settingsPageItem", "settingsHelpItem", "openSettingsMenu("] {
+            assert!(!page.contains(stale), "the old settings popup left {stale}");
+        }
+        // Wording: the guide names the settings page, the group badge states the
+        // reference's phrase, and every sheet label is present.
+        use crate::i18n::t_in;
+        assert!(t_in("zh-CN", "view.logs.settings.path_hint").contains("SQL 日志"));
+        assert!(t_in("en", "view.logs.settings.path_hint").contains("Settings"));
+        assert_eq!(t_in("zh-CN", "view.logs.badge.group"), "同结构 {n} 条");
+        assert_eq!(
+            t_in("zh-CN", "view.logs.badge.n_plus_one_suspect"),
+            "疑似 N+1"
+        );
+        let labels = labels_json();
+        for key in [
+            "settingsDisplayMode",
+            "settingsPathHint",
+            "communityQrPlaceholder",
+        ] {
+            assert!(
+                labels[key].as_str().is_some_and(|text| !text.is_empty()),
+                "empty sheet label {key}"
+            );
+        }
     }
 
     #[test]
@@ -1516,29 +1709,63 @@ mod tests {
 
     #[test]
     fn the_log_list_follows_the_jblist_row_style() {
-        // L24: the rows read like a JBList cell — a 3px type bar, a muted
-        // metadata line, the statement, and a 1px rule between rows.
+        // L2: the rows read like a JBList cell — a 3px type bar, a muted
+        // metadata line, the statement, and a 1px rule between rows. The
+        // reference has no alternating-row fill and no hover plate; only the
+        // selected row is painted.
         let (_host, _guard) = test_host();
         let page = PAGE;
         for needle in [
             "min-height: 40px",
-            ".row:hover { background: var(--openidea-bg-hover); }",
             ".row.sel { background: var(--openidea-bg-selected); }",
-            ".row .bar { width: 3px; flex: 0 0 3px; }",
+            ".row .bar {",
+            "width: 3px; flex: 0 0 3px;",
+            "background: var(--row-type, var(--openidea-fg-muted));",
+            "padding: 12px 9px 12px 5px;",
+            ".list[data-mode=\"single\"] .row .content { padding-top: 8px; padding-bottom: 8px; }",
+            "list.dataset.mode = state.displayMode || 'keyword_wrap';",
         ] {
             assert!(page.contains(needle), "missing row style {needle}");
         }
+        assert!(
+            !page.contains(".row:hover"),
+            "the reference list has no hover plate"
+        );
         // Metadata is 11px muted with monospace sequence/time/duration; the
-        // statement is 12px monospace and wraps.
+        // statement is 12px in the UI font (the reference inherits the JBList
+        // font, not the editor font) and wraps.
         for needle in [
             "align-items: center; justify-content: flex-start;",
             "gap: 8px; font-size: 11px;",
             ".meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }",
+            "font-family: var(--openidea-font-ui, sans-serif);",
             "font-size: 12px; line-height: 1.4;",
             "white-space: pre-wrap; word-break: break-word;",
+            "margin-top: 3px;",
         ] {
             assert!(page.contains(needle), "missing text style {needle}");
         }
+        // The statement fragment is tokenised with the shared highlighter, and
+        // a selected row projects every fragment onto the selection foreground
+        // (the reference drops syntax colours while a row is selected).
+        assert!(
+            page.contains(
+                "import { into as highlightInto, installStyles } from './sql-highlight.js';"
+            ),
+            "the list rows use the shared lexer"
+        );
+        assert!(
+            page.contains("installStyles();"),
+            "the token classes are installed"
+        );
+        assert!(
+            page.contains("highlightInto(sql, row.sql);"),
+            "the SQL is coloured"
+        );
+        assert!(
+            page.contains(".row.sel .content span { color: inherit; }"),
+            "selection hides the syntax colours"
+        );
         // Badges are 8px-radius 10px capsules tinted 16% with the semantic
         // host variable; the slow duration and the error line take the
         // warning/danger ink.
@@ -1550,9 +1777,34 @@ mod tests {
             let rule = format!("color-mix(in srgb, var(--openidea-{tint}) 16%, transparent)");
             assert!(page.contains(&rule), "missing {tint} tint");
         }
+        // Duration ink has four tiers, keyed off `log.slowThresholdMs`: red at the
+        // threshold, orange at half of it, green below, grey when unknown.
+        for tier in ["slow", "warn", "ok", "none"] {
+            assert!(
+                page.contains(&format!(".meta .dur.{tier} {{ color:")),
+                "missing duration tier {tier}"
+            );
+        }
         assert!(
-            page.contains(".meta .dur.hot { color: var(--openidea-warning);"),
-            "slow duration in warning"
+            page.contains("function durationTier(ms, threshold)"),
+            "the tiers are decided once"
+        );
+        assert!(
+            !page.contains(".meta .dur.hot"),
+            "the old one-tier tint is gone"
+        );
+        // The database badge, an MCP row and the affected-row count carry the
+        // reference's fragment inks, all through host variables.
+        for rule in [
+            ".meta .db { color: var(--openidea-info); }",
+            ".meta .mcp { color: color-mix(in srgb, var(--openidea-link) 50%, var(--openidea-danger)); }",
+            ".meta .rows { color: color-mix(in srgb, var(--openidea-link) 55%, var(--openidea-fg-muted)); }",
+        ] {
+            assert!(page.contains(rule), "missing meta ink {rule}");
+        }
+        assert!(
+            page.contains("err.textContent = '⛔ ' + row.error_text;"),
+            "a failed statement carries the warning prefix"
         );
         assert!(
             page.contains("id=\"slowBadge\" class=\"pill danger\""),
@@ -1634,15 +1886,20 @@ mod tests {
             page.contains("var name = db || '';"),
             "no invented database"
         );
-        // Folding: three lines, a muted `… (+N)` tail, the full SQL in the tip.
-        assert!(page.contains("var SQL_MAX_LINES = 3;"), "sql-lines-3");
+        // Folding: three clause lines with a muted `… (+N)` tail, prepared by the
+        // host (`rows::fold_keyword_wrap`); the page renders the pair as-is.
         assert!(
-            page.contains("tail: ' … (+' + rest + ')'"),
-            "the dropped-line tail"
+            page.contains("if (row.sqlTail) {"),
+            "the page appends the host's tail"
+        );
+        assert_eq!(
+            super::rows::fold_keyword_wrap("a\nb\nc\nd\ne"),
+            ("a\nb\nc".to_string(), " … (+2)".to_string()),
+            "three lines and the hidden count"
         );
         assert!(
             page.contains("sql.title = row.sql;"),
-            "the whole statement stays in the tooltip"
+            "the prepared statement stays in the tooltip"
         );
         assert!(
             page.contains(".sql .sqlTail { color: var(--openidea-fg-muted); }"),
@@ -2145,6 +2402,10 @@ mod tests {
         assert!(page.contains("item.setAttribute('data-sort', option.token)"));
         assert!(page.contains("post({ op: 'sort', sort: sortMode })"));
         assert!(page.contains("L.sortLabel"));
+        // The button names the current mode (L2), so the order is readable
+        // without opening the popup; the popup still carries the check mark.
+        assert!(page.contains("id=\"sortBtnText\""));
+        assert!(page.contains("setText($('sortBtnText'), sortOptionLabel(sorted));"));
         // The eye-off toolbar action opens the suppression manager (lane E) —
         // it used to drop a muted-methods popup, replaced by the dialog.
         assert!(page.contains("id=\"blockedBtn\""));
@@ -2334,31 +2595,68 @@ mod tests {
                 "the toolbar lost {id}"
             );
         }
-        // 设置齿轮展开自己的菜单，菜单项才 post `settings`；帮助与交流群直接 post。
+        // 三个入口都开同一个页内弹层（L2），并保留各自的 op 兜底：点了既能看到
+        // 当前值与修改路径，Output 里也仍有可追溯的一行。
         assert!(
             live_line(
                 page,
-                "$('settingsPageItem').addEventListener('click', function () {"
+                "$('settingsBtn').addEventListener('click', function (event) {"
             ),
-            "the settings menu item lost its click handler"
+            "the settings button lost its click handler"
+        );
+        assert!(
+            live_line(page, "openSheet('settings');"),
+            "the settings entry no longer opens the sheet"
         );
         assert!(
             live_line(page, "post({ op: 'settings' })"),
             "the settings entry no longer posts its op"
         );
         assert!(
-            live_line(
-                page,
-                "$('helpBtn').addEventListener('click', function () { post({ op: 'help' }); })"
-            ),
+            live_line(page, "$('helpBtn').addEventListener('click', function () {"),
             "the help button lost its click handler"
+        );
+        assert!(
+            live_line(page, "openSheet('help');"),
+            "the help entry no longer opens the sheet"
+        );
+        assert!(
+            live_line(page, "post({ op: 'help' })"),
+            "the help entry no longer posts its op"
         );
         assert!(
             live_line(
                 page,
-                "$('communityBtn').addEventListener('click', function () { post({ op: 'community' }); })"
+                "$('communityBtn').addEventListener('click', function () {"
             ),
             "the community button lost its click handler"
+        );
+        assert!(
+            live_line(page, "openSheet('community');"),
+            "the community entry no longer opens the sheet"
+        );
+        assert!(
+            live_line(page, "post({ op: 'community' })"),
+            "the community entry no longer posts its op"
+        );
+        // 层要能关：× 与遮罩都走 closeSheet，Esc 先关层再关菜单。
+        assert!(
+            live_line(
+                page,
+                "$('sheetClose').addEventListener('click', closeSheet);"
+            ),
+            "the close button lost its handler"
+        );
+        assert!(
+            live_line(
+                page,
+                "$('sheetBackdrop').addEventListener('click', closeSheet);"
+            ),
+            "the backdrop lost its handler"
+        );
+        assert!(
+            live_line(page, "if (!$('sheet').hidden) { closeSheet(); return; }"),
+            "Escape closes the sheet first"
         );
     }
 
