@@ -1379,6 +1379,85 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "Nothing to render: the wrapper has no condition",
         "没有可渲染的内容：包装器没有条件",
     ),
+    // C06: named parameters with their type class (lane W2-2).
+    (
+        "view.workbench.conditions.title",
+        "Dynamic conditions",
+        "动态条件",
+    ),
+    (
+        "view.workbench.conditions.hint",
+        "Untick a condition to leave that branch out of the render.",
+        "取消勾选后，该分支不参与本次渲染。",
+    ),
+    ("view.workbench.conditions.all", "All", "全选"),
+    ("view.workbench.conditions.none", "None", "全不选"),
+    (
+        "view.workbench.param.empty.number",
+        "number, e.g. 1",
+        "数字，例如 1",
+    ),
+    (
+        "view.workbench.param.empty.temporal",
+        "date, e.g. 2026-11-27",
+        "日期，例如 2026-11-27",
+    ),
+    (
+        "view.workbench.param.empty.collection",
+        "list, e.g. 1,2,3",
+        "集合，例如 1,2,3",
+    ),
+    (
+        "view.workbench.param.empty.object",
+        "object property",
+        "对象属性",
+    ),
+    (
+        "view.workbench.param.warn.number",
+        "This value is not a number",
+        "该值不是数字",
+    ),
+    (
+        "view.workbench.param.warn.temporal",
+        "This value is not a date",
+        "该值不是日期",
+    ),
+    // C14: the interceptor simulation notes, shown in the render's reasons.
+    (
+        "preview.intercept.logicDelete",
+        "Simulated logic delete: {0}",
+        "已模拟逻辑删除：{0}",
+    ),
+    (
+        "preview.intercept.tenant",
+        "Simulated tenant line: {0}",
+        "已模拟多租户：{0}",
+    ),
+    (
+        "preview.intercept.pagination",
+        "Simulated pagination: {0}",
+        "已模拟分页：{0}",
+    ),
+    (
+        "preview.intercept.tablePrefix",
+        "Simulated table prefix: {0}",
+        "已模拟表名前缀：{0}",
+    ),
+    (
+        "preview.intercept.skipExisting",
+        "Not injected, the statement already mentions {0}",
+        "未注入：语句里已经有 {0}",
+    ),
+    (
+        "preview.intercept.tableNotPrefixed",
+        "Table left unprefixed: {0}",
+        "未加表前缀：{0}",
+    ),
+    (
+        "preview.intercept.paginationOrderBy",
+        "SQL Server OFFSET/FETCH needs an ORDER BY",
+        "SQL Server 的 OFFSET/FETCH 需要 ORDER BY",
+    ),
 ];
 
 /// Localised text for `key` in the IDE's current UI language.

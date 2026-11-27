@@ -138,6 +138,18 @@ const TEMPLATE = `<!-- Input half (lane L27): the reference's standalone page ac
     <div class="pv-params">
       <div class="pv-pane-title" id="pvParamsTitle"></div>
       <div class="pv-scroll">
+        <!-- Dynamic conditions (C07): one checkbox per "if" / "when" node of
+             the statement. Ticking a box includes that branch in the next
+             render; the host re-renders and pushes the result. -->
+        <div class="pv-conditions" id="pvConditions" hidden>
+          <div class="pv-pane-subtitle" id="pvConditionsTitle"></div>
+          <div class="pv-conditions-actions">
+            <button id="pvConditionsAll" class="pv-mini" type="button"><span data-btnlabel></span></button>
+            <button id="pvConditionsNone" class="pv-mini" type="button"><span data-btnlabel></span></button>
+          </div>
+          <div id="pvConditionsList"></div>
+          <div class="hint" id="pvConditionsHint"></div>
+        </div>
         <div id="pvParamsList"></div>
         <div class="pv-params-actions">
           <button id="pvRebindBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
@@ -197,6 +209,8 @@ const PV_LABEL_KEYS = {
   pvCopy: 'copySql',
   pvFormatPreview: 'format', pvExport: 'export', pvExplain: 'explain',
   pvRefresh: 'refresh', pvMore: 'more',
+  // C07: the condition list's header actions.
+  pvConditionsAll: 'conditionsAll', pvConditionsNone: 'conditionsNone',
 };
 const PV_TAB_KEYS = { sql: 'tabSql', raw: 'tabRaw', columns: 'tabColumns' };
 const PV_TAB_ORDER = ['sql', 'raw', 'columns'];
@@ -572,6 +586,9 @@ export function mountPreview(root, deps) {
   // does not clobber what the user typed) and whether a clipboard read was
   // refused (the capability gates navigator.clipboard in a web view).
   let pvParamsSig = null;
+  // C07: the condition list's id signature, so a push with the same nodes only
+  // syncs the checkboxes instead of rebuilding the list under the cursor.
+  let pvConditionsSig = null;
   let clipboardMissing = false;
   // Degradation banner (L35b): the reasons the reader dismissed. A later render
   // with different reasons shows the strip again.
@@ -875,40 +892,162 @@ export function mountPreview(root, deps) {
     updateParamsActions();
   }
 
-  // Editable parameters (lane L27) --------------------------------------
+  // Editable parameters (lane L27 / C06) --------------------------------
+  // One row per `?` the render produced. `model.parameters` carries the
+  // `#{}` name, its class, the placeholder an empty box shows and the value the
+  // render bound; a model without it (an older host, a command-built model)
+  // falls back to the ordinal rows this page shipped before.
+  function paramSignature(parameters, params) {
+    if (parameters.length) {
+      const parts = [];
+      for (let i = 0; i < parameters.length; i++) {
+        const p = parameters[i] || {};
+        parts.push([p.name, p.kind, p.value, p.placeholder, p.warning,
+          p.injected ? '1' : '0'].join('\u0002'));
+      }
+      return parts.join('\u0001');
+    }
+    return params.join('\u0001');
+  }
+
   function buildParams() {
     const host = node('pvParamsList');
     if (!host) { return; }
     while (host.firstChild) { host.removeChild(host.firstChild); }
-    const params = (preview.model && preview.model.params) || [];
+    const m = preview.model || {};
+    const params = m.params || [];
+    const parameters = Array.isArray(m.parameters) ? m.parameters : [];
     const labels = preview.labels || {};
-    for (let i = 0; i < params.length; i++) {
+    const count = parameters.length || params.length;
+    for (let i = 0; i < count; i++) {
+      const meta = parameters[i] || null;
       const row = doc.createElement('div');
-      row.className = 'pv-param-row';
-      // Two columns (L35b), the reference's name-beside-value layout. The model
-      // carries positions only — the mapper's parameter names are gone by the
-      // time the SQL is restored — so the name column shows the ordinal.
+      row.className = 'pv-param-row' + (meta && meta.injected ? ' pv-param-injected' : '');
+      // The reference's `#source` label beside the value box; the ordinal is
+      // the fallback for a model that carries values only.
       const name = doc.createElement('span');
       name.className = 'pv-param-name';
-      name.textContent = (labels.paramsName || '').replace('{0}', String(i + 1));
-      name.title = labels.paramsHint || '';
+      name.textContent = meta && meta.name
+        ? '#' + meta.name
+        : (labels.paramsName || '').replace('{0}', String(i + 1));
+      name.title = meta && meta.name
+        ? '#' + meta.name + (labels.paramsHint ? ' \u2014 ' + labels.paramsHint : '')
+        : (labels.paramsHint || '');
+      const cell = doc.createElement('span');
+      cell.className = 'pv-param-cell';
       const input = doc.createElement('input');
       input.type = 'text';
       input.className = 'pv-param-input';
-      input.value = params[i];
+      input.value = meta ? (meta.value || '') : params[i];
+      if (meta && meta.placeholder) { input.placeholder = meta.placeholder; }
       input.autocomplete = 'off';
       input.spellcheck = false;
+      cell.appendChild(input);
+      // The class the statement (or a heuristic) gave the parameter; the
+      // warning is a hint only, the value renders exactly as typed.
+      if (meta && meta.kind && meta.kind !== 'unknown') {
+        const chip = doc.createElement('span');
+        chip.className = 'pv-param-kind';
+        chip.textContent = meta.kind;
+        chip.title = (labels.paramsHint || '') + (meta.kindSource
+          ? ' (' + meta.kindSource + ')' : '');
+        cell.appendChild(chip);
+      }
+      if (meta && meta.warning) {
+        const warn = doc.createElement('span');
+        warn.className = 'pv-param-warn';
+        warn.textContent = '\u26a0';
+        warn.title = meta.warning;
+        cell.appendChild(warn);
+      }
       row.appendChild(name);
-      row.appendChild(input);
+      row.appendChild(cell);
       host.appendChild(row);
     }
-    if (params.length === 0) {
+    if (count === 0) {
       const empty = doc.createElement('div');
       empty.className = 'pv-params-empty';
       empty.textContent = labels.paramsEmpty || '';
       host.appendChild(empty);
     }
-    pvParamsSig = params.join('\u0001');
+    pvParamsSig = paramSignature(parameters, params);
+  }
+
+  // Dynamic conditions (C07) --------------------------------------------
+  // `model.conditions` lists the statement's `<if>` / `<when>` nodes with the
+  // switch the render used. A tick sends `preview-conditions` with the id → new
+  // truth map; the host re-renders and the next push carries the new SQL.
+  function conditionSignature(conditions) {
+    const parts = [];
+    for (let i = 0; i < conditions.length; i++) {
+      parts.push(conditions[i] && conditions[i].id ? conditions[i].id : '');
+    }
+    return parts.join('\u0001');
+  }
+
+  function conditionBoxes() {
+    const host = node('pvConditionsList');
+    return host ? host.querySelectorAll('.pv-cond-box') : [];
+  }
+
+  function postConditions(map) {
+    post({ op: 'preview-conditions', conditions: map });
+  }
+
+  function buildConditions() {
+    const block = node('pvConditions');
+    if (!block) { return; }
+    const labels = preview.labels || {};
+    const conditions = Array.isArray((preview.model || {}).conditions)
+      ? preview.model.conditions : [];
+    setText(node('pvConditionsTitle'), labels.conditions || '');
+    setText(node('pvConditionsHint'), labels.conditionsHint || '');
+    if (conditions.length === 0) {
+      block.hidden = true;
+      pvConditionsSig = null;
+      return;
+    }
+    block.hidden = false;
+    const host = node('pvConditionsList');
+    if (!host) { return; }
+    const sig = conditionSignature(conditions);
+    if (sig === pvConditionsSig) {
+      // Same nodes: only the flags follow the push, so a checkbox keeps focus.
+      const boxes = conditionBoxes();
+      for (let i = 0; i < boxes.length; i++) {
+        const condition = conditions[i] || {};
+        boxes[i].checked = !!condition.enabled;
+      }
+      return;
+    }
+    while (host.firstChild) { host.removeChild(host.firstChild); }
+    for (let i = 0; i < conditions.length; i++) {
+      const condition = conditions[i] || {};
+      const row = doc.createElement('label');
+      row.className = 'pv-cond-row';
+      row.setAttribute('data-cond-kind', condition.kind || 'if');
+      if (condition.group) { row.setAttribute('data-cond-group', condition.group); }
+      const box = doc.createElement('input');
+      box.type = 'checkbox';
+      box.className = 'pv-cond-box';
+      box.checked = !!condition.enabled;
+      box.setAttribute('data-cond-id', condition.id || '');
+      box.addEventListener('change', function () {
+        const id = box.getAttribute('data-cond-id');
+        if (!id) { return; }
+        const map = {};
+        map[id] = !!box.checked;
+        postConditions(map);
+      });
+      const text = doc.createElement('span');
+      text.className = 'pv-cond-label';
+      text.textContent = condition.label || condition.id || '';
+      text.title = condition.label || condition.id || '';
+      row.appendChild(box);
+      row.appendChild(text);
+      host.appendChild(row);
+    }
+    pvConditionsSig = sig;
   }
 
   // Rebind / Import availability: no values -> nothing to rebind; no clipboard
@@ -916,7 +1055,10 @@ export function mountPreview(root, deps) {
   // button is greyed with the reason in its tooltip.
   function updateParamsActions() {
     const labels = preview.labels || {};
-    const count = ((preview.model && preview.model.params) || []).length;
+    const m = preview.model || {};
+    const count = Array.isArray(m.parameters) && m.parameters.length
+      ? m.parameters.length
+      : (m.params || []).length;
     const rebindBtn = node('pvRebindBtn');
     if (rebindBtn) {
       rebindBtn.disabled = count === 0;
@@ -995,10 +1137,14 @@ export function mountPreview(root, deps) {
     }
 
     const params = m.params || [];
+    const parameters = Array.isArray(m.parameters) ? m.parameters : [];
     // Rebuild the inputs only when the parameter list itself changed: a push
     // that carries the same list must leave the user's edits alone.
-    if (params.join('\u0001') !== pvParamsSig) { buildParams(); }
+    if (paramSignature(parameters, params) !== pvParamsSig) { buildParams(); }
     updateParamsActions();
+    // C07: the condition list follows every push (an unchanged list only syncs
+    // its checkboxes).
+    buildConditions();
 
     const columns = tabs().columns || '';
     const buttons = tabButtons();
@@ -1155,6 +1301,22 @@ export function mountPreview(root, deps) {
     for (let i = 0; i < inputs.length; i++) { values.push(inputs[i].value); }
     post({ op: 'preview-params', values: values });
   });
+  // C07: select all / none. The map is complete, so the host applies exactly
+  // what the page shows; the checkboxes are updated locally at once so the
+  // click feels immediate and the push only confirms it.
+  function setAllConditions(value) {
+    const conditions = (preview.model || {}).conditions || [];
+    if (!conditions.length) { return; }
+    const map = {};
+    for (let i = 0; i < conditions.length; i++) {
+      map[conditions[i].id] = value;
+    }
+    const boxes = conditionBoxes();
+    for (let i = 0; i < boxes.length; i++) { boxes[i].checked = value; }
+    postConditions(map);
+  }
+  on('pvConditionsAll', function () { setAllConditions(true); });
+  on('pvConditionsNone', function () { setAllConditions(false); });
   on('pvImportBtn', function () {
     if (!(navigator.clipboard && navigator.clipboard.readText)) {
       clipboardMissing = true;

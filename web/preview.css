@@ -222,12 +222,52 @@ body.pv-root { margin: 0; }
   color: var(--openidea-fg-muted); font-family: var(--openidea-font-mono, monospace);
   font-size: 11px;
 }
+/* Value box + its type chip and warning mark (C06). The chip names the class
+   the statement declared (or the name heuristic guessed); the mark is a hint,
+   never a gate. */
+.pv-root .pv-param-cell {
+  display: flex; align-items: center; gap: 4px; min-width: 0;
+}
 .pv-root .pv-param-input {
   flex: 1 1 auto; min-width: 0;
   background: var(--openidea-bg-input); color: var(--openidea-fg);
   border: 1px solid var(--openidea-border); border-radius: 3px; padding: 2px 4px;
   font-family: var(--openidea-font-mono, monospace); font-size: 12px;
 }
+.pv-root .pv-param-kind {
+  flex: 0 0 auto; font-size: 9.5px; line-height: 1; padding: 2px 4px;
+  border-radius: 8px; color: var(--openidea-fg-muted);
+  border: 1px solid var(--openidea-border);
+}
+.pv-root .pv-param-warn {
+  flex: 0 0 auto; color: var(--openidea-warning, #c98a00);
+  font-size: 12px; cursor: help;
+}
+/* A parameter an interceptor appended (C14): marked so a simulated row is not
+   mistaken for one written in the statement. */
+.pv-root .pv-param-injected .pv-param-name { font-style: italic; }
+/* Dynamic conditions (C07): one checkbox row per `<if>` / `<when>`, above the
+   parameter rows. */
+.pv-root .pv-conditions { padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--openidea-border); }
+.pv-root .pv-pane-subtitle { font-size: 11px; font-weight: 600; padding: 2px 0; }
+.pv-root .pv-conditions-actions { display: flex; gap: 4px; padding: 2px 0 4px; }
+.pv-root .pv-mini {
+  font-size: 10px; line-height: 1; padding: 2px 6px; cursor: pointer;
+  background: transparent; color: var(--openidea-fg-muted);
+  border: 1px solid var(--openidea-border); border-radius: 3px;
+}
+.pv-root .pv-mini:hover { color: var(--openidea-fg); border-color: var(--openidea-accent); }
+.pv-root .pv-cond-row {
+  display: flex; align-items: flex-start; gap: 5px; padding: 1px 0;
+  font-size: 11px; cursor: pointer;
+}
+.pv-root .pv-cond-box { flex: 0 0 auto; margin: 1px 0 0; }
+.pv-root .pv-cond-label {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--openidea-font-mono, monospace);
+  color: var(--openidea-fg-muted);
+}
+.pv-root .pv-cond-row[data-cond-kind="when"] .pv-cond-label { color: var(--openidea-fg); }
 .pv-root .pv-params-empty { color: var(--openidea-fg-muted); font-size: 11px; }
 .pv-root .pv-scroll { flex: 1 1 auto; overflow: auto; padding: 4px 8px 8px; }
 .pv-root .pv-sqlside {

@@ -38,6 +38,7 @@ pub const GROUPS: &[&str] = &[
     "Rendering",
     "Navigation",
     "Preview",
+    "MyBatis Plus",
     "Engine",
 ];
 
@@ -80,9 +81,9 @@ pub struct SettingDef {
     pub needs_restart: bool,
 }
 
-/// The 45 settings of the first release, the L34 parity keys and the L48
-/// preview shell, in page order.
-pub static DEFINITIONS: [SettingDef; 46] = [
+/// The 45 settings of the first release, the L34 parity keys, the L48 preview
+/// shell and the C14 MyBatis-Plus interceptor simulation, in page order.
+pub static DEFINITIONS: [SettingDef; 56] = [
     // Preview -------------------------------------------------------------
     // Lane L48: where the preview opens. The dialog is the IntelliJ edition's
     // `SqlPreviewDialog`; the tab is the fifth tab of the log panel, which the
@@ -94,6 +95,92 @@ pub static DEFINITIONS: [SettingDef; 46] = [
         group: "Preview",
         kind: Kind::Enum(&["dialog", "tab"]),
         default: DefaultValue::Str("dialog"),
+        needs_restart: false,
+    },
+    // MyBatis-Plus interceptors (C14) ---------------------------------------
+    // The reference derives "is there a logic-delete column" from the entity
+    // (`@TableLogic`). This build has no entity at preview time, so the column
+    // is a setting and every switch starts off: a simulation that cannot know
+    // whether the project uses the interceptor must not rewrite SQL by
+    // default. Read on every render, so a change applies to the next preview.
+    SettingDef {
+        key: "preview.injectLogicDelete",
+        title: "Simulate the logic-delete interceptor",
+        group: "MyBatis Plus",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.logicDeleteColumn",
+        title: "Logic-delete column",
+        group: "MyBatis Plus",
+        kind: Kind::String,
+        default: DefaultValue::Str("deleted"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.logicDeleteValue",
+        title: "Logic-delete value",
+        group: "MyBatis Plus",
+        kind: Kind::String,
+        default: DefaultValue::Str("0"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.injectTenantLine",
+        title: "Simulate the tenant-line interceptor",
+        group: "MyBatis Plus",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.tenantColumnName",
+        title: "Tenant column",
+        group: "MyBatis Plus",
+        kind: Kind::String,
+        default: DefaultValue::Str("tenant_id"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.tenantColumnDefault",
+        title: "Tenant value",
+        group: "MyBatis Plus",
+        kind: Kind::String,
+        default: DefaultValue::Str("1"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.paginationSim",
+        title: "Simulate the pagination interceptor",
+        group: "MyBatis Plus",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.paginationCurrent",
+        title: "Page number",
+        group: "MyBatis Plus",
+        kind: Kind::Integer,
+        default: DefaultValue::Int(1),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.paginationSize",
+        title: "Page size",
+        group: "MyBatis Plus",
+        kind: Kind::Integer,
+        default: DefaultValue::Int(10),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.tablePrefix",
+        title: "Table prefix",
+        group: "MyBatis Plus",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
         needs_restart: false,
     },
     // Dialect -------------------------------------------------------------
@@ -490,6 +577,37 @@ pub fn get_i64(key: &str, default: i64) -> i64 {
         .unwrap_or(default)
 }
 
+/// A boolean setting with the value [`DEFINITIONS`] declares as its default.
+///
+/// The accessors above need the caller to repeat the default, which is how a
+/// stored value and the generated settings page can drift apart. These three
+/// read the default off the definition, so there is one source of truth.
+pub fn bool_setting(key: &str) -> bool {
+    let default = match definition(key).map(|def| def.default) {
+        Some(DefaultValue::Bool(value)) => value,
+        _ => false,
+    };
+    get_bool(key, default)
+}
+
+/// A string setting with the declared default (empty when the key is unknown).
+pub fn string_setting(key: &str) -> String {
+    let default = match definition(key).map(|def| def.default) {
+        Some(DefaultValue::Str(value)) => value,
+        _ => "",
+    };
+    get_string(key, default)
+}
+
+/// An integer setting with the declared default (0 when the key is unknown).
+pub fn integer_setting(key: &str) -> i64 {
+    let default = match definition(key).map(|def| def.default) {
+        Some(DefaultValue::Int(value)) => value,
+        _ => 0,
+    };
+    get_i64(key, default)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,16 +670,16 @@ mod tests {
     }
 
     #[test]
-    fn definitions_cover_forty_six_fields_with_unique_keys() {
-        assert_eq!(definitions().len(), 46);
+    fn definitions_cover_every_field_with_unique_keys() {
+        assert_eq!(definitions().len(), DEFINITIONS.len());
         let mut keys = std::collections::BTreeSet::new();
         for def in definitions() {
             assert!(keys.insert(def.key), "duplicate key {}", def.key);
         }
         assert_eq!(
             keys.len(),
-            46,
-            "the first release, the L34 parity keys and the L48 preview shell ship 46 settings"
+            DEFINITIONS.len(),
+            "the first release, the L34 parity keys, the L48 preview shell and the C14 interceptor keys share one table"
         );
     }
 
@@ -647,6 +765,54 @@ mod tests {
                 .kind,
             Kind::Enum(&["single", "multi", "keyword_wrap"])
         );
+    }
+
+    #[test]
+    fn the_c14_interceptor_keys_start_off_and_keep_the_reference_defaults() {
+        // C14: a simulation the project may not use must never rewrite SQL
+        // before the user asks for it, so every switch starts off. The column
+        // and value defaults follow the reference (`deleted` / `0`,
+        // `tenant_id` / `1`, `Page(1, 10)`).
+        let switches = [
+            "preview.injectLogicDelete",
+            "preview.injectTenantLine",
+            "preview.paginationSim",
+        ];
+        for key in switches {
+            let def = definition(key).unwrap_or_else(|| panic!("{key} is missing"));
+            assert_eq!(def.default, DefaultValue::Bool(false), "default of {key}");
+            assert_eq!(def.group, "MyBatis Plus");
+            assert!(!def.needs_restart, "{key} is read on the next render");
+        }
+        let strings = [
+            ("preview.logicDeleteColumn", "deleted"),
+            ("preview.logicDeleteValue", "0"),
+            ("preview.tenantColumnName", "tenant_id"),
+            ("preview.tenantColumnDefault", "1"),
+            ("preview.tablePrefix", ""),
+        ];
+        for (key, default) in strings {
+            let def = definition(key).unwrap_or_else(|| panic!("{key} is missing"));
+            assert_eq!(def.default, DefaultValue::Str(default), "default of {key}");
+        }
+        assert_eq!(
+            definition("preview.paginationCurrent").map(|def| def.default),
+            Some(DefaultValue::Int(1))
+        );
+        assert_eq!(
+            definition("preview.paginationSize").map(|def| def.default),
+            Some(DefaultValue::Int(10))
+        );
+    }
+
+    #[test]
+    fn the_setting_helpers_read_the_declared_default() {
+        let _host = MockHost::install();
+        assert!(!bool_setting("preview.injectLogicDelete"));
+        assert_eq!(string_setting("preview.logicDeleteColumn"), "deleted");
+        assert_eq!(integer_setting("preview.paginationSize"), 10);
+        assert_eq!(string_setting("no.such.key"), "");
+        assert_eq!(integer_setting("no.such.key"), 0);
     }
 
     #[test]
