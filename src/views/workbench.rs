@@ -139,9 +139,11 @@ impl WorkbenchModel {
         self.params.join(", ")
     }
 
-    /// What the Copy button puts on the clipboard: the executable SQL.
+    /// What the Copy button puts on the clipboard: the executable SQL with SQL
+    /// comments stripped, matching the reference's `SqlCommentStripper`: a
+    /// copied statement is what runs, so `--` notes never travel with it.
     pub fn copy_text(&self) -> String {
-        self.sql.clone()
+        strip_sql_comments(&self.sql)
     }
 
     /// What Export hands over: the statement formatted for the current dialect
@@ -225,6 +227,111 @@ impl WorkbenchModel {
         }
         fields
     }
+}
+
+/// Placeholder written over comment characters while scanning, so a line can
+/// tell "only a comment" from "code" before the markers are dropped. Never
+/// reaches the output (`filter_commented_lines` removes them).
+const COMMENT_MARK: char = '\u{0}';
+
+/// Strips `-- … EOL` and `/* … */` comments, leaving string literals and
+/// quoted identifiers untouched.
+///
+/// This mirrors the IntelliJ edition's `SqlCommentStripper.strip`, whose
+/// contract the reference's Copy button promises: comments are marked while
+/// scanning, comment-only lines disappear instead of leaving blank lines, and
+/// each kept line loses its trailing whitespace. `''` / `""` doubled quotes and
+/// backslash escapes inside a quoted span are honoured, so `'-- not a comment'`
+/// survives.
+pub(crate) fn strip_sql_comments(sql: &str) -> String {
+    if sql.is_empty() {
+        return String::new();
+    }
+    let mut chars: Vec<char> = sql.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '\'' || ch == '"' || ch == '`' {
+            i = skip_quoted_span(&chars, i, ch);
+            continue;
+        }
+        if ch == '-' && i + 1 < chars.len() && chars[i + 1] == '-' {
+            while i < chars.len() && chars[i] != '\n' {
+                chars[i] = COMMENT_MARK;
+                i += 1;
+            }
+            continue;
+        }
+        if ch == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            chars[i] = COMMENT_MARK;
+            chars[i + 1] = COMMENT_MARK;
+            i += 2;
+            while i < chars.len() {
+                if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                    chars[i] = COMMENT_MARK;
+                    chars[i + 1] = COMMENT_MARK;
+                    i += 2;
+                    break;
+                }
+                if chars[i] != '\n' {
+                    chars[i] = COMMENT_MARK;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    filter_commented_lines(&chars)
+}
+
+/// One quoted span (string literal or quoted identifier), starting at `start`.
+/// Returns the index just past the closing quote (or the end of input).
+fn skip_quoted_span(chars: &[char], start: usize, quote: char) -> usize {
+    let mut i = start + 1;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            i += 2;
+            continue;
+        }
+        if chars[i] == quote {
+            // A doubled quote is an escaped one, not the end of the span.
+            if i + 1 < chars.len() && chars[i + 1] == quote {
+                i += 2;
+                continue;
+            }
+            return i + 1;
+        }
+        i += 1;
+    }
+    chars.len()
+}
+
+/// Drops marked (comment) characters, then removes lines that held only a
+/// comment and trims trailing whitespace from the lines that remain.
+fn filter_commented_lines(chars: &[char]) -> String {
+    let mut out = String::with_capacity(chars.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let mut end = i;
+        while end < chars.len() && chars[end] != '\n' {
+            end += 1;
+        }
+        let has_code = (i..end).any(|k| chars[k] != COMMENT_MARK && !chars[k].is_whitespace());
+        let has_mark = (i..end).any(|k| chars[k] == COMMENT_MARK);
+        if has_code || !has_mark {
+            let line: String = (i..end)
+                .filter(|&k| chars[k] != COMMENT_MARK)
+                .map(|k| chars[k])
+                .collect();
+            out.push_str(line.trim_end());
+            if end < chars.len() {
+                out.push('\n');
+            }
+        }
+        i = if end < chars.len() { end + 1 } else { end };
+    }
+    out
 }
 
 /// The fields that change when the dialect switches.
@@ -1526,8 +1633,33 @@ mod tests {
 
     #[test]
     fn copy_text_is_the_executable_sql() {
+        // No comments in the sample: Copy hands the statement over verbatim.
         let model = sample();
         assert_eq!(model.copy_text(), model.sql);
+    }
+
+    #[test]
+    fn copy_text_strips_comments_like_the_reference() {
+        // The reference's Copy button runs `SqlCommentStripper`: line and block
+        // comments go, comment-only lines disappear, trailing blanks are
+        // trimmed. A copied statement must be the one that runs.
+        let mut model = sample();
+        model.sql = "SELECT id, -- the key\n       name /* display */\nFROM t\n-- trailing note\nWHERE id = 1".to_string();
+        assert_eq!(
+            model.copy_text(),
+            "SELECT id,\n       name\nFROM t\nWHERE id = 1"
+        );
+    }
+
+    #[test]
+    fn copy_text_keeps_comment_markers_inside_quoted_spans() {
+        let mut model = sample();
+        model.sql =
+            "SELECT '-- not a comment', \"/* nor this */\", `--x` FROM t -- real\n".to_string();
+        assert_eq!(
+            model.copy_text(),
+            "SELECT '-- not a comment', \"/* nor this */\", `--x` FROM t\n"
+        );
     }
 
     #[test]
@@ -1762,11 +1894,22 @@ mod tests {
         assert!(toolbar < banner, "the strip sits under the toolbar");
         assert!(banner < cols, "the strip keeps clear of the columns");
 
-        // Toolbar order, exactly the reference's five entries plus "More".
+        // Lane C: the performance advice left the meta row for a line of its
+        // own (the reference's perf row), directly under the meta/toolbar row
+        // and above the degradation strip.
+        let perf = module.find("id=\"pvPerfRow\"").expect("perf row");
+        assert!(meta < perf, "the perf row sits under the meta row");
+        assert!(perf < toolbar, "the perf row keeps the toolbar row clear");
+        assert!(perf < banner, "the perf row sits above the strip");
+
+        // Toolbar order, the reference's entries plus "More": copy / format /
+        // display mode / keyword wrap / vertical / explain / refresh / more.
         let order = [
             "id=\"pvCopy\"",
             "id=\"pvFormatPreview\"",
             "id=\"pvMode\"",
+            "id=\"pvKeywordWrap\"",
+            "id=\"pvVertical\"",
             "id=\"pvExplain\"",
             "id=\"pvRefresh\"",
             "id=\"pvMore\"",
@@ -1779,6 +1922,25 @@ mod tests {
             assert!(at >= previous, "{id} is out of the reference order");
             previous = at;
         }
+        // Lane C: the display-mode control is the reference's toggle button
+        // (its label names the target mode), and keyword wrap / vertical are
+        // direct toolbar entries rather than entries of the "More" fold.
+        assert!(
+            module.contains("id=\"pvMode\" class=\"btn pv-btn-text\""),
+            "the mode toggle is a text button"
+        );
+        assert!(
+            module.contains("id=\"pvKeywordWrap\" class=\"btn pv-btn-text\""),
+            "keyword wrap is in the toolbar"
+        );
+        assert!(
+            module.contains("id=\"pvVertical\" class=\"btn pv-btn-text\""),
+            "vertical is in the toolbar"
+        );
+        assert!(
+            module.contains("on('pvMode', function () { setMode(modeTarget()); });"),
+            "the mode button toggles"
+        );
         // Explain is disabled and explains itself; the fold holds Export and
         // the (disabled) Rollback.
         assert!(
@@ -1813,6 +1975,47 @@ mod tests {
             .expect("parameter column");
         let sqlside = module.find("class=\"pv-sqlside\"").expect("result column");
         assert!(params < sqlside, "parameters sit left of the result tabs");
+        // Lane C: the two columns are separated by a draggable splitter (the
+        // reference's horizontal OnePixelSplitter, default 0.3).
+        let hsplit = module
+            .find("id=\"pvHSplitter\"")
+            .expect("the horizontal splitter");
+        assert!(params < hsplit, "the splitter sits right of the parameters");
+        assert!(
+            hsplit < sqlside,
+            "the splitter sits left of the result tabs"
+        );
+        assert!(
+            module.contains("setParamsFraction((event.clientX - rect.left) / rect.width);"),
+            "the horizontal splitter drags"
+        );
+        assert!(
+            css.contains(".pv-root .pv-hsplitter"),
+            "the splitter has its own rule"
+        );
+        // Lane C: the meta row names where the render came from, and the SQL
+        // tab is syntax-coloured (the reference's editor look), while the
+        // 原文 / 列信息 tabs and placeholders stay plain.
+        assert!(
+            module.contains("id=\"pvSource\""),
+            "the meta row carries the source"
+        );
+        assert!(
+            module.contains("source.textContent = m.source || '';"),
+            "the source is painted"
+        );
+        assert!(
+            module.contains("export function tokenizeSql"),
+            "the SQL tokenizer exists"
+        );
+        assert!(
+            module.contains("paintSql(body, text);"),
+            "the SQL tab is painted from tokens"
+        );
+        assert!(
+            css.contains(".pv-root .pv-tok-kw"),
+            "the token colours have their own rules"
+        );
         assert!(
             css.contains(".pv-root .pv-params {"),
             "the parameter column has its own rule"
