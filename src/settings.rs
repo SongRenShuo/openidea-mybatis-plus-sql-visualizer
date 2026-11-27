@@ -100,6 +100,56 @@ pub struct SettingDef {
 /// The first release's settings, the L34 parity keys, the L48 preview shell,
 /// the C14 MyBatis-Plus interceptor simulation and the L-SettingsParity
 /// expansion to the IntelliJ edition's 81 application-level fields.
+/// Not every key has a consumer in this port yet. The list below is kept next
+/// to the table so a reader (and the lane report) can tell a working switch
+/// from a placeholder; each such row repeats the boundary in its `description`
+/// on the settings page.
+///
+/// stored, not wired:
+/// - UI and Actions: `ui.gutter.mapperXml/annotation/jpaHql/jdbc/
+///   inlineFallback/wrapperChain` (only the master switch
+///   `nav.showLineMarkers` is read; this build produces mapper XML icons
+///   only), `ui.mapperNavYield`, `ui.xmlInlineSql`, `ui.ibatisXml`,
+///   `ui.xmlSyntaxHighlight`, `ui.consolePrepMode`, `ui.pagesXmlSourceMode`,
+///   `ui.joinDiagramNative`, `ui.showWhitespaces`, `ui.onboardingAnchorTip`,
+///   `ui.dialectTip`, `ui.firstCaptureGuide`, `ui.language` (this port always
+///   follows the host locale).
+/// - Shortcuts: every row is read-only text; the platform has no key recorder,
+///   so the reference's default keys are shown and changed in IDE Keymap.
+/// - SQL Preview: `preview.replaceParams`, `preview.verticalPairAnnotation`,
+///   `preview.autoFoldEnabled/Threshold`, `preview.emptyParamFill`,
+///   `preview.literalParamRecovery`, `preview.injectTenantOnInsert`,
+///   `preview.dataPermissionHint/Condition`, `preview.paginationCount`,
+///   `preview.jdbcPreview`, `preview.explainStructured`,
+///   `preview.explainRetention`, `preview.executionTimeoutSeconds`,
+///   `preview.embeddedColumnNaming`, and the code-generation trio (there is no
+///   SQL → Java command in this port).
+/// - Dialect / Rendering (pre-existing placeholders): `dialect.mode` (only
+///   `dialect.default` is read), `dialect.detectFromUrl`,
+///   `dialect.autoDetectFromMappers`, `dialect.quoteIdentifiers`,
+///   `dialect.keywordCase`, `render.paramsSeparator`, `render.sqlCase`,
+///   `render.dateFormat`, `render.showConfidence`, `render.formatSql`,
+///   `render.indentWidth`, `render.truncateSql`, `render.exportFormat`.
+/// - Table Name Mapping: all except `preview.tablePrefix` (preview page);
+///   entity inference stays fixed to camel → snake.
+/// - SQL Log: the panel / auto-save half — `log.autoCaptureOnStart`,
+///   `log.autoOpenOnCapture`, `log.autoOpenYield`, `log.stopOnWindowClose`,
+///   `log.timestampEnabled`, `log.timestampFormat`, `log.timestampSource`,
+///   `log.formatRestored`, `log.showMethodName`, `log.dataSourceBadgeDetail`,
+///   `log.crudColorStyle`, the four `log.crudColor*` colours,
+///   `log.shardingSphereEnabled`, `log.autoSaveEnabled/Path/FileNamePattern/
+///   MaxFiles`, `log.stackMaxFrames` (no call-stack collection),
+///   `log.sourceFrameSkipPrefixes`, `log.sourceFrameBizJarPrefixes`,
+///   `log.desensitize`.
+/// - MCP Tools: `mcp.enabled`, `mcp.disabledTools`, `mcp.mask`.
+/// - About: `about.updateChannel`, `about.buildNumber` (read-only) and
+///   `about.cacheAction` (explanatory text only).
+///
+/// Wired by this lane through `core::log::ParseOptions` (read by the capture
+/// bridge and the log commands): `log.prefix`, `log.paramPrefix`,
+/// `log.mixedPrefix`, `log.filterKeywords`, `log.timePrefix`,
+/// `log.hibernateEnabled`, `log.hibernateSqlPrefix`, `log.hibernateParamPrefix`
+/// and `log.jdbcEnabled`.
 pub static DEFINITIONS: [SettingDef; 142] = [
     // Preview -------------------------------------------------------------
     // Lane L48: where the preview opens. The dialog is the IntelliJ edition's

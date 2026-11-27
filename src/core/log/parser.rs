@@ -64,6 +64,8 @@ pub(crate) struct Emitter<'a> {
     /// Last entry emitted per console thread, so a close row is resolved by
     /// thread instead of by "whatever was emitted last".
     last_by_thread: HashMap<String, usize>,
+    /// `log.filterKeywords`, lower-cased once.
+    filter_keywords: Vec<String>,
 }
 
 impl<'a> Emitter<'a> {
@@ -78,6 +80,12 @@ impl<'a> Emitter<'a> {
             pending_duration: None,
             last_entry: None,
             last_by_thread: HashMap::new(),
+            filter_keywords: opts
+                .filter_keywords
+                .iter()
+                .map(|key| key.trim().to_ascii_lowercase())
+                .filter(|key| !key.is_empty())
+                .collect(),
         }
     }
 
@@ -94,6 +102,15 @@ impl<'a> Emitter<'a> {
     }
 
     pub(crate) fn emit(&mut self, mut pending: PendingEntry) {
+        if self.is_filtered(&pending.sql) {
+            // The statement is dropped as if it were never captured: no close
+            // row or later duration may attach to an older entry instead.
+            if let Some(thread) = pending.thread.as_ref().or(self.current_thread.as_ref()) {
+                self.last_by_thread.remove(thread.as_str());
+            }
+            self.last_entry = None;
+            return;
+        }
         if pending.duration_ms.is_none() {
             pending.duration_ms = self.current_duration;
         }
@@ -154,6 +171,17 @@ impl<'a> Emitter<'a> {
         };
         self.entries.push(entry);
         self.last_entry = Some(self.entries.len() - 1);
+    }
+
+    /// True when `log.filterKeywords` drops the statement with this restored SQL.
+    fn is_filtered(&self, sql: &str) -> bool {
+        if sql.is_empty() || self.filter_keywords.is_empty() {
+            return false;
+        }
+        let lower = sql.to_ascii_lowercase();
+        self.filter_keywords
+            .iter()
+            .any(|keyword| lower.contains(keyword.as_str()))
     }
 
     pub(crate) fn unparsed(&mut self, line_no: usize, line: &str, key: &str) {
@@ -237,8 +265,8 @@ impl<'a> Parser<'a> {
         Self {
             opts,
             emitter: Emitter::new(opts),
-            mybatis: super::mybatis::MyBatisState::default(),
-            hibernate: super::hibernate::HibernateState::default(),
+            mybatis: super::mybatis::MyBatisState::with_options(opts),
+            hibernate: super::hibernate::HibernateState::with_options(opts),
             jdbc: super::jdbc::JdbcState::default(),
         }
     }
@@ -251,7 +279,8 @@ impl<'a> Parser<'a> {
         }
         self.emitter.current_timestamp =
             super::timestamp::parse_line(line, self.opts.timestamp_offset_minutes);
-        self.emitter.current_duration = super::duration::extract(line);
+        self.emitter.current_duration =
+            super::duration::extract_with_prefix(line, Some(&self.opts.time_prefix));
         self.emitter.current_thread = super::text::thread_token(line);
 
         // Error signatures first: MyBatis `### Error` rows start with `###` but
@@ -268,8 +297,8 @@ impl<'a> Parser<'a> {
         }
 
         if self.feed_mybatis(line_no, line)
-            || self.feed_hibernate(line_no, line)
-            || self.feed_jdbc(line_no, line)
+            || (self.opts.hibernate_enabled && self.feed_hibernate(line_no, line))
+            || (self.opts.jdbc_enabled && self.feed_jdbc(line_no, line))
             || self.feed_p6spy(line_no, line)
         {
             return;
@@ -287,10 +316,14 @@ impl<'a> Parser<'a> {
         if starts_with_sql_keyword(trimmed) {
             self.emitter
                 .unparsed(line_no, line, message_keys::UNPARSED_UNRECOGNIZED_SQL);
-        } else if super::text::find_ci(line, "preparing:").is_some() {
+        } else if super::text::find_ci(line, &self.opts.sql_prefix.trim().to_ascii_lowercase())
+            .is_some()
+        {
             self.emitter
                 .unparsed(line_no, line, message_keys::UNPARSED_ORPHAN_PREPARING);
-        } else if super::text::find_ci(line, "parameters:").is_some() {
+        } else if super::text::find_ci(line, &self.opts.param_prefix.trim().to_ascii_lowercase())
+            .is_some()
+        {
             self.emitter
                 .unparsed(line_no, line, message_keys::UNPARSED_ORPHAN_PARAMETERS);
         } else if is_log_framework_line(line) {

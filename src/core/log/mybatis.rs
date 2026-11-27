@@ -11,7 +11,7 @@ use super::model::{Confidence, Family, message_keys};
 use super::params::{Param, parse_mybatis, render_param};
 use super::parser::{CloseRow, Emitter, PendingEntry, cap_sql, is_continuation_candidate};
 use super::restore::restore;
-use super::text::{after_ci, classify, find_ci, is_log_framework_line};
+use super::text::{after_ci, after_prefix, classify, find_ci, is_log_framework_line};
 
 #[derive(Default)]
 pub(crate) struct MyBatisState {
@@ -26,9 +26,22 @@ pub(crate) struct MyBatisState {
     wait_params: bool,
     continuing: bool,
     truncated: bool,
+    /// Configured prefixes, already trimmed and lower-cased (computed once so
+    /// the per-line path stays allocation-light).
+    sql_prefix: String,
+    param_prefix: String,
 }
 
 impl MyBatisState {
+    /// State with the prefixes from `log.prefix` / `log.paramPrefix`.
+    pub(crate) fn with_options(opts: &super::model::ParseOptions) -> Self {
+        Self {
+            sql_prefix: opts.sql_prefix.trim().to_ascii_lowercase(),
+            param_prefix: opts.param_prefix.trim().to_ascii_lowercase(),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn continuing(&self) -> bool {
         self.continuing
     }
@@ -40,7 +53,7 @@ impl MyBatisState {
         emitter: &mut Emitter<'_>,
         opts: &super::model::ParseOptions,
     ) -> bool {
-        if let Some(after) = after_ci(line, "preparing:") {
+        if let Some(after) = after_prefix(line, &self.sql_prefix, opts.mixed_prefix) {
             self.close(emitter, None);
             let rest = line[after..].trim();
             if rest.is_empty() {
@@ -53,7 +66,7 @@ impl MyBatisState {
             return true;
         }
 
-        if let Some(after) = after_ci(line, "parameters:") {
+        if let Some(after) = after_prefix(line, &self.param_prefix, opts.mixed_prefix) {
             if self.wait_sql || self.pending_sql.is_none() {
                 self.wait_sql = false;
                 self.wait_params = false;

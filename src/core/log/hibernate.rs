@@ -25,12 +25,12 @@
 //!   (unprefixed) line: only the bare-row rule sees that SQL.
 
 use super::model::{Confidence, Family, ParseOptions, message_keys};
-use super::params::{Param, parse_binding, render_param};
+use super::params::{Param, parse_binding_with, render_param};
 use super::parser::{Emitter, PendingEntry, cap_sql, is_continuation_candidate};
 use super::restore::restore;
 use super::text::{
-    HibernateLoggerKind, after_ci, classify, find_ci, hibernate_logger_row, is_log_framework_line,
-    starts_with_sql_keyword,
+    HibernateLoggerKind, after_prefix, classify, find_ci, hibernate_logger_row,
+    is_log_framework_line, starts_with_sql_keyword,
 };
 
 #[derive(Default)]
@@ -44,9 +44,22 @@ pub(crate) struct HibernateState {
     duration: Option<f64>,
     params: Vec<(usize, Param)>,
     truncated: bool,
+    /// Configured prefixes, already trimmed and lower-cased.
+    sql_prefix: String,
+    param_prefix: String,
 }
 
 impl HibernateState {
+    /// State with the prefixes from `log.hibernateSqlPrefix` /
+    /// `log.hibernateParamPrefix`.
+    pub(crate) fn with_options(opts: &ParseOptions) -> Self {
+        Self {
+            sql_prefix: opts.hibernate_sql_prefix.trim().to_ascii_lowercase(),
+            param_prefix: opts.hibernate_param_prefix.trim().to_ascii_lowercase(),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn collecting(&self) -> bool {
         self.collecting
     }
@@ -58,7 +71,7 @@ impl HibernateState {
         emitter: &mut Emitter<'_>,
         opts: &ParseOptions,
     ) -> bool {
-        if let Some(after) = after_ci(line, "hibernate:") {
+        if let Some(after) = after_prefix(line, &self.sql_prefix, opts.mixed_prefix) {
             self.close(emitter);
             let rest = line[after..].trim();
             if rest.starts_with("/*") {
@@ -96,7 +109,7 @@ impl HibernateState {
                     // Same bookkeeping as the unprefixed `binding parameter`
                     // row: it belongs to whichever statement is open.
                     if self.collecting
-                        && let Some((index, param)) = parse_binding(line)
+                        && let Some((index, param)) = parse_binding_with(line, &self.param_prefix)
                     {
                         self.params.push((index, param));
                     }
@@ -105,7 +118,7 @@ impl HibernateState {
             return true;
         }
 
-        if let Some((index, param)) = parse_binding(line) {
+        if let Some((index, param)) = parse_binding_with(line, &self.param_prefix) {
             if self.collecting {
                 self.params.push((index, param));
             }

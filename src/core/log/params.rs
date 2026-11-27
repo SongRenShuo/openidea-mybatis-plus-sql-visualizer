@@ -159,7 +159,13 @@ fn read_type(text: &str, from: usize) -> Option<usize> {
 /// Parse a Hibernate binding row:
 /// `binding parameter [1] as [BIGINT] - [1]` → `(1, Param)`.
 pub(crate) fn parse_binding(line: &str) -> Option<(usize, Param)> {
-    let start = find_ci(line, "binding parameter")?;
+    parse_binding_with(line, "binding parameter")
+}
+
+/// Same, with the configured row label (`log.hibernateParamPrefix`, already
+/// trimmed and lower-cased by the caller). An empty label disables the row.
+pub(crate) fn parse_binding_with(line: &str, prefix_lower: &str) -> Option<(usize, Param)> {
+    let start = find_ci(line, prefix_lower)?;
     let tail = &line[start..];
     let open = tail.find('[')?;
     let close = open + tail[open..].find(']')?;

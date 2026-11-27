@@ -11,7 +11,7 @@ use std::time::Instant;
 use openidea_plugin::{Error, Invocation, host};
 
 use crate::commands::common::{self, CliError};
-use crate::core::log::{EntryClass, ParseOptions, parse};
+use crate::core::log::{EntryClass, parse};
 
 /// Matches `[[contributes.commands]] id` in `plugin.toml`.
 pub const ID: &str = "render-log";
@@ -48,7 +48,7 @@ fn render(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     }
     let text = common::read_file(ctx, path)?;
     let started = Instant::now();
-    let analysis = parse(&text, &ParseOptions::default());
+    let analysis = parse(&text, &crate::capture::bridge::parse_options());
     let page_size = page_size();
     let shown = analysis.entries.len().min(page_size);
 
