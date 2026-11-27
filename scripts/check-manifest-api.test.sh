@@ -80,18 +80,18 @@ height = 600
 TOML
 check "b: ^1.18 + dialogs is green" 0 "$work/b.toml" "ok (engines.openidea \"^1.18\""
 
-# c) every key this repo actually ships, at the floor it actually declares:
-#    copied from the real plugin.toml, only the engines line is normalised so
-#    the case stays meaningful when the repo moves on.
+# c) the repository's own manifest, twice: green at the floor it declares, and
+#    red when that floor is forced down to ^1.15 — the keys it uses need more.
+#    This replaces the earlier "the real manifest has no 1.16+ key" tripwire,
+#    which fired for the right reason once the repo moved to 1.18: the case has
+#    to describe the manifest as it is now, not as it was when written.
 if [[ -f "$root/plugin.toml" ]]; then
-  if grep -Eq 'contributes\.(dialogs|overlays|frames|markdownHover|markdown_hover)' "$root/plugin.toml"; then
-    echo "fail: c: real plugin.toml already declares an API 1.16+/1.18 key"
-    fail=$((fail + 1))
-  else
-    sed 's/^[[:space:]]*engines\.openidea[[:space:]]*=.*/engines.openidea = "^1.15"/' \
-      "$root/plugin.toml" > "$work/c.toml"
-    check "c: ^1.15 + the real manifest's keys is green" 0 "$work/c.toml" "ok (engines.openidea \"^1.15\""
-  fi
+  check "c: the real manifest passes at its own floor" 0 "$root/plugin.toml" \
+    "ok (engines.openidea"
+  sed 's/^[[:space:]]*engines\.openidea[[:space:]]*=.*/engines.openidea = "^1.15"/' \
+    "$root/plugin.toml" > "$work/c15.toml"
+  check "c: the real manifest at ^1.15 is red" 1 "$work/c15.toml" \
+    'error: contributes.dialogs needs plugin API 1.18'
 else
   echo "fail: c: repository plugin.toml not found"
   fail=$((fail + 1))
@@ -175,13 +175,16 @@ id = "f"
 TOML
 check "h: >=1.16 + frames is green" 0 "$work/h.toml" 'floor 1.16'
 
-# i) the reverse check, kept as a regression: today's real manifest plus one
-#    dialog entry must be red, and the same file with a raised floor green.
+# i) the reverse check, kept as a regression: a manifest that declares a dialog
+#    entry at ^1.15 must be red, and the same file with a raised floor green.
 #    Without this, case c) alone would pass even if the key detector went blind
-#    (nothing to find, so nothing to report).
-if [[ -f "$root/plugin.toml" ]]; then
-  cp "$work/c.toml" "$work/i.toml"
-  cat >> "$work/i.toml" <<'TOML'
+#    (nothing to find, so nothing to report). Synthetic on purpose: deriving the
+#    fixture from the real manifest ties this test to whatever the repo happens
+#    to ship today and breaks the moment the repo moves past it.
+cat > "$work/i.toml" <<'TOML'
+id = "t"
+version = "0.0.1"
+engines.openidea = "^1.15"
 
 [[contributes.dialogs]]
 id = "sqlv-preview"
@@ -190,13 +193,12 @@ web = "web/preview.html"
 width = 900
 height = 600
 TOML
-  check "i: real manifest + dialogs at ^1.15 is red" 1 "$work/i.toml" \
-    'error: contributes.dialogs needs plugin API 1.18'
-  sed 's/^[[:space:]]*engines\.openidea[[:space:]]*=.*/engines.openidea = "^1.18"/' \
-    "$work/i.toml" > "$work/j.toml"
-  check "j: real manifest + dialogs at ^1.18 is green" 0 "$work/j.toml" \
-    'ok (engines.openidea "^1.18"'
-fi
+check "i: dialogs at ^1.15 is red" 1 "$work/i.toml" \
+  'error: contributes.dialogs needs plugin API 1.18'
+sed 's/^[[:space:]]*engines\.openidea[[:space:]]*=.*/engines.openidea = "^1.18"/' \
+  "$work/i.toml" > "$work/j.toml"
+check "j: dialogs at ^1.18 is green" 0 "$work/j.toml" \
+  'ok (engines.openidea "^1.18"'
 
 # k) a commented-out higher-version key is not a declaration: this is the
 #    natural "park the dialog block until 1.18" move and must stay green.
