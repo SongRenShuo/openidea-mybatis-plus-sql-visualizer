@@ -1150,6 +1150,9 @@ mod tests {
         // The duration segment (and its tint) is dropped when the flag is off;
         // the rest of the header stays.
         assert!(page.contains("showDuration = state.showDuration !== false;"));
+        // A duration attached on a later push must repaint the row: without it
+        // the tier (and the `—`) would stay at whatever the first push drew.
+        assert!(page.contains("(r.duration_ms == null ? '' : r.duration_ms)"));
         // The segment is only built when the flag is on, so hiding it cannot
         // leave an empty `.dur` node behind.
         let guard = page

@@ -1842,12 +1842,17 @@
       }
 
       // A cheap identity for the pushed rows: same signature => same list, so
-      // the DOM is not rebuilt and scroll/selection survive.
+      // the DOM is not rebuilt and scroll/selection survive. The duration and
+      // the affected-row count are part of it: the parser can attach them on a
+      // later push (a close line arriving behind the statement), and a stale
+      // `—` or the wrong duration tier would otherwise stay on screen.
       function rowsSignature(rows) {
         var parts = [];
         for (var i = 0; i < rows.length; i++) {
           var r = rows[i];
           parts.push(r.line + '/' + r.seq + '/' + r.sql_type + '/' + r.category + '/' +
+            (r.duration_ms == null ? '' : r.duration_ms) + '/' +
+            (r.rows_affected == null ? '' : r.rows_affected) + '/' +
             r.dedupe_count + '/' + r.group_count + '/' + (r.n_plus_one ? 1 : 0) + '/' +
             (r.dedupe_key || '') + '/' + (r.n_plus_one_key || '') + '/' + (r.expanded ? 1 : 0) + '/' +
             (r.class_simple || '') + '#' + (r.method || '') + '/' +
