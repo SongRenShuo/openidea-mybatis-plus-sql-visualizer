@@ -2269,6 +2269,10 @@ mod tests {
         assert!(page.contains("item.setAttribute('data-sort', option.token)"));
         assert!(page.contains("post({ op: 'sort', sort: sortMode })"));
         assert!(page.contains("L.sortLabel"));
+        // The button names the current mode (L2), so the order is readable
+        // without opening the popup; the popup still carries the check mark.
+        assert!(page.contains("id=\"sortBtnText\""));
+        assert!(page.contains("setText($('sortBtnText'), sortOptionLabel(sorted));"));
         // The eye-off toolbar action opens the suppression manager (lane E) —
         // it used to drop a muted-methods popup, replaced by the dialog.
         assert!(page.contains("id=\"blockedBtn\""));
