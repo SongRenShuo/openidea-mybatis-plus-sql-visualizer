@@ -50,7 +50,6 @@ use crate::analyze::sources::{self, KEY_IBATIS_STATEMENT_REQUIRED};
 use crate::analyze::{EntityColumns, entity};
 use crate::capture::bridge;
 use crate::commands::common::{self, CliError};
-use crate::core::dialect::{self, Dialect};
 use crate::core::xml::{Confidence, MapperSet, RenderOutput};
 use crate::views::{log_panel, workbench};
 
@@ -91,12 +90,10 @@ pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error>
 /// Resolve the input and render it into the workbench model.
 ///
 /// Returns the model, a one-line description (kept for `preview-sql-diff`'s
-/// diagnostics and tests), and the raw input the diff view shows on its left
-/// side (`preview-sql-diff`).
-pub fn model_for(
-    ctx: &Invocation,
-    arg: Option<&str>,
-) -> Result<(workbench::WorkbenchModel, String, String), CliError> {
+/// diagnostics and tests), the raw input the diff view shows on its left side
+/// (`preview-sql-diff`), and — for a wrapper chain — the projection the preview
+/// keeps so the page can re-render without the host re-reading the entity.
+pub fn model_for(ctx: &Invocation, arg: Option<&str>) -> Result<ModelFor, CliError> {
     let dialect = dialect_name();
     match resolve(ctx, arg)? {
         Input::Mapper {
@@ -112,7 +109,7 @@ pub fn model_for(
                 model.confidence,
                 model.sql.chars().count()
             );
-            Ok((model, detail, xml))
+            Ok((model, detail, xml, None))
         }
         Input::Ibatis {
             path,
@@ -126,7 +123,7 @@ pub fn model_for(
                 non_empty(&model.confidence),
                 model.sql.chars().count()
             );
-            Ok((model, detail, xml))
+            Ok((model, detail, xml, None))
         }
         Input::Annotation {
             path,
@@ -142,7 +139,7 @@ pub fn model_for(
                 non_empty(&model.confidence),
                 model.sql.chars().count()
             );
-            Ok((model, detail, java))
+            Ok((model, detail, java, None))
         }
         Input::Wrapper {
             text,
@@ -150,7 +147,7 @@ pub fn model_for(
             class,
             projection,
         } => {
-            let (model, label) = wrapper_model(
+            let (model, label, context) = wrapper_model(
                 &text,
                 source.as_deref(),
                 class.as_deref(),
@@ -163,7 +160,7 @@ pub fn model_for(
                 non_empty(&model.confidence),
                 model.sql.chars().count()
             );
-            Ok((model, detail, text))
+            Ok((model, detail, text, context))
         }
         Input::Text { text, source } => {
             let mut model = workbench::render_input(&text, "", &dialect);
@@ -177,10 +174,19 @@ pub fn model_for(
                 non_empty(&model.confidence),
                 model.sql.chars().count()
             );
-            Ok((model, detail, text))
+            Ok((model, detail, text, None))
         }
     }
 }
+
+/// One resolved input: the model, its one-line summary, the raw text the diff
+/// view shows, and the wrapper projection a re-render needs (if any).
+pub type ModelFor = (
+    workbench::WorkbenchModel,
+    String,
+    String,
+    Option<workbench::WrapperContext>,
+);
 
 /// A model field that may legitimately be empty, for a one-line summary.
 fn non_empty(value: &str) -> &str {
@@ -190,7 +196,7 @@ fn non_empty(value: &str) -> &str {
 /// Resolve the input, render it into the workbench model, push the log panel's
 /// state with `selectTab = "preview"` and reveal the tool window.
 fn preview(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
-    let (model, detail, raw) = model_for(ctx, arg)?;
+    let (model, detail, raw, wrapper) = model_for(ctx, arg)?;
 
     // The same handshake as `open-workbench`: the page asks for the state again
     // once its script is ready (`preview-ready` in the dialog, `ready` in the
@@ -202,6 +208,9 @@ fn preview(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     let is_mapper = model.kind == workbench::KIND_XML;
     workbench::set_model(model);
     workbench::set_mapper_source(is_mapper.then_some(raw));
+    // A wrapper render keeps its projection so the condition checkboxes can
+    // re-render; `set_model` cleared it, so it goes in after.
+    workbench::set_wrapper_context(wrapper);
     workbench::request_tab();
     workbench::request_input_replace();
     // Lane L48: the shell comes from `preview.presentation`; the dialog is a
@@ -463,8 +472,12 @@ fn document_input(ctx: &Invocation, path: &str, text: String) -> Input {
         // Even a Java file with no annotation goes to the annotation model: it
         // renders `unresolved` with "no @Select … found", which is the truth,
         // instead of pasting the class into the preview as if it were SQL.
-        if sources::annotation_statements(&text).is_empty() && sources::looks_like_wrapper(&text) {
-            return wrapper_input(ctx, &text, Some(path.to_string()));
+        // A wrapper chain is the one other source a Java file can be; the
+        // chain — never the whole file — is what the renderer reads.
+        if sources::annotation_statements(&text).is_empty()
+            && let Some(chain) = sources::wrapper_chain_near(&text, None)
+        {
+            return wrapper_input(ctx, &chain, Some(path.to_string()));
         }
         return Input::Annotation {
             path: path.to_string(),
@@ -579,10 +592,13 @@ fn editor_input(ctx: &Invocation) -> Result<Input, CliError> {
     // annotation model reports "no @Select … found" when the class has none.
     if path.to_ascii_lowercase().ends_with(".java") {
         let caret = caret_offset(&document, &selections);
+        // A wrapper chain is read at the caret (or as the document's only
+        // chain), never as the whole file: every `.method(…)` in the file is
+        // not one statement.
         if sources::annotation_statements(&document.text).is_empty()
-            && sources::looks_like_wrapper(&document.text)
+            && let Some(chain) = sources::wrapper_chain_near(&document.text, caret)
         {
-            return Ok(wrapper_input(ctx, &document.text, Some(path)));
+            return Ok(wrapper_input(ctx, &chain, Some(path)));
         }
         return Ok(Input::Annotation {
             path,
@@ -844,47 +860,92 @@ fn annotation_model(
 /// Render a wrapper chain into the model.
 ///
 /// Without a field/column projection there is no SQL to emit: the render is
-/// `unresolved` and says which class could not be used, and why.
+/// `unresolved` and says which class could not be used, and why. A projection
+/// that was read also yields the [`workbench::WrapperContext`] the preview
+/// store keeps, so the page's condition switches re-render the chain without the
+/// host reading the entity again.
 fn wrapper_model(
     text: &str,
     source: Option<&str>,
     class: Option<&str>,
     projection: &Projection,
     dialect: &str,
-) -> (workbench::WorkbenchModel, String) {
+) -> (
+    workbench::WorkbenchModel,
+    String,
+    Option<workbench::WrapperContext>,
+) {
     let label = source.unwrap_or("<wrapper>");
-    let out = match projection {
+    match projection {
         Projection::Read {
             columns,
             fully_declared,
-        } => sources::wrapper_render(text, columns, !fully_declared, dialect_of(dialect)),
-        Projection::Unknown => sources::entity_unknown(
-            label,
-            class,
-            "is not in the project index, so there is no field/column mapping",
-        ),
-        Projection::Unreadable => {
-            sources::entity_unknown(label, class, "is indexed but its file could not be read")
+        } => {
+            let derived = !fully_declared;
+            let mut model = workbench::wrapper_model(
+                text,
+                columns,
+                derived,
+                dialect,
+                &std::collections::BTreeSet::new(),
+            );
+            model.source = label.to_string();
+            let context = workbench::WrapperContext {
+                text: text.to_string(),
+                columns: columns.clone(),
+                derived,
+            };
+            (model, label.to_string(), Some(context))
         }
-        Projection::NoColumns => sources::entity_unknown(
-            label,
-            class,
-            "declares no column this reader understands (static and collection fields are skipped)",
+        Projection::Unknown => (
+            wrapper_unresolved(
+                text,
+                label,
+                class,
+                dialect,
+                "is not in the project index, so there is no field/column mapping",
+            ),
+            label.to_string(),
+            None,
         ),
-    };
-    (output_model(&out, text, label, dialect), label.to_string())
+        Projection::Unreadable => (
+            wrapper_unresolved(
+                text,
+                label,
+                class,
+                dialect,
+                "is indexed but its file could not be read",
+            ),
+            label.to_string(),
+            None,
+        ),
+        Projection::NoColumns => (
+            wrapper_unresolved(
+                text,
+                label,
+                class,
+                dialect,
+                "declares no column this reader understands (static and collection fields are skipped)",
+            ),
+            label.to_string(),
+            None,
+        ),
+    }
 }
 
-/// The settings dialect by name, falling back to [`FALLBACK_DIALECT`] for a
-/// name the dialect table does not know.
-fn dialect_of(name: &str) -> &'static Dialect {
-    dialect::by_name(name)
-        .or_else(|| {
-            dialect::all()
-                .iter()
-                .find(|known| known.name.eq_ignore_ascii_case(name))
-        })
-        .unwrap_or_else(|| dialect::by_name(FALLBACK_DIALECT).expect("the fallback dialect exists"))
+/// A wrapper render that could not run for lack of a projection, still labelled
+/// as a wrapper so the page does not present it as plain SQL.
+fn wrapper_unresolved(
+    text: &str,
+    label: &str,
+    class: Option<&str>,
+    dialect: &str,
+    detail: &str,
+) -> workbench::WorkbenchModel {
+    let out = sources::entity_unknown(label, class, detail);
+    let mut model = output_model(&out, text, label, dialect);
+    model.kind = workbench::KIND_WRAPPER.to_string();
+    model
 }
 
 /// The workbench model for a render that is not a mapper document.

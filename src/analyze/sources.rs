@@ -238,6 +238,236 @@ fn has_call(text: &str) -> bool {
 // Wrapper
 // ---------------------------------------------------------------------------
 
+/// The wrapper chain that contains `caret` in a Java document.
+///
+/// The IntelliJ edition answers this with PSI (`WrapperLocator` walks the tree
+/// from the caret). There is no PSI here, so the same question is answered over
+/// the text: the *statement* around the caret, narrowed to the wrapper
+/// construction it may wrap (`return …`, `mapper.selectList(…)`, an
+/// assignment), and — when the statement only continues a variable — that
+/// variable's declaration plus the statements before it that keep chaining.
+///
+/// Passing the whole document instead (what this replaces) made the renderer
+/// collect every `.method(…)` call in the file: the preview showed a statement
+/// no one wrote. A caret that is not in a chain yields `None`, which the caller
+/// turns into "no source at the caret" rather than a guess.
+pub fn wrapper_chain_at(java: &str, caret: usize) -> Option<String> {
+    let statements = statements(java);
+    let index = statements
+        .iter()
+        .position(|(start, end)| *start <= caret && caret <= *end)?;
+    let (start, end) = statements[index];
+    let statement = &java[start..end];
+    if let Some(chain) = as_chain(statement) {
+        return Some(chain);
+    }
+    // `wrapper.eq(…)`: the chain starts at the variable's declaration, and the
+    // statements between it and the caret that keep chaining belong to it too.
+    let receiver = receiver_ident(statement)?;
+    let assignment = format!("{receiver} =");
+    let declaration = (0..index).rev().find(|&earlier| {
+        let text = &java[statements[earlier].0..statements[earlier].1];
+        text.contains(&assignment) && as_chain(text).is_some()
+    })?;
+    let mut chain = as_chain(&java[statements[declaration].0..statements[declaration].1])?;
+    let call_prefix = format!("{receiver}.");
+    for (piece_start, piece_end) in statements.iter().take(index + 1).skip(declaration + 1) {
+        let piece = java[*piece_start..*piece_end].trim();
+        if !piece.starts_with(&call_prefix) {
+            continue;
+        }
+        chain.push('\n');
+        chain.push_str(piece);
+    }
+    if looks_like_wrapper(&chain) {
+        Some(chain)
+    } else {
+        None
+    }
+}
+
+/// The wrapper chain for a whole document: the one at `caret`, else the
+/// document's only chain.
+///
+/// A command that names a file has no caret, and the reader still means the
+/// file's single chain. Several chains mean the text alone does not say which
+/// one — `None` here, and the annotation model explains there is no
+/// `@Select`/`#{…}` statement, instead of pasting the whole file as a chain.
+pub fn wrapper_chain_near(java: &str, caret: Option<usize>) -> Option<String> {
+    if let Some(chain) = caret.and_then(|caret| wrapper_chain_at(java, caret)) {
+        return Some(chain);
+    }
+    let mut chains: Vec<String> = statements(java)
+        .into_iter()
+        .filter_map(|(start, end)| as_chain(&java[start..end]))
+        .filter(|chain| looks_like_wrapper(chain))
+        .collect();
+    if chains.len() == 1 {
+        chains.pop()
+    } else {
+        None
+    }
+}
+
+/// The wrapper constructions and factories a statement may hold. Longest-first
+/// inside a family so `new LambdaQueryWrapper` is not cut down to a prefix.
+const CHAIN_TOKENS: [&str; 8] = [
+    "new LambdaUpdateWrapper",
+    "new LambdaQueryWrapper",
+    "new UpdateWrapper",
+    "new QueryWrapper",
+    "ChainWrappers.",
+    "JoinWrappers.",
+    "MPJWrappers.",
+    "Wrappers.",
+];
+
+/// The declared generic forms: a variable declaration writes the entity in the
+/// *type* (`LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>()`), and
+/// the constructor is often a diamond. Starting the chain at the constructor
+/// would drop the only mention of the entity class, so the type counts as an
+/// entry point too.
+const TYPE_TOKENS: [&str; 4] = [
+    "LambdaUpdateWrapper<",
+    "LambdaQueryWrapper<",
+    "UpdateWrapper<",
+    "QueryWrapper<",
+];
+
+/// `statement` from its first wrapper construction on, when that is a chain.
+fn as_chain(statement: &str) -> Option<String> {
+    let mut earliest: Option<usize> = None;
+    for token in CHAIN_TOKENS.into_iter().chain(TYPE_TOKENS) {
+        if let Some(found) = statement.find(token) {
+            earliest = Some(earliest.map_or(found, |at: usize| at.min(found)));
+        }
+    }
+    let text = match earliest {
+        Some(at) => &statement[at..],
+        None => statement,
+    };
+    let text = text.trim().trim_end_matches(';').trim();
+    if looks_like_wrapper(text) {
+        Some(text.to_string())
+    } else {
+        None
+    }
+}
+
+/// The identifier a statement is called on (`wrapper.eq(…)` → `wrapper`).
+fn receiver_ident(statement: &str) -> Option<String> {
+    let text = statement.trim_start();
+    let mut end = 0usize;
+    for (index, ch) in text.char_indices() {
+        if ch.is_alphanumeric() || ch == '_' || ch == '$' {
+            end = index + ch.len_utf8();
+            continue;
+        }
+        break;
+    }
+    if end == 0 {
+        return None;
+    }
+    let rest = text[end..].trim_start();
+    if !rest.starts_with('.') {
+        return None;
+    }
+    Some(text[..end].to_string())
+}
+
+/// Statement ranges of a Java source, split on `;`, `{` and `}` outside strings
+/// and comments. Brace splitting is what keeps one method's chains out of the
+/// next one's.
+fn statements(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => {
+                index = skip_quoted(bytes, index, b'"');
+                continue;
+            }
+            b'\'' => {
+                index = skip_quoted(bytes, index, b'\'');
+                continue;
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+                continue;
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index += 2;
+                while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
+                {
+                    index += 1;
+                }
+                index = (index + 2).min(bytes.len());
+                continue;
+            }
+            b';' | b'{' | b'}' => {
+                if start < index {
+                    out.push((start, index));
+                }
+                index += 1;
+                start = index;
+                continue;
+            }
+            _ => index += 1,
+        }
+    }
+    if start < bytes.len() {
+        out.push((start, bytes.len()));
+    }
+    out
+}
+
+/// One wrapper render: the shared output plus the chain facts the preview
+/// needs to build its left column (condition rows, parameter names, table).
+#[derive(Debug, Clone)]
+pub struct WrapperRender {
+    pub output: RenderOutput,
+    pub chain: wrapper::WrapperChain,
+    /// The runtime expressions that became `?`, in SQL order.
+    pub params: Vec<String>,
+}
+
+/// [`wrapper_render`] keeping the chain and the parameter sources.
+pub fn wrapper_render_detailed(
+    text: &str,
+    columns: &EntityColumns,
+    derived: bool,
+    dialect: &Dialect,
+) -> WrapperRender {
+    wrapper_render_detailed_with(text, columns, derived, dialect, &Default::default())
+}
+
+/// [`wrapper_render_detailed`] with the preview's switched-off branches.
+///
+/// `disabled` holds the condition ids (`c0`, `c0.1`, …) the reader turned off.
+/// The chain in the result still lists every node — the page draws one row per
+/// condition and has to keep showing the ones it switched off — while the SQL
+/// and the parameters come from the filtered tree.
+pub fn wrapper_render_detailed_with(
+    text: &str,
+    columns: &EntityColumns,
+    derived: bool,
+    dialect: &Dialect,
+    disabled: &std::collections::BTreeSet<String>,
+) -> WrapperRender {
+    let out = wrapper::render_with(text, columns, dialect, disabled);
+    let params = out.params.clone();
+    let chain = out.chain.clone();
+    WrapperRender {
+        output: from_wrapper(out, derived),
+        chain,
+        params,
+    }
+}
+
 /// Renders a wrapper chain, mapping the wrapper module's result onto the shared
 /// [`RenderOutput`].
 ///
@@ -250,8 +480,7 @@ pub fn wrapper_render(
     derived: bool,
     dialect: &Dialect,
 ) -> RenderOutput {
-    let out = wrapper::render(text, columns, dialect);
-    from_wrapper(out, derived)
+    wrapper_render_detailed(text, columns, derived, dialect).output
 }
 
 fn from_wrapper(out: WrapperOutput, derived: bool) -> RenderOutput {
@@ -856,5 +1085,73 @@ public interface UserMapper {
         let error = ibatis_statement_ids("<mapper namespace=\"a\"/>").unwrap_err();
         assert_eq!(error.confidence, Confidence::Unresolved);
         assert_eq!(error.message_keys, ["ibatis.root_invalid"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Wrapper chains at the caret
+    // -----------------------------------------------------------------------
+
+    /// A wrapper built in one statement, continued by two more, then handed to
+    /// the mapper — the shape the IntelliJ edition's `WrapperLocator` walks.
+    const WRAPPER_JAVA: &str = r#"public class UserService {
+    public List<User> list(String name) {
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(User::getName, name);
+        wrapper.orderByDesc(User::getId);
+        return mapper.selectList(wrapper);
+    }
+}"#;
+
+    #[test]
+    fn a_caret_in_a_wrapper_statement_returns_that_chain() {
+        let caret = WRAPPER_JAVA.find("new LambdaQueryWrapper").unwrap() + 3;
+        let chain = wrapper_chain_at(WRAPPER_JAVA, caret).expect("the statement is a chain");
+        // The declaration writes the entity in the type; the constructor is a
+        // diamond, so the chain has to start there to keep `<User>`.
+        assert!(
+            chain.starts_with("LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>()"),
+            "{chain}"
+        );
+    }
+
+    #[test]
+    fn a_caret_in_a_chaining_statement_returns_the_declaration_and_its_calls() {
+        let caret = WRAPPER_JAVA.find("wrapper.orderByDesc").unwrap() + 3;
+        let chain = wrapper_chain_at(WRAPPER_JAVA, caret).expect("the variable's chain");
+        // The declaration and every statement between it and the caret, and
+        // nothing past it.
+        assert!(
+            chain.contains("LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>()"),
+            "{chain}"
+        );
+        assert!(chain.contains("wrapper.eq(User::getName, name)"), "{chain}");
+        assert!(chain.contains("wrapper.orderByDesc"), "{chain}");
+        assert!(!chain.contains("selectList"), "{chain}");
+    }
+
+    #[test]
+    fn a_caret_outside_every_statement_is_not_a_chain() {
+        let caret = WRAPPER_JAVA.find("public List<User>").unwrap();
+        assert_eq!(wrapper_chain_at(WRAPPER_JAVA, caret), None);
+    }
+
+    #[test]
+    fn a_document_with_one_chain_answers_without_a_caret() {
+        let chain = wrapper_chain_near(WRAPPER_JAVA, None).expect("one chain in the file");
+        assert!(
+            chain.contains("LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>()"),
+            "{chain}"
+        );
+    }
+
+    #[test]
+    fn several_chains_need_the_caret_and_none_is_guessed() {
+        let two = format!(
+            "{WRAPPER_JAVA}\nclass Other {{\n    void run() {{\n        new QueryWrapper<User>().eq(\"id\", 1);\n    }}\n}}"
+        );
+        assert_eq!(wrapper_chain_near(&two, None), None);
+        let caret = two.find("new QueryWrapper").unwrap() + 3;
+        let chain = wrapper_chain_near(&two, Some(caret)).expect("the caret names one");
+        assert!(chain.contains("new QueryWrapper<User>"), "{chain}");
     }
 }

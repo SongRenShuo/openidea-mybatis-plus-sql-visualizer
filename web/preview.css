@@ -54,10 +54,12 @@ body.pv-root { margin: 0; }
 }
 .pv-root .btn svg { width: 14px; height: 14px; flex: 0 0 auto; display: block; fill: none; }
 .pv-root .btn [data-btnlabel] { display: none; }
-/* Text buttons (input Copy / Close, the display toolbar, the dialog row). */
+/* Text buttons (input Copy / Close, the display toolbar, the dialog row, the
+   tab's own Execute / Copy row — the reference's two plain JButtons). */
 .pv-root .btn.pv-btn-text [data-btnlabel],
 .pv-root .pv-toolbar .btn [data-btnlabel],
-.pv-root .pv-dialog-actions .btn [data-btnlabel] { display: inline; }
+.pv-root .pv-dialog-actions .btn [data-btnlabel],
+.pv-root .pv-tab-actions .btn [data-btnlabel] { display: inline; }
 .pv-root .btn.pv-btn-text, .pv-root .pv-toolbar .btn { min-width: 0; }
 .pv-root .pv-toolbar .btn { font-size: 11px; padding: 1px 8px; }
 .pv-root .pv-dialog-actions .btn { font-size: 11px; padding: 2px 12px; }
@@ -102,7 +104,7 @@ body.pv-root { margin: 0; }
   flex: 1 1 auto; min-height: 0; margin: 0 8px 8px; padding: 6px 8px; resize: none;
   color: var(--openidea-fg); background: var(--openidea-bg-input);
   border: 1px solid var(--openidea-border); border-radius: 3px;
-  font: var(--openidea-font-size, 13px)/1.5 var(--openidea-font-mono, monospace);
+  font: var(--openidea-font-size, 13px)/1.5 var(--openidea-font-ui, system-ui, sans-serif);
 }
 .pv-root .pv-splitter {
   flex: 0 0 6px; cursor: row-resize; background: var(--openidea-border); opacity: 0.6;
@@ -271,7 +273,7 @@ body.pv-root { margin: 0; }
 .pv-root .pv-cond-box { flex: 0 0 auto; margin: 1px 0 0; }
 .pv-root .pv-cond-label {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--openidea-font-mono, monospace);
+  font-family: var(--openidea-font-ui, system-ui, sans-serif);
   color: var(--openidea-fg-muted);
 }
 .pv-root .pv-cond-row[data-cond-kind="when"] .pv-cond-label {
@@ -293,7 +295,7 @@ body.pv-root { margin: 0; }
   max-width: 480px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--openidea-fg-muted);
-  font-family: var(--openidea-font-mono, monospace); font-size: 11px;
+  font-family: var(--openidea-font-ui, system-ui, sans-serif); font-size: 11px;
 }
 .pv-root .pv-param-cell {
   display: flex; align-items: center; gap: 4px; min-width: 0;
@@ -302,7 +304,7 @@ body.pv-root { margin: 0; }
   flex: 1 1 auto; min-width: 0;
   background: var(--openidea-bg-input); color: var(--openidea-fg);
   border: 1px solid var(--openidea-border); border-radius: 3px; padding: 2px 4px;
-  font-family: var(--openidea-font-mono, monospace); font-size: 12px;
+  font-family: var(--openidea-font-ui, system-ui, sans-serif); font-size: 12px;
 }
 .pv-root .pv-param-warn {
   flex: 0 0 auto; color: var(--openidea-warning);
@@ -313,9 +315,6 @@ body.pv-root { margin: 0; }
 .pv-root .pv-param-injected .pv-param-name { font-style: italic; }
 .pv-root .pv-params-empty {
   color: var(--openidea-fg-muted); font-size: 11px; padding: 4px 0;
-}
-.pv-root .pv-params-actions {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 2px 0 4px;
 }
 .pv-root .pv-params .hint { font-size: 10.5px; line-height: 1.45; padding: 0 0 4px; }
 
@@ -350,8 +349,8 @@ body.pv-root { margin: 0; }
   padding: 4px 6px 4px 4px; text-align: right;
   color: var(--openidea-fg-muted); background: var(--openidea-bg);
   border-right: 1px solid var(--openidea-border);
-  font-family: var(--openidea-font-mono, monospace);
-  font-size: 12px; line-height: 18px; white-space: pre; user-select: none;
+  font-family: var(--openidea-font-ui, system-ui, sans-serif);
+  font-size: var(--openidea-font-size, 13px); line-height: 20px; white-space: pre; user-select: none;
 }
 .pv-root .pv-gutter[hidden] { display: none; }
 .pv-root #pvTabBody {
@@ -359,8 +358,8 @@ body.pv-root { margin: 0; }
   min-width: max-content;
   border: none; border-radius: 0; background: transparent;
   color: var(--openidea-fg);
-  font-family: var(--openidea-font-mono, monospace);
-  font-size: 12px; line-height: 18px;
+  font-family: var(--openidea-font-ui, system-ui, sans-serif);
+  font-size: var(--openidea-font-size, 13px); line-height: 20px;
   white-space: pre; tab-size: 4;
 }
 .pv-root #pvTabBody.pv-placeholder {
@@ -371,10 +370,20 @@ body.pv-root { margin: 0; }
 /* ---- footer --------------------------------------------------------- */
 
 .pv-root .pv-footer {
-  display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 0;
   border-top: 1px solid var(--openidea-border);
 }
 .pv-root .pv-footer[hidden] { display: none; }
+/* The tab's two text buttons, right-aligned, copy is the primary one — the
+   reference's `FlowLayout(RIGHT, 6, 4)` with `JBUI.Borders.empty(2, 6, 2, 6)`. */
+.pv-root .pv-tab-actions {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  padding: 2px 6px;
+}
+.pv-root .pv-tab-actions[hidden] { display: none; }
+.pv-root .pv-footer-status {
+  display: flex; align-items: center; gap: 8px; padding: 3px 8px;
+}
 .pv-root #pvStatus {
   flex: 1 1 auto; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; font-size: 11px;
@@ -384,3 +393,6 @@ body.pv-root { margin: 0; }
   display: flex; align-items: center; gap: 6px; margin-left: auto;
 }
 .pv-root .pv-dialog-actions[hidden] { display: none; }
+/* The input toolbar is icon-only (the reference's ActionToolbar icon mode):
+   the label is the tooltip, not a caption beside the glyph. */
+.pv-root .pv-input-toolbar .btn [data-btnlabel] { display: none; }

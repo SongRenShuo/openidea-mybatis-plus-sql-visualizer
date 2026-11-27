@@ -40,7 +40,6 @@ const TEMPLATE = `<!-- Input half (tab mount only): the standalone page actions.
     <button id="pvFormat" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="12" width="12" height="1" rx="0.5" fill="currentColor"/><rect x="6" y="6" width="8" height="1" rx="0.5" fill="currentColor"/><rect x="6" y="9" width="8" height="1" rx="0.5" fill="currentColor"/><rect x="2" y="3" width="12" height="1" rx="0.5" fill="currentColor"/><path d="M2.8 6.1C2.64849 5.98637 2.44579 5.96809 2.27639 6.05279C2.107 6.13749 2 6.31062 2 6.5V9.5C2 9.68939 2.107 9.86252 2.27639 9.94722C2.44579 10.0319 2.64849 10.0136 2.8 9.9L4.8 8.4C4.9259 8.30558 5 8.15738 5 8C5 7.84262 4.9259 7.69443 4.8 7.6L2.8 6.1Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
     <button id="pvLoadFile" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.0775 2.44037C10.1656 2.12093 9.97809 1.79054 9.65866 1.70242C9.33922 1.6143 9.00882 1.80182 8.9207 2.12126L5.76529 13.5596C5.67717 13.8791 5.86469 14.2095 6.18412 14.2976C6.50356 14.3857 6.83396 14.1982 6.92208 13.8788L10.0775 2.44037ZM5.41281 4.66699C5.61982 4.92575 5.57786 5.30332 5.31911 5.51033L1.96049 8.19723L5.31911 10.8841C5.57786 11.0911 5.61982 11.4687 5.41281 11.7275C5.20581 11.9862 4.82823 12.0282 4.56947 11.8212L0.625202 8.66575L0.0395508 8.19723L0.625202 7.7287L4.56947 4.57329C4.82823 4.36628 5.20581 4.40823 5.41281 4.66699ZM10.5872 11.7275C10.3802 11.4687 10.4222 11.0911 10.6809 10.8841L14.0395 8.19725L10.6809 5.51035C10.4222 5.30334 10.3802 4.92577 10.5872 4.66701C10.7942 4.40825 11.1718 4.3663 11.4305 4.57331L15.3748 7.72872L15.9605 8.19725L15.3748 8.66577L11.4305 11.8212C11.1718 12.0282 10.7942 11.9862 10.5872 11.7275Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
     <button id="pvClear" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
-    <button id="pvCopy" class="btn pv-btn-text" type="button"><span data-btnlabel></span></button>
     <button id="pvOpenDialog" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.00002 3H12C12.5523 3 13 3.44772 13 4V12C13 12.5523 12.5523 13 12 13H7.00002V3ZM6.00002 2H7.00002H12C13.1046 2 14 2.89543 14 4V12C14 13.1046 13.1046 14 12 14H7.00002H6.00002H4C2.89543 14 2 13.1046 2 12V4C2 2.89543 2.89543 2 4 2H6.00002ZM6.00002 13H4C3.44772 13 3 12.5523 3 12V4C3 3.44772 3.44772 3 4 3H6.00002V13Z" fill="currentColor"/><rect x="8" y="5" width="4" height="1" rx="0.5" fill="currentColor"/><rect x="8" y="7.5" width="4" height="1" rx="0.5" fill="currentColor"/><rect x="8" y="10" width="4" height="1" rx="0.5" fill="currentColor"/></svg><span data-btnlabel></span></button>
     <!-- Lane L48: shown only in the dialog page, where the host offers the
          dialog object; the tab mount leaves it hidden. -->
@@ -158,10 +157,6 @@ const TEMPLATE = `<!-- Input half (tab mount only): the standalone page actions.
           </div>
           <div id="pvParamsList"></div>
         </div>
-        <div class="pv-params-actions">
-          <button id="pvRebindBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 7.13397C14.1667 7.51888 14.1667 8.48112 13.5 8.86602L4.5 14.0622C3.83333 14.4471 3 13.966 3 13.1962L3 2.80385C3 2.03405 3.83333 1.55292 4.5 1.93782L13.5 7.13397Z" fill="none" stroke="var(--openidea-success)"/></svg><span data-btnlabel></span></button>
-          <button id="pvImportBtn" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M5.5 6C5.22386 6 5 6.22386 5 6.5C5 6.77614 5.22386 7 5.5 7H10.5C10.7761 7 11 6.77614 11 6.5C11 6.22386 10.7761 6 10.5 6H5.5Z" fill="currentColor"/><path d="M5 8.5C5 8.22386 5.22386 8 5.5 8H10.5C10.7761 8 11 8.22386 11 8.5C11 8.77614 10.7761 9 10.5 9H5.5C5.22386 9 5 8.77614 5 8.5Z" fill="currentColor"/><path d="M5.5 10C5.22386 10 5 10.2239 5 10.5C5 10.7761 5.22386 11 5.5 11H10.5C10.7761 11 11 10.7761 11 10.5C11 10.2239 10.7761 10 10.5 10H5.5Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2H10.9146C10.7087 1.4174 10.1531 1 9.5 1H6.5C5.84689 1 5.29127 1.4174 5.08535 2H4C2.89543 2 2 2.89543 2 4V13C2 14.1046 2.89543 15 4 15H12C13.1046 15 14 14.1046 14 13V4C14 2.89543 13.1046 2 12 2ZM4 3H5.08535C5.29127 3.5826 5.84689 4 6.5 4H9.5C10.1531 4 10.7087 3.5826 10.9146 3H12C12.5523 3 13 3.44772 13 4V13C13 13.5523 12.5523 14 12 14H4C3.44772 14 3 13.5523 3 13V4C3 3.44772 3.44772 3 4 3ZM6.5 2C6.22386 2 6 2.22386 6 2.5C6 2.77614 6.22386 3 6.5 3H9.5C9.77614 3 10 2.77614 10 2.5C10 2.22386 9.77614 2 9.5 2H6.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
-        </div>
         <div class="hint" id="pvParamsHint"></div>
       </div>
     </div>
@@ -184,14 +179,23 @@ const TEMPLATE = `<!-- Input half (tab mount only): the standalone page actions.
       </div>
     </div>
   </div>
-  <!-- Status line, plus the dialog's fixed action row (hidden in the tab). -->
+  <!-- Status line, plus the fixed action rows. The reference's standalone tab
+       ends with two text buttons (执行 SQL / 复制 SQL, copy is the primary one)
+       and the status line below them; the dialog carries its own four-button
+       row instead, so exactly one of the two rows is visible per shell. -->
   <div class="pv-footer" id="pvFooter" hidden>
-    <span id="pvStatus" class="muted"></span>
-    <span class="pv-dialog-actions" id="pvDialogActions" hidden>
-      <button id="pvExecute" class="btn" type="button" disabled><span data-btnlabel></span></button>
-      <button id="pvCopySql" class="btn" type="button"><span data-btnlabel></span></button>
-      <button id="pvCopyClose" class="btn pv-primary" type="button"><span data-btnlabel></span></button>
-      <button id="pvCancel" class="btn" type="button"><span data-btnlabel></span></button>
+    <span class="pv-tab-actions" id="pvTabActions" hidden>
+      <button id="pvTabExecute" class="btn" type="button" disabled><span data-btnlabel></span></button>
+      <button id="pvCopy" class="btn pv-primary" type="button"><span data-btnlabel></span></button>
+    </span>
+    <span class="pv-footer-status">
+      <span id="pvStatus" class="muted"></span>
+      <span class="pv-dialog-actions" id="pvDialogActions" hidden>
+        <button id="pvExecute" class="btn" type="button" disabled><span data-btnlabel></span></button>
+        <button id="pvCopySql" class="btn" type="button"><span data-btnlabel></span></button>
+        <button id="pvCopyClose" class="btn pv-primary" type="button"><span data-btnlabel></span></button>
+        <button id="pvCancel" class="btn" type="button"><span data-btnlabel></span></button>
+      </span>
     </span>
   </div>
 </div>`;
@@ -212,6 +216,7 @@ const PV_TEXT = {
     table: '表:',
     kindSql: 'SQL',
     kindXml: 'Mapper XML',
+    kindWrapper: 'Wrapper',
     stmtType: '语句: {0}',
     copyError: '复制错误信息',
     copyErrorEmpty: '本次渲染没有可复制的错误信息',
@@ -256,6 +261,7 @@ const PV_TEXT = {
     paramObject: '{"id": 1}',
     paramsEmpty: '无未解析参数',
     copySql: '复制 SQL',
+    execute: '执行 SQL',
     copySqlAndClose: '复制 SQL 并关闭',
     cancel: '取消',
     copyCloseNote: '复制当前 SQL 并关闭预览',
@@ -266,6 +272,7 @@ const PV_TEXT = {
     table: 'Table:',
     kindSql: 'SQL',
     kindXml: 'Mapper XML',
+    kindWrapper: 'Wrapper',
     stmtType: 'Statement: {0}',
     copyError: 'Copy error',
     copyErrorEmpty: 'This render carries no error text',
@@ -310,6 +317,7 @@ const PV_TEXT = {
     paramObject: '{"id": 1}',
     paramsEmpty: 'No unresolved parameter',
     copySql: 'Copy SQL',
+    execute: 'Execute SQL',
     copySqlAndClose: 'Copy SQL and close',
     cancel: 'Cancel',
     copyCloseNote: 'Copy the current SQL and close the preview',
@@ -729,13 +737,16 @@ export function mountPreview(root, deps) {
   /** The footer is the status line plus the dialog's action row; with an empty
    *  status and no dialog row it takes no height at all. */
   function updateFooter() {
-    const status = node('pvStatus');
     const actions = node('pvDialogActions');
+    const tabActions = node('pvTabActions');
     const footer = node('pvFooter');
     if (actions) { actions.hidden = !dialogBridge; }
+    if (tabActions) { tabActions.hidden = !!dialogBridge; }
     if (footer) {
-      const hasStatus = !!(status && status.textContent.trim());
-      footer.hidden = !hasStatus && !dialogBridge;
+      // Both mounts keep the row: the tab carries Execute / Copy (the
+      // reference's two plain buttons), the dialog its four. It never
+      // collapses, so the status line below has a home.
+      footer.hidden = false;
     }
   }
 
@@ -930,6 +941,19 @@ export function mountPreview(root, deps) {
     for (let index = 0; index < ids.length; index++) {
       setText(node(ids[index]), labels[PV_LABEL_KEYS[ids[index]]]);
     }
+    // The tab's input toolbar is icon-only, as the reference's ActionToolbar in
+    // icon mode: the label is the tooltip and the accessible name, never a
+    // piece of text next to the glyph.
+    const iconOnly = ['pvResolve', 'pvFormat', 'pvLoadFile', 'pvClear', 'pvOpenDialog'];
+    for (let index = 0; index < iconOnly.length; index++) {
+      const button = node(iconOnly[index]);
+      if (!button) { continue; }
+      const text = labels[PV_LABEL_KEYS[iconOnly[index]]] || '';
+      if (text) {
+        button.title = text;
+        button.setAttribute('aria-label', text);
+      }
+    }
     const openDialog = node('pvOpenDialog');
     if (openDialog) {
       // Lane L48: the tab mount can pop the preview out into the dialog; inside
@@ -1021,7 +1045,7 @@ export function mountPreview(root, deps) {
       qualifyBtn.title = labels.qualifyNote || '';
     }
     // The dialog's fixed action row.
-    setText(node('pvExecute'), labels.execute || L('executeNote'));
+    setText(node('pvExecute'), labels.execute || L('execute'));
     const executeButton = node('pvExecute');
     if (executeButton) {
       executeButton.disabled = true;
@@ -1035,6 +1059,16 @@ export function mountPreview(root, deps) {
       copyClose.setAttribute('aria-label', L('copyCloseNote'));
     }
     setText(node('pvCancel'), L('cancel'));
+    // The tab's own action row (the reference's two text buttons). "执行 SQL"
+    // has no execution channel in this build and says so; "复制 SQL" is the
+    // primary action, exactly like the reference's `PRIMARY_BOTTOM_INDEX = 1`.
+    setText(node('pvTabExecute'), labels.execute || L('execute'));
+    const tabExecute = node('pvTabExecute');
+    if (tabExecute) {
+      tabExecute.disabled = true;
+      tabExecute.title = labels.executeNote || L('executeNote');
+    }
+    setText(node('pvCopy'), labels.copySql || L('copySql'));
     const bannerClose = node('pvBannerClose');
     if (bannerClose) {
       bannerClose.textContent = '\u00d7';
@@ -1042,8 +1076,6 @@ export function mountPreview(root, deps) {
       bannerClose.setAttribute('aria-label', labels.bannerDismiss || '');
     }
     setText(node('pvInputHint'), labels.hintInput);
-    setText(node('pvRebindBtn'), labels.rebind || '');
-    setText(node('pvImportBtn'), labels.importClipboard || '');
     const buttons = tabButtons();
     for (let tabIndex = 0; tabIndex < buttons.length; tabIndex++) {
       const key = buttons[tabIndex].getAttribute('data-pvtab');
@@ -1059,17 +1091,39 @@ export function mountPreview(root, deps) {
   // `#{}` name, its class, the placeholder an empty box shows and the value the
   // render bound; a model without it (an older host, a command-built model)
   // falls back to the ordinal rows this page shipped before.
+  // The structural signature decides whether the rows have to be rebuilt. The
+  // bound value is deliberately not part of it: the host re-pushes a state after
+  // every `preview-params`, and rebuilding on a value change would take the
+  // caret away from the box the reader is typing in (the Playwright acceptance
+  // run saw the box replaced ~150 ms after every keystroke, focus back on
+  // `body`). Values are written in place by `syncParamValues` instead.
   function paramSignature(parameters, params) {
     if (parameters.length) {
       const parts = [];
       for (let i = 0; i < parameters.length; i++) {
         const p = parameters[i] || {};
-        parts.push([p.name, p.kind, p.value, p.placeholder, p.warning,
+        parts.push([p.name, p.kind, p.placeholder, p.warning,
           p.injected ? '1' : '0'].join('\u0002'));
       }
       return parts.join('\u0001');
     }
-    return params.join('\u0001');
+    return 'n=' + params.length;
+  }
+
+  /** Writes the render's bound values into the boxes that already exist.
+   *  The focused box is left alone: the reader's text is the newer value, and
+   *  assigning `value` would also reset the caret. */
+  function syncParamValues(parameters, params) {
+    const host = node('pvParamsList');
+    if (!host) { return; }
+    const boxes = host.querySelectorAll('.pv-param-input');
+    for (let i = 0; i < boxes.length; i++) {
+      const box = boxes[i];
+      if (box === doc.activeElement) { continue; }
+      const meta = parameters[i] || null;
+      const value = meta ? (meta.value || '') : (params[i] == null ? '' : params[i]);
+      if (box.value !== value) { box.value = value; }
+    }
   }
 
   /** Middle-ellipsis for the name column: the head and tail both identify the
@@ -1260,31 +1314,16 @@ export function mountPreview(root, deps) {
     updateConditionsToggle();
   }
 
-  // Rebind / Import availability: no values -> nothing to rebind; no clipboard
-  // API (the capability gates navigator.clipboard in a web view) -> the import
-  // button is greyed with the reason in its tooltip.
+  // The parameter column has no buttons of its own (the reference's
+  // `SqlPreviewPanelParamPanel` ends its rows and stops there): a value edit
+  // re-renders through the debounce below, and "导入参数" lives in "More".
+  // Only that menu entry and the hint line need their availability updated.
   function updateParamsActions() {
     const labels = preview.labels || {};
     const m = preview.model || {};
     const count = Array.isArray(m.parameters) && m.parameters.length
       ? m.parameters.length
       : (m.params || []).length;
-    const rebindBtn = node('pvRebindBtn');
-    if (rebindBtn) {
-      rebindBtn.disabled = count === 0;
-      rebindBtn.title = count === 0
-        ? (labels.paramsEmpty || L('paramsEmpty'))
-        : (labels.paramsHint || '');
-    }
-    const importBtn = node('pvImportBtn');
-    if (importBtn) {
-      const api = !!(navigator.clipboard && navigator.clipboard.readText);
-      const blocked = !api || clipboardMissing;
-      importBtn.disabled = blocked || count === 0;
-      importBtn.title = blocked
-        ? (labels.clipboardMissing || '')
-        : (count === 0 ? (labels.paramsEmpty || L('paramsEmpty')) : '');
-    }
     const moreImport = node('pvImportParams');
     if (moreImport) {
       const api = !!(navigator.clipboard && navigator.clipboard.readText);
@@ -1331,14 +1370,18 @@ export function mountPreview(root, deps) {
     setText(node('pvDialectChip'), (labels.dialect || L('dialect')) + ' ' + name + suffix);
     const chip = node('pvDialectChip');
     if (chip) { chip.title = dialect.capabilities || ''; }
-    // Type: the input kind the render came from (SQL / mapper XML).
+    // Type: the input kind the render came from (SQL / mapper XML / a wrapper
+    // chain).
     const kindText = m.kind === 'sql' ? L('kindSql')
-      : m.kind === 'xml' ? L('kindXml') : (m.kind || '');
+      : m.kind === 'xml' ? L('kindXml')
+        : m.kind === 'wrapper' ? (labels.kindWrapper || L('kindWrapper'))
+          : (m.kind || '');
     setText(node('pvKindValue'), kindText);
     const kindWrap = node('pvKindWrap');
     if (kindWrap) { kindWrap.hidden = !kindText; }
-    // The table segment has no source in this render; it stays hidden rather
-    // than guessing a table out of the statement.
+    // The table the render knows it touches (a wrapper's entity table). Every
+    // other source leaves it empty and the segment hides, rather than guessing
+    // a table out of the statement text.
     const table = m.table || '';
     setText(node('pvTableValue'), table);
     const tableWrap = node('pvTableWrap');
@@ -1369,6 +1412,10 @@ export function mountPreview(root, deps) {
     }
     const diffButton = node('pvDiff');
     if (diffButton) { diffButton.disabled = !m.sql; }
+    // The tab's own Copy needs a statement, like the reference's disabled
+    // action; Execute never enables (this build has no execution channel).
+    const tabCopy = node('pvCopy');
+    if (tabCopy) { tabCopy.disabled = !m.sql; }
     const shareButton = node('pvShare');
     if (shareButton) { shareButton.disabled = !m.sql; }
 
@@ -1384,8 +1431,13 @@ export function mountPreview(root, deps) {
     const params = m.params || [];
     const parameters = Array.isArray(m.parameters) ? m.parameters : [];
     // Rebuild the inputs only when the parameter list itself changed: a push
-    // that carries the same list must leave the user's edits alone.
-    if (paramSignature(parameters, params) !== pvParamsSig) { buildParams(); }
+    // that carries the same list must leave the user's edits — and the caret —
+    // alone, so its values are written into the existing boxes.
+    if (paramSignature(parameters, params) !== pvParamsSig) {
+      buildParams();
+    } else {
+      syncParamValues(parameters, params);
+    }
     updateParamsActions();
     buildConditions();
     // The "参数" header follows the condition section (the reference only adds
@@ -1573,13 +1625,29 @@ export function mountPreview(root, deps) {
     }
   });
 
-  // Lane L27: rebind the edited values into the SQL.
-  on('pvRebindBtn', function () {
+  // Lane L27→原版对齐：参数值改动即写入 SQL。原版 `buildParamRow` 的
+  // `DocumentListener` 每击键都调 `scheduleRender`（150 ms 防抖），没有
+  // 「重绑定」按钮；这里同样只在停手后发一次，避免每击键重建整条语句。
+  const PARAM_DEBOUNCE_MS = 150;
+  let paramTimer = 0;
+  function postParamValues() {
     const inputs = paramInputs();
     const values = [];
     for (let i = 0; i < inputs.length; i++) { values.push(inputs[i].value); }
     post({ op: 'preview-params', values: values });
-  });
+  }
+  function onParamInput() {
+    if (paramTimer) { clearTimeout(paramTimer); }
+    paramTimer = setTimeout(function () {
+      paramTimer = 0;
+      postParamValues();
+    }, PARAM_DEBOUNCE_MS);
+  }
+  const paramsHost = node('pvParamsList');
+  if (paramsHost) {
+    paramsHost.addEventListener('input', onParamInput);
+    paramsHost.addEventListener('change', onParamInput);
+  }
   // C07: the section header's toggle flips every branch at once; the map is
   // complete, so the host applies exactly what the page shows.
   function setAllConditions(value) {
@@ -1613,7 +1681,6 @@ export function mountPreview(root, deps) {
     for (let i = 0; i < inputs.length; i++) { values.push(''); }
     post({ op: 'preview-params', values: values });
   });
-  on('pvImportBtn', function () { importFromClipboard(); });
   on('pvImportParams', function () { closeMore(); importFromClipboard(); });
   function importFromClipboard() {
     if (!(navigator.clipboard && navigator.clipboard.readText)) {

@@ -37,7 +37,9 @@ pub fn run(ctx: &Invocation, arg: Option<&str>) -> Result<Option<String>, Error>
 }
 
 fn open(ctx: &Invocation, arg: Option<&str>) -> Result<(), CliError> {
-    let (model, _detail, raw) = preview_sql::model_for(ctx, arg)?;
+    // The diff view only reads the render: the wrapper projection (fourth
+    // value) is the preview store's business, not the diff's.
+    let (model, _detail, raw, _wrapper) = preview_sql::model_for(ctx, arg)?;
     let sql = model.sql.trim_end();
     if sql.trim().is_empty() {
         return Err(CliError::new(

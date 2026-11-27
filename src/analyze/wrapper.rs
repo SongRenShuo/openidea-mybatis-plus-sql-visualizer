@@ -118,13 +118,15 @@ pub enum Value {
     Num(String),
     Bool(bool),
     Null,
-    /// A runtime expression we cannot evaluate — renders as `?`.
-    Param,
+    /// A runtime expression we cannot evaluate — renders as `?`. The expression
+    /// text is kept so the preview can name the parameter row (`#username`)
+    /// the way the IntelliJ edition's `ArgResolver` does.
+    Param(String),
 }
 
 impl Value {
     fn is_param(&self) -> bool {
-        matches!(self, Value::Param)
+        matches!(self, Value::Param(_))
     }
 }
 
@@ -173,9 +175,94 @@ pub struct WrapperOutput {
     pub confidence: Confidence,
     pub sql: Option<String>,
     pub chain: WrapperChain,
+    /// The runtime expressions that became `?`, in the order the SQL has them.
+    /// The preview shows one editable row per entry, named after the expression
+    /// (`#username`), the way the IntelliJ edition's parameter column does.
+    pub params: Vec<String>,
     /// Localization keys for the UI; empty when `Exact`.
     pub message_keys: Vec<String>,
     pub notes: Vec<String>,
+}
+
+/// The `#name` of every `?` in `sql`, in order, taken from the chain.
+///
+/// A leaf renders its values in order, and every leaf in `conditions` renders
+/// (a skipped `eq(false, …)` never reaches the tree), so walking the tree the
+/// way `render_nodes` does yields exactly the placeholders' order.
+pub fn param_sources(nodes: &[CondNode]) -> Vec<String> {
+    let mut out = Vec::new();
+    for node in nodes {
+        match node {
+            CondNode::Leaf(condition) => {
+                for value in &condition.values {
+                    if let Value::Param(source) = value {
+                        out.push(source.clone());
+                    }
+                }
+            }
+            CondNode::Group { inner, .. } => out.extend(param_sources(inner)),
+        }
+    }
+    out
+}
+
+/// One row per condition: `(id, label)`.
+///
+/// `id` is the node's position in the tree (`c0`, `c0.1`, …) — stable across a
+/// re-render with some branches switched off, which is what lets the page keep
+/// the reader's choices under the same paths. A group is one row labelled with
+/// its rendered body; its children follow, so a nested `or(…)` can be switched
+/// as a whole and per branch, as the reference's Wrapper rows do.
+pub fn condition_labels(nodes: &[CondNode], dialect: &Dialect) -> Vec<(String, String)> {
+    labels_with(nodes, CONDITION_ID_PREFIX, dialect)
+}
+
+fn labels_with(nodes: &[CondNode], prefix: &str, dialect: &Dialect) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (index, node) in nodes.iter().enumerate() {
+        let id = format!("{prefix}{index}");
+        let label = match node {
+            CondNode::Leaf(condition) => render_leaf(condition, dialect),
+            CondNode::Group { inner, .. } => format!("({})", render_nodes(inner, dialect)),
+        };
+        if label.is_empty() {
+            continue;
+        }
+        out.push((id.clone(), label));
+        if let CondNode::Group { inner, .. } = node {
+            out.extend(labels_with(inner, &format!("{id}."), dialect));
+        }
+    }
+    out
+}
+
+/// The prefix every condition id starts with, so a page can tell a wrapper row
+/// from a mapper `<if>` id at a glance.
+const CONDITION_ID_PREFIX: &str = "c";
+
+/// The tree with the branches the reader switched off removed. Ids are the
+/// positions in the *original* tree, so a switch keeps meaning the same node
+/// after its neighbours changed.
+fn filter_disabled(
+    nodes: &[CondNode],
+    prefix: &str,
+    disabled: &std::collections::BTreeSet<String>,
+) -> Vec<CondNode> {
+    let mut out = Vec::new();
+    for (index, node) in nodes.iter().enumerate() {
+        let id = format!("{prefix}{index}");
+        if disabled.contains(&id) {
+            continue;
+        }
+        match node {
+            CondNode::Leaf(leaf) => out.push(CondNode::Leaf(leaf.clone())),
+            CondNode::Group { connector, inner } => out.push(CondNode::Group {
+                connector: *connector,
+                inner: filter_disabled(inner, &format!("{id}."), disabled),
+            }),
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +274,20 @@ pub struct WrapperOutput {
 /// `columns` supplies the field → column projection; `dialect` controls pagination
 /// shape and identifier quoting.
 pub fn render(text: &str, columns: &EntityColumns, dialect: &Dialect) -> WrapperOutput {
+    render_with(text, columns, dialect, &std::collections::BTreeSet::new())
+}
+
+/// [`render`] with the condition branches the preview's reader switched off.
+///
+/// The returned `chain` keeps the *whole* tree — the page draws one row per
+/// node and needs the switched-off ones to stay listed — while `sql` and
+/// `params` come from the filtered tree.
+pub fn render_with(
+    text: &str,
+    columns: &EntityColumns,
+    dialect: &Dialect,
+    disabled: &std::collections::BTreeSet<String>,
+) -> WrapperOutput {
     let mut ctx = Ctx {
         columns,
         notes: Vec::new(),
@@ -208,6 +309,7 @@ pub fn render(text: &str, columns: &EntityColumns, dialect: &Dialect) -> Wrapper
                 table: non_empty(&columns.table),
                 ..Default::default()
             },
+            params: Vec::new(),
             message_keys: vec!["wrapper.not_a_wrapper".to_string()],
             notes: vec!["no wrapper class or method call found in the source".to_string()],
         };
@@ -249,16 +351,23 @@ pub fn render(text: &str, columns: &EntityColumns, dialect: &Dialect) -> Wrapper
         Confidence::Exact
     };
 
+    // The SQL comes from the switched-on branches only; the chain keeps the
+    // whole tree so the page can still list what the reader switched off.
+    let mut effective = chain.clone();
+    effective.conditions = filter_disabled(&chain.conditions, CONDITION_ID_PREFIX, disabled);
+
     let sql = match (confidence, chain.kind) {
         (Confidence::Unresolved, _) => None,
-        (_, WrapperKind::Query) => Some(render_select(&chain, dialect)),
-        (_, WrapperKind::Update) => render_fragment(&chain, dialect),
+        (_, WrapperKind::Query) => Some(render_select(&effective, dialect)),
+        (_, WrapperKind::Update) => render_fragment(&effective, dialect),
     };
 
+    let params = param_sources(&effective.conditions);
     WrapperOutput {
         confidence,
         sql,
         chain,
+        params,
         message_keys: ctx.message_keys,
         notes: ctx.notes,
     }
@@ -716,7 +825,7 @@ fn parse_value(raw: &str) -> Value {
     if is_number(t) {
         return Value::Num(t.trim_end_matches(['L', 'l']).to_string());
     }
-    Value::Param
+    Value::Param(t.to_string())
 }
 
 /// A lambda field reference `User::getStatus` → `(User, getStatus)`.
@@ -963,7 +1072,7 @@ fn value_pattern_text(v: &Value) -> String {
         Value::Num(n) => n.clone(),
         Value::Bool(b) => b.to_string(),
         Value::Null => "NULL".to_string(),
-        Value::Param => "?".to_string(),
+        Value::Param(_) => "?".to_string(),
     }
 }
 
@@ -985,7 +1094,7 @@ fn render_value(v: &Value, dialect: &Dialect) -> String {
             }
         }
         Value::Null => "NULL".to_string(),
-        Value::Param => "?".to_string(),
+        Value::Param(_) => "?".to_string(),
     }
 }
 

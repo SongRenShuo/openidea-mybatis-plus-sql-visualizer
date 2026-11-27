@@ -31,6 +31,7 @@ use openidea_plugin::{ContentDiff, Error, Invocation, PickItem, host};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::analyze::{sources, wrapper};
 use crate::core::perf::{self, Severity};
 use crate::core::xml::intercept::{self, InterceptConfig};
 use crate::core::xml::param;
@@ -43,6 +44,8 @@ use crate::settings;
 pub const KIND_SQL: &str = "sql";
 /// The input is a mapper XML fragment and is rendered into statements.
 pub const KIND_XML: &str = "xml";
+/// The input is a MyBatis-Plus wrapper chain and is rendered into SQL.
+pub const KIND_WRAPPER: &str = "wrapper";
 
 /// The schema-declared setting the dialect comes from (`settings.schema.json`).
 const DIALECT_SETTING: &str = "dialect.default";
@@ -128,6 +131,11 @@ pub struct WorkbenchModel {
     /// list and re-render from it without a second lookup.
     #[serde(default)]
     pub conditions: Vec<ConditionView>,
+    /// The table the render knows it touches (a wrapper's entity table). Empty
+    /// means "not known", never "no table": the page hides the segment instead
+    /// of guessing one out of the statement text.
+    #[serde(default)]
+    pub table: String,
 }
 
 /// One named parameter of the current render (C06).
@@ -182,6 +190,21 @@ pub struct ConditionView {
     pub group: String,
 }
 
+/// What a wrapper render needs to run again: the chain text plus the
+/// field→column projection the command read out of the project.
+///
+/// The model cannot carry this (the page has no use for the projection, and the
+/// chain is the "原文" text anyway), so the preview store keeps it beside the
+/// mapper document: both let the page re-render without the host shipping the
+/// source again. `derived` is the `@TableField`-less projection flag, which
+/// downgrades an otherwise `exact` render to `partial`.
+#[derive(Debug, Clone)]
+pub struct WrapperContext {
+    pub text: String,
+    pub columns: crate::analyze::wrapper::EntityColumns,
+    pub derived: bool,
+}
+
 impl Default for WorkbenchModel {
     fn default() -> Self {
         Self {
@@ -199,6 +222,7 @@ impl Default for WorkbenchModel {
             statement: String::new(),
             parameters: Vec::new(),
             conditions: Vec::new(),
+            table: String::new(),
         }
     }
 }
@@ -630,6 +654,97 @@ pub(crate) fn apply_parameters(model: &mut WorkbenchModel, detailed: &DetailedRe
     }
 }
 
+/// Renders a MyBatis-Plus wrapper chain into the model (the "Wrappers" source).
+///
+/// `columns` is the entity's field→column projection and `derived` says it came
+/// from MyBatis-Plus defaults rather than `@TableField` (an otherwise `exact`
+/// render is then `partial`). `disabled` holds the condition ids the reader
+/// switched off, so the page's checkboxes and the SQL always agree.
+///
+/// The chain's parameter sources name the rows (`#username`), but their values
+/// are runtime expressions this build cannot evaluate: the boxes start empty and
+/// typing a value re-binds it into the `?`, exactly like a mapper render.
+pub fn wrapper_model(
+    text: &str,
+    columns: &wrapper::EntityColumns,
+    derived: bool,
+    dialect_name: &str,
+    disabled: &std::collections::BTreeSet<String>,
+) -> WorkbenchModel {
+    let dialect = dialect_by_setting(dialect_name);
+    let render = sources::wrapper_render_detailed_with(text, columns, derived, dialect, disabled);
+    let out = &render.output;
+
+    let mut model = WorkbenchModel::new("", Vec::new(), dialect_name);
+    model.kind = KIND_WRAPPER.to_string();
+    model.raw = text.to_string();
+    model.confidence = confidence_str(out.confidence).to_string();
+    model.table = render.chain.table.clone().unwrap_or_default();
+    model.reason = reason_lines(out).join("\n");
+    model.conditions = wrapper_conditions(&render.chain, dialect, disabled);
+    if out.confidence == Confidence::Unresolved {
+        // `unresolved` never carries SQL, and no placeholder exists to name.
+        model.sql.clear();
+        model.params.clear();
+        model.parameters.clear();
+    } else {
+        model.sql = out.sql.trim_end().to_string();
+        model.params = vec![String::new(); render.params.len()];
+        model.parameters = render
+            .params
+            .iter()
+            .map(|source| ParamView {
+                name: format!("#{source}"),
+                // A wrapper value is a runtime expression: the type is unknown
+                // until the reader types something, so no hint is shown.
+                kind: "unknown".to_string(),
+                kind_source: "none".to_string(),
+                placeholder: String::new(),
+                value: String::new(),
+                warning: String::new(),
+                injected: false,
+            })
+            .collect();
+    }
+    model
+}
+
+/// The dialect the settings named, accepting any case of a known name (a value
+/// written by hand may differ); an unknown name falls back to MySQL, the same
+/// rule [`configured_dialect`] applies.
+fn dialect_by_setting(name: &str) -> &'static dialect::Dialect {
+    dialect::by_name(name)
+        .or_else(|| {
+            dialect::all()
+                .iter()
+                .find(|known| known.name.eq_ignore_ascii_case(name))
+        })
+        .or_else(|| dialect::by_name(FALLBACK_DIALECT))
+        .expect("the fallback dialect exists")
+}
+
+/// The wrapper chain's condition rows, each `enabled` unless the reader turned
+/// it off. Ids are tree paths (`c0`, `c0.1`), so a switch survives a re-render.
+fn wrapper_conditions(
+    chain: &wrapper::WrapperChain,
+    dialect: &dialect::Dialect,
+    disabled: &std::collections::BTreeSet<String>,
+) -> Vec<ConditionView> {
+    wrapper::condition_labels(&chain.conditions, dialect)
+        .into_iter()
+        .map(|(id, label)| {
+            let enabled = !disabled.contains(&id);
+            ConditionView {
+                id,
+                label,
+                enabled,
+                kind: KIND_WRAPPER.to_string(),
+                group: String::new(),
+            }
+        })
+        .collect()
+}
+
 /// The name the pane shows for a `#{}` placeholder.
 ///
 /// A `<foreach>` rewrites its item to `__frch_<item>_<n>` before the values are
@@ -922,6 +1037,10 @@ struct PreviewStore {
     /// page can switch statements by id without shipping the file back. `None`
     /// for inline SQL and log rows, which have nothing to switch.
     mapper_xml: Option<String>,
+    /// The wrapper render's context (chain text + field→column projection).
+    /// `None` unless the current model came from a wrapper chain; the condition
+    /// switches and the parameter rows re-render through it.
+    wrapper: Option<WrapperContext>,
     /// The display state (lane L45, four modes + compact): the page paints the
     /// shaped text, the host only remembers the choice so a remount (or the
     /// standalone page reloading) restores it. The SQL itself is never touched.
@@ -932,6 +1051,12 @@ struct PreviewStore {
     /// so a refresh or a statement switch keeps the reader's choices while a
     /// newly typed document starts from its own defaults.
     conditions: BTreeMap<String, bool>,
+    /// The SQL as the render produced it, before any parameter value was
+    /// written in. Parameter edits re-bind from this copy, because the model's
+    /// `sql` no longer holds the `?` placeholders after the first one — the
+    /// reference re-renders the statement instead, which the host cannot do
+    /// without the whole render context.
+    sql_base: String,
 }
 
 static PREVIEW: OnceLock<Mutex<PreviewStore>> = OnceLock::new();
@@ -950,8 +1075,12 @@ fn preview_store() -> MutexGuard<'static, PreviewStore> {
 /// [`set_mapper_source`] right after, which is the only way the stash is set.
 pub fn set_model(model: WorkbenchModel) {
     let mut store = preview_store();
+    store.sql_base = model.sql.clone();
     store.model = model;
     store.mapper_xml = None;
+    // A hand-set model carries no wrapper projection either; the caller that
+    // rendered one calls `set_wrapper_context` right after.
+    store.wrapper = None;
     // C07: the switches belong to the document that produced them.
     store.conditions.clear();
 }
@@ -969,6 +1098,20 @@ pub fn set_mapper_source(xml: Option<String>) {
 /// The mapper document the current render came from, if any (lane L45).
 pub fn mapper_source() -> Option<String> {
     preview_store().mapper_xml.clone()
+}
+
+/// Hands a wrapper render's context to the store (see [`WrapperContext`]).
+///
+/// Like [`set_mapper_source`], this is set right after [`set_model`] by the
+/// caller that produced the render: the model carries what the page draws, the
+/// context carries what a re-render needs.
+pub fn set_wrapper_context(context: Option<WrapperContext>) {
+    preview_store().wrapper = context;
+}
+
+/// The wrapper context of the current render, if it came from a wrapper chain.
+pub fn wrapper_context() -> Option<WrapperContext> {
+    preview_store().wrapper.clone()
 }
 
 /// The display state as the page last set it (lane L45): the four modes plus
@@ -1010,11 +1153,14 @@ pub(crate) fn restore_oneshot_flags(flags: (bool, bool)) {
 pub fn clear() {
     let mut store = preview_store();
     store.model = WorkbenchModel::default();
+    store.sql_base.clear();
     // Nothing is left to replace or format once the model is gone.
     store.replace_input = false;
     store.handoff = false;
     // No statements to switch between once the render is gone.
     store.mapper_xml = None;
+    // Nor a wrapper to re-render.
+    store.wrapper = None;
     // C07: and no condition switches either.
     store.conditions.clear();
 }
@@ -1118,6 +1264,10 @@ pub fn preview_tab() -> Value {
             "confidence": &current.confidence,
             "source": &current.source,
             "kind": &current.kind,
+            // The table a wrapper render knows it touches; every other source
+            // leaves this empty and the page hides the segment instead of
+            // guessing one out of the statement text.
+            "table": &current.table,
             "reason": &current.reason,
             // The page wears a degradation strip whenever this is true: an
             // `unresolved` render carries no SQL, only reasons (lane L35b).
@@ -1661,6 +1811,9 @@ fn render_with_store(text: &str, kind: &str, dialect_name: &str) -> WorkbenchMod
 /// kept, and lets the next state push carry the new SQL and the new list. The
 /// input box is left alone: a switch is not an edit of the source.
 fn apply_conditions(message: &Value) {
+    if let Some(context) = wrapper_context() {
+        return apply_wrapper_conditions(message, context);
+    }
     let Some(xml) = mapper_source() else {
         return;
     };
@@ -1701,7 +1854,54 @@ fn apply_conditions(message: &Value) {
     set_status(status, false);
 }
 
-/// Re-renders the statement the picker named (lane L45).
+/// Re-renders a wrapper chain with the page's condition switches.
+///
+/// A wrapper render has no document and no statement id, so this is the wrapper
+/// counterpart of the mapper branch above: same message, same "unknown id is
+/// ignored" rule, but the re-render goes through [`wrapper_model`] with the
+/// store's projection.
+fn apply_wrapper_conditions(message: &Value, context: WrapperContext) {
+    let current = model();
+    if current.conditions.is_empty() {
+        return;
+    }
+    let mut switched = condition_switches(&current);
+    if let Some(map) = message.get("conditions").and_then(Value::as_object) {
+        for (id, value) in map {
+            if switched.contains_key(id)
+                && let Some(enabled) = value.as_bool()
+            {
+                switched.insert(id.clone(), enabled);
+            }
+        }
+    }
+    if switched == condition_switches(&current) {
+        return;
+    }
+    // The renderer takes the branches to drop; the chain keeps every node so
+    // the page can switch one back on.
+    let disabled: std::collections::BTreeSet<String> = switched
+        .iter()
+        .filter(|(_, enabled)| !**enabled)
+        .map(|(id, _)| id.clone())
+        .collect();
+    let (dialect_name, _) = configured_dialect();
+    let mut next = wrapper_model(
+        &context.text,
+        &context.columns,
+        context.derived,
+        &dialect_name,
+        &disabled,
+    );
+    next.dialect = dialect_name;
+    // The source label describes the chain, not the switches.
+    next.source = current.source;
+    let status = status_for(&next);
+    set_model(next);
+    set_wrapper_context(Some(context));
+    preview_store().conditions = switched;
+    set_status(status, false);
+}
 ///
 /// The document comes from the store, not from the page: the page only knows
 /// the ids. An id the current model does not list — or a render with no mapper
@@ -1916,9 +2116,19 @@ fn rebind_params(values: Vec<String>) {
         set_status(t("view.workbench.status.params_empty"), false);
         return;
     }
-    let had_placeholders = current.sql.contains('?');
+    // Bind from the render's own SQL, not from what the last edit left: the
+    // placeholders are gone after the first substitution, and the page now
+    // re-binds on every (debounced) keystroke — the reference re-renders the
+    // statement instead, which needs the whole render context.
+    let base = preview_store().sql_base.clone();
+    let base = if base.trim().is_empty() {
+        current.sql.clone()
+    } else {
+        base
+    };
+    let had_placeholders = base.contains('?');
     let literals: Vec<String> = values.iter().map(|value| param_literal(value)).collect();
-    let rebound = crate::core::log::restore_rendered(&current.sql, &literals);
+    let rebound = crate::core::log::restore_rendered(&base, &literals);
     let mut next = current;
     next.sql = rebound;
     next.params = values;
@@ -1932,7 +2142,20 @@ fn rebind_params(values: Vec<String>) {
         param.warning = key.map(t).unwrap_or_default();
         param.value = value;
     }
+    // `set_model` drops the document / projection and the switches, because a
+    // model set by hand may come from anywhere. This is the *same* render with
+    // one value written in, so the statement picker, the wrapper projection and
+    // the condition checkboxes have to survive the rebind.
+    let mapper = mapper_source();
+    let wrapper = wrapper_context();
+    let switches = preview_store().conditions.clone();
     set_model(next);
+    // `set_model` keeps the SQL it was given as the new base; put the render's
+    // own SQL back so the next edit still finds its placeholders.
+    preview_store().sql_base = base;
+    set_mapper_source(mapper);
+    set_wrapper_context(wrapper);
+    preview_store().conditions = switches;
     let status = if had_placeholders {
         t("view.workbench.status.rebound")
     } else {
@@ -2671,10 +2894,18 @@ mod tests {
 
         // Editable parameters in two columns (name, value) — the reference's
         // name-beside-input layout — plus the preset fold, the condition
-        // section's batch actions and the empty state.
+        // section's batch actions and the empty state. The column itself ends
+        // there: the reference has no buttons under the rows, and the tab's two
+        // text actions live in the footer instead.
         assert!(
-            module.contains("class=\"pv-params-actions\""),
-            "Rebind / Import stay"
+            !module.contains("class=\"pv-params-actions\""),
+            "the parameter column must not grow buttons of its own"
+        );
+        assert!(
+            module.contains("class=\"pv-tab-actions\"")
+                && module.contains("id=\"pvTabExecute\"")
+                && module.contains("id=\"pvCopy\""),
+            "the tab's 执行 SQL / 复制 SQL row"
         );
         assert!(
             module.contains("id=\"pvParamsList\""),
@@ -3590,10 +3821,11 @@ mod tests {
             module.contains("op: 'preview-display'"),
             "the display op carries the state"
         );
-        // The fixed action row is dialog-only: hidden in the tab mount, and the
-        // footer collapses when it has neither a status nor that row.
+        // The fixed action row is dialog-only: the tab shows its own Execute /
+        // Copy row instead, and the footer never collapses.
         assert!(module.contains("actions.hidden = !dialogBridge;"));
-        assert!(module.contains("footer.hidden = !hasStatus && !dialogBridge;"));
+        assert!(module.contains("tabActions.hidden = !!dialogBridge;"));
+        assert!(module.contains("footer.hidden = false;"));
         assert!(module.contains("on('pvCopyClose', function () {"));
         assert!(
             module.contains("post({ op: 'preview-copy' });\n    closeDialog();"),
@@ -4154,5 +4386,202 @@ mod tests {
         assert!(css.contains(".pv-root .pv-param-warn"));
         assert!(!module.contains("pv-param-kind"));
         assert!(css.contains(".pv-root .pv-cond-row"));
+    }
+
+    // Wrapper preview (the "Wrappers" source) ---------------------------
+
+    fn entity() -> wrapper::EntityColumns {
+        wrapper::EntityColumns::new("User", "user")
+            .with_column("id", "id", "bigint")
+            .with_column("username", "username", "varchar")
+            .with_column("status", "status", "int")
+    }
+
+    const WRAPPER_CHAIN: &str = "new LambdaQueryWrapper<User>()\n\
+        .eq(User::getUsername, username)\n\
+        .eq(User::getStatus, status)";
+
+    #[test]
+    fn a_wrapper_render_names_the_table_and_the_parameter_sources() {
+        let model = wrapper_model(
+            WRAPPER_CHAIN,
+            &entity(),
+            false,
+            "MySQL",
+            &Default::default(),
+        );
+        assert_eq!(model.kind, KIND_WRAPPER);
+        assert_eq!(model.table, "user");
+        // A value bound from a runtime expression is not something the text can
+        // know: the render is `partial` and says which key it is.
+        assert_eq!(model.confidence, "partial");
+        assert!(
+            model.reason.contains("wrapper.param_value"),
+            "{}",
+            model.reason
+        );
+        // MySQL quotes identifiers; the table the chain names is the one the
+        // statement touches.
+        assert!(model.sql.contains("`user`"), "{}", model.sql);
+        // One row per `?`, named after the runtime expression the chain binds.
+        assert_eq!(model.params.len(), model.sql.matches('?').count());
+        assert!(
+            model.parameters.iter().any(|row| row.name == "#username"),
+            "{:?}",
+            model.parameters
+        );
+        assert!(
+            model.parameters.iter().all(|row| row.value.is_empty()),
+            "a runtime expression has no value until the reader types one"
+        );
+        // One checkbox per condition, all on, labelled as a wrapper row.
+        assert_eq!(model.conditions.len(), 2);
+        assert!(
+            model
+                .conditions
+                .iter()
+                .all(|condition| condition.enabled && condition.kind == KIND_WRAPPER)
+        );
+        assert!(model.raw.contains("LambdaQueryWrapper"));
+    }
+
+    #[test]
+    fn a_switched_off_wrapper_branch_leaves_the_sql_and_the_rows_behind() {
+        let mut disabled = std::collections::BTreeSet::new();
+        disabled.insert("c1".to_string());
+        let model = wrapper_model(WRAPPER_CHAIN, &entity(), false, "MySQL", &disabled);
+        // The chain keeps both rows; only the second one is off.
+        assert_eq!(model.conditions.len(), 2);
+        assert!(model.conditions[0].enabled);
+        assert!(!model.conditions[1].enabled);
+        assert_eq!(model.params.len(), 1);
+        assert!(!model.sql.contains("status"), "{}", model.sql);
+    }
+
+    #[test]
+    fn an_unresolved_wrapper_keeps_the_kind_and_ships_no_sql() {
+        // No table, no statement: the render is unresolved and says why.
+        let columns = wrapper::EntityColumns::default();
+        let model = wrapper_model(WRAPPER_CHAIN, &columns, false, "MySQL", &Default::default());
+        assert_eq!(model.kind, KIND_WRAPPER);
+        assert_eq!(model.confidence, "unresolved");
+        assert!(model.sql.is_empty());
+        assert!(model.parameters.is_empty());
+        assert!(
+            model.reason.contains("wrapper.table_unknown"),
+            "{}",
+            model.reason
+        );
+    }
+
+    #[test]
+    fn the_condition_op_re_renders_a_wrapper_chain() {
+        let (_host, _guard) = test_host();
+        let rendered = wrapper_model(
+            WRAPPER_CHAIN,
+            &entity(),
+            false,
+            "MySQL",
+            &Default::default(),
+        );
+        assert!(rendered.sql.contains("status"), "{}", rendered.sql);
+        set_model(rendered);
+        set_wrapper_context(Some(WrapperContext {
+            text: WRAPPER_CHAIN.to_string(),
+            columns: entity(),
+            derived: false,
+        }));
+
+        send(json!({"op": "preview-conditions", "conditions": {"c1": false}}));
+
+        let after = model();
+        assert!(!after.sql.contains("status"), "{}", after.sql);
+        assert_eq!(after.conditions.len(), 2);
+        assert!(!after.conditions[1].enabled);
+        // The projection survives the re-render, so the next switch still works.
+        assert!(wrapper_context().is_some());
+    }
+
+    #[test]
+    fn a_parameter_edit_keeps_the_wrapper_projection_and_its_conditions() {
+        let (_host, _guard) = test_host();
+        let rendered = wrapper_model(
+            WRAPPER_CHAIN,
+            &entity(),
+            false,
+            "MySQL",
+            &Default::default(),
+        );
+        set_model(rendered);
+        set_wrapper_context(Some(WrapperContext {
+            text: WRAPPER_CHAIN.to_string(),
+            columns: entity(),
+            derived: false,
+        }));
+        preview_store().conditions = condition_switches(&model());
+
+        send(json!({"op": "preview-params", "values": ["42", "1"]}));
+
+        let after = model();
+        assert!(after.sql.contains("username = 42"), "{}", after.sql);
+        // The rebind is the same render with one value written in: the
+        // projection has to survive, or a later checkbox switch would stop
+        // working.
+        assert!(wrapper_context().is_some());
+        send(json!({"op": "preview-conditions", "conditions": {"c1": false}}));
+        assert!(!model().sql.contains("status"), "{}", model().sql);
+    }
+
+    #[test]
+    fn a_wrapper_condition_op_without_a_wrapper_context_changes_nothing() {
+        let (_host, _guard) = test_host();
+        let rendered = wrapper_model(
+            WRAPPER_CHAIN,
+            &entity(),
+            false,
+            "MySQL",
+            &Default::default(),
+        );
+        set_model(rendered);
+        // No context (the model was set by hand): the op is a no-op, not a panic
+        // and not a mapper re-render of wrapper text.
+        send(json!({"op": "preview-conditions", "conditions": {"c1": false}}));
+        assert!(model().conditions[1].enabled);
+    }
+
+    #[test]
+    fn the_wrapper_kind_has_its_own_label_and_the_footer_buttons_draw_text() {
+        let module = include_str!("../../web/preview.js");
+        let css = include_str!("../../web/preview.css");
+        assert!(module.contains("kindWrapper"), "the page names the kind");
+        assert!(module.contains("m.kind === 'wrapper'"), "the page maps it");
+        // The tab's Execute / Copy are text buttons: without the whitelist they
+        // collapse to 16 px squares with no label (found by the acceptance run).
+        assert!(
+            css.contains(".pv-tab-actions .btn [data-btnlabel]"),
+            "the tab footer needs its own display rule"
+        );
+    }
+
+    #[test]
+    fn the_parameter_rows_keep_the_caret_across_a_state_push() {
+        let module = include_str!("../../web/preview.js");
+        let signature = module
+            .split("function paramSignature(parameters, params) {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n  }").next())
+            .expect("paramSignature is defined");
+        // The bound value must not be part of the structural signature: every
+        // `preview-params` pushes a value change back, and rebuilding on it
+        // would drop focus out of the box the reader is typing in.
+        assert!(!signature.contains("p.value"), "{signature}");
+        assert!(
+            module.contains("function syncParamValues(parameters, params)"),
+            "values are written in place"
+        );
+        assert!(
+            module.contains("if (box === doc.activeElement) { continue; }"),
+            "the focused box is left alone"
+        );
     }
 }

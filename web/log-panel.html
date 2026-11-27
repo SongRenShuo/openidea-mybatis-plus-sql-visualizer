@@ -316,8 +316,8 @@
     .meta .focusable:hover { color: var(--openidea-link); text-decoration: underline; }
     .meta .focusable.on { color: var(--openidea-link); font-weight: 600; }
     .sql {
-      margin-top: 3px; font-family: var(--openidea-font-ui, sans-serif);
-      font-size: 12px; line-height: 1.4;
+      margin-top: 3px; font-family: var(--openidea-font-ui, system-ui, sans-serif);
+      font-size: var(--openidea-font-size, 13px); line-height: 1.45;
       white-space: pre-wrap; word-break: break-word; color: var(--openidea-fg);
     }
     /* The folded-lines counter (`… (+N)`) is muted so it never competes with the
@@ -508,8 +508,8 @@
       overflow: hidden; text-overflow: ellipsis; min-width: 0;
     }
     .histentry .hsql {
-      margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
-      font-size: 12px; color: var(--openidea-fg);
+      margin-top: 2px; font-family: var(--openidea-font-ui, system-ui, sans-serif);
+      font-size: var(--openidea-font-size, 13px); color: var(--openidea-fg);
       white-space: pre-wrap; word-break: break-word;
     }
     .histentry .hsql mark {
@@ -2038,7 +2038,10 @@
         head.appendChild(loc);
         var sql = document.createElement('div');
         sql.className = 'hsql';
-        sql.textContent = entry.sql || '';
+        // The history list colours its statements with the same lexer as the
+        // log list (the reference's `HistoryCellRenderer` extends the same
+        // `RailCellRendererBase`), so the two lists cannot drift apart.
+        highlightInto(sql, entry.sql || '');
         el.appendChild(head);
         el.appendChild(sql);
         el.title = entry.method || '';

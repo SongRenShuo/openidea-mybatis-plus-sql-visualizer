@@ -1732,14 +1732,15 @@ mod tests {
             "the reference list has no hover plate"
         );
         // Metadata is 11px muted with monospace sequence/time/duration; the
-        // statement is 12px in the UI font (the reference inherits the JBList
-        // font, not the editor font) and wraps.
+        // statement is the IDE's own UI font (the reference inherits the JBList
+        // font, not the editor font — `--openidea-font-mono` falls back to
+        // Courier New in a frame, which read badly) and wraps.
         for needle in [
             "align-items: center; justify-content: flex-start;",
             "gap: 8px; font-size: 11px;",
             ".meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }",
-            "font-family: var(--openidea-font-ui, sans-serif);",
-            "font-size: 12px; line-height: 1.4;",
+            "font-family: var(--openidea-font-ui, system-ui, sans-serif);",
+            "font-size: var(--openidea-font-size, 13px); line-height: 1.45;",
             "white-space: pre-wrap; word-break: break-word;",
             "margin-top: 3px;",
         ] {
@@ -2140,8 +2141,8 @@ mod tests {
             "pvBannerText",
             "pvBannerClose",
             "pvParamsList",
-            "pvRebindBtn",
-            "pvImportBtn",
+            "pvTabActions",
+            "pvTabExecute",
             "pvTabBody",
             "pvStatus",
         ] {
@@ -2163,7 +2164,9 @@ mod tests {
             module.contains("navigator.clipboard.readText()"),
             "the clipboard read"
         );
-        assert!(module.contains("importBtn.disabled"), "the degrade branch");
+        // The import entry is the "more" menu item: with no parameters (or no
+        // clipboard API) it is greyed and its tooltip says why.
+        assert!(module.contains("moreImport.disabled"), "the degrade branch");
         assert!(
             module.contains("split(/[\\r\\n,]+/)"),
             "comma/newline parsing"
@@ -2662,9 +2665,10 @@ mod tests {
 
     #[test]
     fn b8_the_parameter_column_stays_editable_and_rebindable() {
-        // B8：工作台参数列可编辑并重绑定（L42 起在 `web/preview.js`）。拦的是
-        // 「输入框不再生成、或重绑定按钮丢掉 post」——参数框变只读文本，
-        // 用户改了值也进不了 SQL。
+        // B8：工作台参数列可编辑并写入 SQL（L42 起在 `web/preview.js`）。原版
+        // 没有「重绑定」按钮——`buildParamRow` 的 DocumentListener 每击键都调
+        // `scheduleRender`（150 ms 防抖）。这里拦的是同一件事：输入框还在、
+        // 输入事件还绑着、停手后仍会把值 post 给宿主。
         let (_host, _guard) = test_host();
         let module = PREVIEW_JS;
         assert!(
@@ -2672,10 +2676,17 @@ mod tests {
             "the parameter inputs are no longer created"
         );
         assert!(
-            live_line(module, "on('pvRebindBtn', function () {"),
-            "the rebind button lost its click handler"
+            live_line(module, "const PARAM_DEBOUNCE_MS = 150;"),
+            "the reference's 150 ms render debounce is gone"
         );
-        // 回调体里既要读输入框，又要把它 post 出去；只剩一行就断链。
+        assert!(
+            live_line(
+                module,
+                "paramsHost.addEventListener('input', onParamInput);"
+            ),
+            "the parameter inputs no longer report edits"
+        );
+        // 防抖回调体里既要读输入框，又要把它 post 出去；只剩一行就断链。
         assert!(
             live_line(module, "const inputs = paramInputs();"),
             "the rebind no longer reads the parameter inputs"
@@ -2683,6 +2694,10 @@ mod tests {
         assert!(
             live_line(module, "post({ op: 'preview-params', values: values });"),
             "the rebind no longer posts the edited values"
+        );
+        assert!(
+            !module.contains("pvRebindBtn"),
+            "the parameter column must not grow buttons of its own"
         );
     }
 

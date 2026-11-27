@@ -64,6 +64,11 @@
 2. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
    `LambdaQueryWrapper` 文本→链由 `src/analyze` 解析（无 PSI 的类型推断），
    `unresolved` 时只给原因，不出 Java 代码。
+   预览按**光标所在语句**抽链（`preview-sql` 的 Java 文件入口）：光标落在链上取该语句，
+   落在 `wrapper.eq(...)` 这类续写语句时回溯变量声明并把中间的续写语句拼上；整文件只有一个链时
+   即使没有光标也取它，多个链则只在光标指明时取，不猜。实体类不在工程索引里时渲染为
+   `unresolved`（无可用的字段→列投影）。页面输入框里手贴的 Wrapper 链仍按原文 SQL 处理
+   （输入框是无工程上下文的纯文本通道），Wrapper 预览请走命令 / gutter 入口。
 3. **EXPLAIN 只在引擎侧真执行**：平台 `database` 不执行 SQL，所以执行面只有 sidecar 的 JVM。
    引擎 jar 现在自带 **PostgreSQL JDBC 42.7.1（BSD-2）** 与 **mssql-jdbc 12.4.2（MIT）**，
    支持对 PostgreSQL / SQL Server 跑**只读** `EXPLAIN`（PG 返回 JSON、SQL Server 返回 ShowPlan XML）；

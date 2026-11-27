@@ -393,6 +393,7 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     ("view.workbench.kind.sql", "SQL", "SQL"),
     ("view.workbench.kind.xml", "mapper XML", "mapper XML 片段"),
+    ("view.workbench.kind.wrapper", "Wrapper", "Wrapper 链"),
     (
         "view.workbench.dialect.default_suffix",
         " (default)",
@@ -587,8 +588,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "view.workbench.params.hint",
-        "Edit a value, then Rebind to write it into the SQL; numbers and booleans stay bare, everything else is quoted.",
-        "修改参数后点「重绑定」写入 SQL；数字与布尔值裸写，其余按字符串加引号。",
+        "Editing a value writes it into the SQL; numbers and booleans stay bare, everything else is quoted.",
+        "改动参数即写入 SQL；数字与布尔值裸写，其余按字符串加引号。",
     ),
     (
         "view.workbench.status.clipboard_missing",

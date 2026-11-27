@@ -75,6 +75,24 @@ pub struct RenderOutput {
 }
 
 impl RenderOutput {
+    /// One `[key] detail` line per note, plus a bare `[key]` for a key with no
+    /// note — the preview's "why is this partial/unresolved" text. Lives here
+    /// so every caller (the command, the workbench, the wrapper re-render)
+    /// words it the same way.
+    pub fn reason_lines(&self) -> Vec<String> {
+        let mut lines: Vec<String> = self
+            .notes
+            .iter()
+            .map(|note| format!("[{}] {}", note.message_key, note.detail))
+            .collect();
+        for key in &self.message_keys {
+            if !self.notes.iter().any(|note| &note.message_key == key) {
+                lines.push(format!("[{key}]"));
+            }
+        }
+        lines
+    }
+
     pub(crate) fn unresolved(key: &str, detail: impl Into<String>) -> Self {
         Self {
             sql: String::new(),
