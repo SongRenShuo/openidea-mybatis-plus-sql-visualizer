@@ -32,7 +32,14 @@ pub const DIALECTS: &[&str] = &[
 ];
 
 /// Groups share a heading on the generated page, in this order.
-pub const GROUPS: &[&str] = &["Dialect", "Log", "Rendering", "Navigation", "Engine"];
+pub const GROUPS: &[&str] = &[
+    "Dialect",
+    "Log",
+    "Rendering",
+    "Navigation",
+    "Preview",
+    "Engine",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -73,8 +80,22 @@ pub struct SettingDef {
     pub needs_restart: bool,
 }
 
-/// The 45 settings of the first release plus the L34 parity keys, in page order.
-pub static DEFINITIONS: [SettingDef; 45] = [
+/// The 45 settings of the first release, the L34 parity keys and the L48
+/// preview shell, in page order.
+pub static DEFINITIONS: [SettingDef; 46] = [
+    // Preview -------------------------------------------------------------
+    // Lane L48: where the preview opens. The dialog is the IntelliJ edition's
+    // `SqlPreviewDialog`; the tab is the fifth tab of the log panel, which the
+    // build shipped before API 1.18 existed. Read on every open, so a change
+    // applies to the next preview without a restart.
+    SettingDef {
+        key: "preview.presentation",
+        title: "Open preview in",
+        group: "Preview",
+        kind: Kind::Enum(&["dialog", "tab"]),
+        default: DefaultValue::Str("dialog"),
+        needs_restart: false,
+    },
     // Dialect -------------------------------------------------------------
     SettingDef {
         key: "dialect.mode",
@@ -531,21 +552,21 @@ mod tests {
     }
 
     #[test]
-    fn definitions_cover_forty_five_fields_with_unique_keys() {
-        assert_eq!(definitions().len(), 45);
+    fn definitions_cover_forty_six_fields_with_unique_keys() {
+        assert_eq!(definitions().len(), 46);
         let mut keys = std::collections::BTreeSet::new();
         for def in definitions() {
             assert!(keys.insert(def.key), "duplicate key {}", def.key);
         }
         assert_eq!(
             keys.len(),
-            45,
-            "the first release plus the L34 parity keys ships 45 settings"
+            46,
+            "the first release, the L34 parity keys and the L48 preview shell ship 46 settings"
         );
     }
 
     #[test]
-    fn definitions_use_the_five_groups() {
+    fn definitions_use_every_group() {
         let mut groups = std::collections::BTreeSet::new();
         for def in definitions() {
             assert!(

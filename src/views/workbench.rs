@@ -25,7 +25,8 @@
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use openidea_plugin::{ContentDiff, Error, PickItem, host};
+use openidea_plugin::views::{Body, View, ViewEvent};
+use openidea_plugin::{ContentDiff, Error, Invocation, PickItem, host};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -50,6 +51,15 @@ const FALLBACK_DIALECT: &str = "MySQL";
 
 /// Lane L34: format the statement a hand-off put in the preview.
 const FORMAT_ON_PREVIEW_SETTING: &str = "render.formatOnPreview";
+
+/// Lane L48: where the preview opens. `dialog` is the IntelliJ edition's modal
+/// `SqlPreviewDialog` (API 1.18 `[[contributes.dialogs]]`); `tab` is the fifth
+/// tab of the log panel, the shell this build shipped before dialogs existed.
+/// Declared on the SQL Preview settings page.
+const PRESENTATION_SETTING: &str = "preview.presentation";
+
+/// The one dialog id (`plugin.toml`), used to post to and reveal the preview.
+pub const DIALOG_VIEW_ID: &str = "sqlv-preview";
 
 /// How many project files one "load from file" pick lists.
 const PICK_LIMIT: u32 = 200;
@@ -848,12 +858,14 @@ pub fn select_tab() -> Option<&'static str> {
 /// How the preview workbench is carried.
 ///
 /// The workbench is one implementation (`web/preview.js`) with two mount
-/// points, so the host has to name the live one before it pushes. Until API
-/// 1.18 brings `[[contributes.dialogs]]` the answer is always
-/// [`PreviewTarget::Tab`]: the preview rides the log panel's own `state` push,
-/// and that panel (`sqlv-logs`) is the single view its messages go to.
+/// points, so the host has to name the live one before it pushes: the plugin's
+/// modal dialog (`sqlv-preview`, API 1.18) or the fifth tab of the log panel
+/// (`sqlv-logs`, part of that page's `state` push).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewTarget {
+    /// The modal dialog `[[contributes.dialogs]]` declares; the commands and
+    /// the log list's hand-off open it with `views::reveal("sqlv-preview")`.
+    Dialog,
     /// The fifth tab of the log panel: the preview is part of that page's state.
     Tab,
 }
@@ -863,9 +875,11 @@ impl PreviewTarget {
     ///
     /// The tab target is the log panel, because the tab *is* part of that page:
     /// the panel carries `tabs.preview` in the same `state` push as everything
-    /// else, so one channel serves both halves of the view.
+    /// else, so one channel serves both halves of the view. The dialog is a view
+    /// of its own, so it only sees what is posted to its id.
     pub fn view_id(self) -> &'static str {
         match self {
+            Self::Dialog => DIALOG_VIEW_ID,
             Self::Tab => crate::views::log_panel::VIEW_ID,
         }
     }
@@ -874,15 +888,18 @@ impl PreviewTarget {
 /// Which mount point carries the preview right now.
 ///
 /// This is the one place that answers it (lane L42). Callers must not hard-code
-/// a view id: they ask this function, or [`Self::view_id`] on its answer. Moving
-/// the preview to a dialog is a change here and in the `match` of
-/// [`send_to_preview`], nowhere else.
+/// a view id: they ask this function, or [`PreviewTarget::view_id`] on its
+/// answer.
+///
+/// Lane L48 reads `preview.presentation`: `tab` keeps the pre-dialog shell, and
+/// anything else — the declared default `dialog`, an unset key, a value written
+/// by an older build — means the dialog. So a user who never touched the
+/// setting gets the IntelliJ edition's modal window.
 pub fn preview_target() -> PreviewTarget {
-    // The dialog mount (`web/preview.html` as its own `[[contributes.dialogs]]`
-    // entry, view id `sqlv-preview`) needs API 1.18. It becomes a second
-    // variant here; `send_to_preview` then posts `{op:"preview-tab", tab}` to
-    // `PreviewTarget::view_id()` instead of leaving the delivery to the panel.
-    PreviewTarget::Tab
+    match settings::get_string(PRESENTATION_SETTING, "dialog").as_str() {
+        "tab" => PreviewTarget::Tab,
+        _ => PreviewTarget::Dialog,
+    }
 }
 
 /// The cross-view "send this statement to the preview" op (lane L42).
@@ -890,11 +907,12 @@ pub fn preview_target() -> PreviewTarget {
 /// The log panel's quick-preview button posts `{op:"preview-send", line,
 /// selectTab}`; the host resolves the line against the log it already holds,
 /// renders it, retargets the input box, and lets [`preview_target`] decide where
-/// the result goes. Written as a message crossing views so the two mounts stay
-/// interchangeable: today both ends resolve to the same view id.
+/// the result goes.
 ///
-/// It stores and does not push: the panel answers every `preview*` op with one
-/// `state` push, which is exactly how the tab mount delivers.
+/// The tab mount is answered by the panel's own `state` push (the caller emits
+/// it right after this op). The dialog is a different view, so the payload is
+/// posted to it here, and the panel's state is pushed again as well so the
+/// fifth tab keeps showing the same statement.
 pub fn send_to_preview(line: usize, select_tab: bool) {
     let statement = crate::views::log_panel::snapshot()
         .entries
@@ -917,9 +935,83 @@ pub fn send_to_preview(line: usize, select_tab: bool) {
     // The target itself is asked, so the branch that names a channel lives
     // here in one place instead of at each call site.
     match preview_target() {
+        PreviewTarget::Dialog => {
+            // Best effort: a dialog that is not open yet asks again with
+            // `preview-ready` when its page loads, which is the same handshake
+            // the standalone page has always used.
+            let _ = push_dialog();
+            let _ = crate::views::log_panel::push_state();
+        }
         // The payload rides the panel's `state` push right after this op.
         PreviewTarget::Tab => {}
     }
+}
+
+/// Posts the preview payload to the modal dialog.
+///
+/// The dialog is a view of its own, so it only sees what is addressed to it:
+/// `{op:"preview-tab", tab}` carries the same `tabs.preview` object the log
+/// panel's `state` push carries, and `web/preview.html` renders both shapes.
+/// The one-shot `replaceInput` flag is taken here, exactly as the panel's
+/// `state` push takes it, so a dialog page that is already open rewrites its
+/// input box for a hand-off but never for an unrelated push.
+pub fn push_dialog() -> Result<(), Error> {
+    let tab = preview_tab();
+    let message = json!({ "op": "preview-tab", "tab": tab });
+    host::post_view_message(DIALOG_VIEW_ID, &message.to_string())
+}
+
+/// The dialog view's empty chrome.
+///
+/// A dialog's page comes from `[[contributes.dialogs]]`, but the host still
+/// asks the plugin for the view: `web/preview.html` builds every control, so
+/// the body is empty and there is no toolbar (the platform draws the title bar
+/// and the close button).
+pub fn render_dialog() -> View {
+    View::new(Body::Html(String::new()))
+}
+
+/// View events of the preview dialog (`sqlv-preview`).
+///
+/// Messages follow the page's own protocol (`preview-*` ops, the same ones the
+/// fifth tab sends); every one of them is answered with a fresh payload, since
+/// nothing else pushes to this view. `closed` forgets only the transient flags:
+/// closing the dialog and opening it again shows the last statement, exactly as
+/// the IntelliJ edition's `SqlPreviewDialog` does.
+///
+/// The close arrives as an `Other` event of kind `closed` (the SDK's
+/// [`ViewEvent::closed`] is the predicate), because it is newer than the SDK's
+/// enum variants.
+pub fn handle_dialog_event(event: ViewEvent, _ctx: &Invocation) -> Result<(), Error> {
+    if let ViewEvent::Message(text) = &event {
+        let message: Value =
+            serde_json::from_str(text).map_err(|error| Error::Invalid(error.to_string()))?;
+        let op = message
+            .get("op")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if op.starts_with("preview") {
+            handle_preview_message(&message)?;
+        }
+        return push_dialog();
+    }
+    if event.closed() {
+        dialog_closed();
+    }
+    Ok(())
+}
+
+/// A closed preview dialog forgets its transient flags and nothing else.
+///
+/// `select_pending` (the next push should open the preview tab),
+/// `replace_input` and `handoff` all describe one push that never reached a
+/// page; the model, its mapper document, the status line and the display
+/// switches survive, so reopening the dialog shows the last render.
+pub fn dialog_closed() {
+    let mut store = preview_store();
+    store.select_pending = false;
+    store.replace_input = false;
+    store.handoff = false;
 }
 
 fn labels(confidence: &str) -> Value {
@@ -933,6 +1025,9 @@ fn labels(confidence: &str) -> Value {
         "clear": t("view.workbench.action.clear"),
         "openDialog": t("view.workbench.action.open_dialog"),
         "openDialogNote": t("view.workbench.open_dialog.note"),
+        // Lane L48: the dialog mount's own close entry and its tooltip.
+        "close": t("view.workbench.action.close"),
+        "dialogNote": t("view.workbench.dialog.note"),
         "copy": t("view.workbench.copy"),
         "copySql": t("view.workbench.action.copy_sql"),
         "export": t("view.workbench.export"),
@@ -1080,6 +1175,11 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
         }
         "copy" => copy_sql()?,
         "export" => export_sql()?,
+        // Lane L48: the tab mount's "Open in Dialog". It is an event context
+        // (a page message), so `views::reveal` is allowed here; the dialog page
+        // receives the current model from its own `preview-ready` handshake.
+        // Asking for the dialog that is already open is a no-op in the host.
+        "open-dialog" => host::reveal_view(DIALOG_VIEW_ID)?,
         // Lane L44: the reference's "差异对比" — the original on the left, the
         // rendered SQL on the right, opened in the platform diff viewer (the one
         // surface that can be popped out into a window). The payload is built
@@ -2116,19 +2216,169 @@ mod tests {
     }
 
     #[test]
-    fn the_preview_target_is_the_fifth_tab_of_the_log_panel() {
-        // Lane L42: one function answers where the preview is pushed, so the
-        // switch to the API 1.18 dialog is a return value, not a hunt. Today
-        // the answer is the tab, and the tab *is* the log panel's page.
+    fn the_preview_target_follows_the_presentation_setting() {
+        // Lane L42: one function answers where the preview is pushed, so a shell
+        // change is a return value, not a hunt. Lane L48 makes the answer the
+        // setting `preview.presentation`: the dialog by default (the IntelliJ
+        // edition's modal window), the fifth tab of the log panel on `tab`.
+        let (host, _guard) = test_host();
+        assert_eq!(preview_target(), PreviewTarget::Dialog);
+        assert_eq!(preview_target().view_id(), DIALOG_VIEW_ID);
+
+        host.set_setting("preview.presentation", "\"tab\"");
         assert_eq!(preview_target(), PreviewTarget::Tab);
         assert_eq!(preview_target().view_id(), crate::views::log_panel::VIEW_ID);
-        // No view id is hard-coded at a call site: the one address used is the
-        // target's own.
+
+        // A value this build does not know (a hand-edited file, a build from
+        // another branch) is the dialog, never an error and never a blank
+        // preview.
+        host.set_setting("preview.presentation", "\"side-panel\"");
+        assert_eq!(preview_target(), PreviewTarget::Dialog);
+        host.set_setting("preview.presentation", "42");
+        assert_eq!(
+            preview_target(),
+            PreviewTarget::Dialog,
+            "a wrong-typed value falls back like an unset key"
+        );
+
+        // No view id is hard-coded at a call site: the one address used is
+        // `PreviewTarget::view_id()`.
         let source = include_str!("workbench.rs");
         assert!(
             !source.contains("post_view_message(\"sqlv-preview\""),
-            "a dialog view id may not be hard-coded before it exists"
+            "the dialog address goes through DIALOG_VIEW_ID"
         );
+    }
+
+    /// What the host delivers when a plugin dialog closes: the newer kind, which
+    /// reaches the plugin as an `Other` event (`ViewEvent::closed`).
+    fn closed_event() -> ViewEvent {
+        ViewEvent::Other {
+            kind: "closed".to_string(),
+            data: "{}".to_string(),
+        }
+    }
+
+    #[test]
+    fn the_dialog_closes_without_losing_the_last_render() {
+        // Lane L48: the IntelliJ edition's `SqlPreviewDialog` keeps what the
+        // last render put in it, so closing and reopening shows the same
+        // statement. Only the transient flags die with the dialog: the model,
+        // its mapper document, the status line and the display switches stay.
+        let (host, _guard) = test_host();
+        set_model(sample());
+        set_mapper_source(Some("<mapper namespace=\"x\"/>".to_string()));
+        request_input_replace();
+        request_tab();
+        assert!(select_tab().is_some(), "a tab request is pending");
+
+        handle_dialog_event(closed_event(), &host.invocation()).expect("closed is answered");
+
+        assert!(select_tab().is_none(), "the open marker is cleared");
+        assert!(
+            !format_handoff_sql(),
+            "a pending hand-off is dropped, not formatted later"
+        );
+        // Reopening: the page asks for the payload, and it carries the model
+        // from before the close.
+        let payload = tab();
+        assert_eq!(payload["replaceInput"], false, "nothing rewrites the box");
+        assert_eq!(payload["model"]["sql"], sample().sql);
+        assert_eq!(
+            payload["model"]["source"], "UserMapper.xml#findById",
+            "the source line survives too"
+        );
+        assert_eq!(model().sql, sample().sql);
+        assert_eq!(
+            mapper_source().as_deref(),
+            Some("<mapper namespace=\"x\"/>"),
+            "the statement picker keeps its document"
+        );
+    }
+
+    #[test]
+    fn a_dialog_message_is_answered_on_the_dialog_view() {
+        // Lane L48: the dialog is a view of its own, so nothing else pushes to
+        // it. The page's `preview-ready` handshake is answered with the same
+        // `tabs.preview` object the log panel would carry.
+        let (host, _guard) = test_host();
+        set_model(sample());
+        handle_dialog_event(
+            ViewEvent::Message(json!({ "op": "preview-ready" }).to_string()),
+            &host.invocation(),
+        )
+        .expect("the handshake is answered");
+
+        let messages = host.view_messages();
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert_eq!(messages[0].0, DIALOG_VIEW_ID);
+        let value: Value = serde_json::from_str(&messages[0].1).expect("valid JSON");
+        assert_eq!(value["op"], "preview-tab");
+        assert_eq!(value["tab"]["model"]["sql"], sample().sql);
+        assert_eq!(
+            value["tab"]["replaceInput"], true,
+            "the first payload fills the input box"
+        );
+    }
+
+    #[test]
+    fn a_send_op_in_dialog_mode_posts_the_payload_to_the_dialog() {
+        // Lane L42 + L48: the log list's hand-off resolves the row, and the
+        // dialog target posts the payload to its own view. The panel still gets
+        // its state push, so the fifth tab shows the same statement.
+        let (host, _guard) = test_host();
+        assert_eq!(preview_target(), PreviewTarget::Dialog);
+        send_to_preview(999_999, true);
+
+        let messages = host.view_messages();
+        assert_eq!(messages.len(), 2, "{messages:?}");
+        assert_eq!(messages[0].0, DIALOG_VIEW_ID);
+        assert_eq!(messages[1].0, crate::views::log_panel::VIEW_ID);
+        let value: Value = serde_json::from_str(&messages[0].1).expect("valid JSON");
+        assert_eq!(value["op"], "preview-tab");
+        assert!(
+            value["tab"].is_object(),
+            "the payload is the preview object"
+        );
+    }
+
+    #[test]
+    fn the_tab_opens_the_dialog_on_request() {
+        // Lane L48: the tab mount's "Open in Dialog" is a page message, which
+        // is an event context, so `views::reveal` is allowed there.
+        let (host, _guard) = test_host();
+        send(json!({ "op": "preview-open-dialog" }));
+        assert_eq!(host.revealed_views(), [DIALOG_VIEW_ID.to_string()]);
+    }
+
+    #[test]
+    fn the_page_touches_the_dialog_only_where_the_host_offers_one() {
+        // Lane L48: `openidea.dialog` exists in a dialog page and nowhere else.
+        // Both the Escape binding and the Close button hang off that one check;
+        // the tab mount must bind neither, or a keypress would call a missing
+        // host object and the page would fail in the tool window only.
+        let module = include_str!("../../web/preview.js");
+        assert!(
+            module.contains("window.openidea && window.openidea.dialog"),
+            "the module has to detect the dialog bridge"
+        );
+        assert!(
+            module.contains("if (dialogBridge && !menuOpen)"),
+            "Escape closes the dialog only when the bridge exists"
+        );
+        assert!(
+            module.contains("on('pvClose', closeDialog)"),
+            "the dialog's Close button is wired"
+        );
+        assert!(
+            module.contains("post({ op: 'preview-open-dialog' })"),
+            "the tab mount asks the host for the dialog"
+        );
+        // The dialog page keeps its handshake, which is how a reopened dialog
+        // gets the last render back.
+        let page = include_str!("../../web/preview.html");
+        assert!(page.contains("op: 'preview-ready'"));
+        assert!(page.contains("message.op === 'preview-tab'"));
     }
 
     #[test]

@@ -1,11 +1,13 @@
-//! `preview-sql`: send a statement to the SQL log panel's preview tab.
+//! `preview-sql`: send a statement to the SQL preview.
 //!
 //! The IntelliJ edition opens `SqlPreviewDialog`, a modal dialog, from the
-//! mapper gutter icon and from `Alt+Shift+Q`. OpenIDEA has no plugin-facing
-//! modal dialog, so both entries land on the surface this plugin already has:
-//! the fifth tab of the `sqlv-logs` tool window (`sqlv-logs#preview`). The
-//! render is the same — `core::xml` for mapper statements, the workbench's own
-//! input path for SQL text — only the shell differs.
+//! mapper gutter icon and from `Alt+Shift+Q`. Since API 1.18 the platform has
+//! the same shell (`[[contributes.dialogs]]`), so those entries now open
+//! `sqlv-preview` — the dialog `preview.presentation` names by default. A user
+//! who prefers the pre-dialog shell sets that key to `tab` and gets the fifth
+//! tab of the `sqlv-logs` tool window. The render is the same either way —
+//! `core::xml` for mapper statements, the workbench's own input path for SQL
+//! text — only the shell differs.
 //!
 //! ## Argument matrix
 //!
@@ -120,8 +122,8 @@ fn preview(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     let (model, detail, raw) = model_for(ctx, arg)?;
 
     // The same handshake as `open-workbench`: the page asks for the state again
-    // with `{op:"ready"}` once its script is ready, so the plugin-side model has
-    // to be set as well as the push below.
+    // once its script is ready (`preview-ready` in the dialog, `ready` in the
+    // panel), so the plugin-side model has to be set as well as the push below.
     // Lane L45: the statement picker switches by id, so the host keeps the
     // mapper document when that is what was rendered. `model_for` returns the
     // raw input as the third value, which is the mapper XML for a mapper render
@@ -131,16 +133,22 @@ fn preview(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
     workbench::set_mapper_source(is_mapper.then_some(raw));
     workbench::request_tab();
     workbench::request_input_replace();
-    log_panel::push_state()
-        .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
-    host::reveal_view(log_panel::VIEW_ID)
+    // Lane L48: the shell comes from `preview.presentation`; the dialog is a
+    // view of its own, so it is revealed and posted to instead of the panel.
+    let target = workbench::preview_target();
+    match target {
+        workbench::PreviewTarget::Dialog => workbench::push_dialog(),
+        workbench::PreviewTarget::Tab => log_panel::push_state(),
+    }
+    .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
+    host::reveal_view(target.view_id())
         .map_err(|error| CliError::new(bridge::KEY_VIEW_UNAVAILABLE, error.to_string()))?;
 
     let mut out = String::new();
     let _ = writeln!(
         out,
         "-- preview-sql: {detail} -> {}#preview",
-        log_panel::VIEW_ID
+        target.view_id()
     );
     Ok(out)
 }
@@ -445,11 +453,31 @@ mod tests {
         out
     }
 
+    /// The preview payload the command produced, whatever shell it went to.
+    ///
+    /// Lane L48: the dialog is the default shell and receives
+    /// `{op:"preview-tab", tab}`, while the tab shell receives the panel's whole
+    /// `state`. Both carry the same `tabs.preview` object, so the tests read it
+    /// through this one helper and stay shell-independent; `selectTab` comes
+    /// from the store, which is where the dialog shell keeps the request.
     fn preview_state(host: &MockHost) -> Value {
         let messages = host.view_messages();
         assert_eq!(messages.len(), 1, "{messages:?}");
-        assert_eq!(messages[0].0, log_panel::VIEW_ID);
-        serde_json::from_str(&messages[0].1).expect("valid JSON")
+        let value: Value = serde_json::from_str(&messages[0].1).expect("valid JSON");
+        match workbench::preview_target() {
+            workbench::PreviewTarget::Dialog => {
+                assert_eq!(messages[0].0, workbench::DIALOG_VIEW_ID);
+                assert_eq!(value["op"], "preview-tab");
+                json!({
+                    "selectTab": workbench::select_tab(),
+                    "tabs": { "preview": value["tab"].clone() },
+                })
+            }
+            workbench::PreviewTarget::Tab => {
+                assert_eq!(messages[0].0, log_panel::VIEW_ID);
+                value
+            }
+        }
     }
 
     fn model_of(state: &Value) -> Value {
@@ -484,14 +512,17 @@ mod tests {
                     .as_str()
                     .is_some_and(|sql| sql.contains("UPDATE users SET name = ?"))
             );
-            // A successful preview leaves the Output tab alone; the tab is the
+            // A successful preview leaves the Output tab alone; the shell is the
             // surface. (Errors still go there, tested below.)
             assert!(
                 !host.output().contains_key(common::CHANNEL),
                 "{:?}",
                 host.output().get(common::CHANNEL)
             );
-            assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
+            assert_eq!(
+                host.revealed_views(),
+                [workbench::preview_target().view_id().to_string()]
+            );
         });
     }
 
@@ -663,6 +694,34 @@ mod tests {
             host.add_file("/project/Empty.xml", "<mapper namespace=\"a\"/>");
             let err = run(&host.invocation(), Some("/project/Empty.xml")).unwrap_err();
             assert!(matches!(err, Error::Failed(ref text) if text.contains(KEY_NO_STATEMENTS)));
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_keeps_the_tab_shell_when_the_setting_says_so() {
+        // Lane L48: `preview.presentation = tab` is the pre-dialog shell, and it
+        // must keep working exactly as before — the panel's `state` push with
+        // `selectTab`, and the tool window brought forward.
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.set_setting("preview.presentation", "\"tab\"");
+            host.add_file("/project/UserMapper.xml", MAPPER);
+            run(
+                &host.invocation(),
+                Some("/project/UserMapper.xml#com.example.UserMapper.findById"),
+            )
+            .unwrap();
+
+            let state = preview_state(&host);
+            assert_eq!(state["selectTab"], "preview");
+            assert_eq!(state["tabs"]["preview"]["model"]["kind"], "xml");
+            assert_eq!(host.revealed_views(), [log_panel::VIEW_ID.to_string()]);
+            assert!(
+                !host
+                    .revealed_views()
+                    .contains(&workbench::DIALOG_VIEW_ID.to_string()),
+                "no dialog in the tab shell"
+            );
         });
     }
 }

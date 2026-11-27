@@ -12,14 +12,14 @@
 | P0 骨架 | 完成 | 本仓首提交 `e2e6e38`：`plugin.toml`（API 1.15）、`render-xml` 命令、`openidea-plugin check` ok、wasm 110.6 KiB |
 | P0 引擎导出 | 完成（主仓） | 主仓 `sub-projects/engine-jar`，`b3a8aeb9a`；jar 4.5 MB、零 IntelliJ 引用、15 方言 |
 | P1 纯逻辑引擎 | 完成 | Rust 侧 XML/OGNL/include/注解/iBatis、15 方言、参数、格式化、21 条规则、生成/回滚、日志四族；`cases/cases.jsonl` 150 例对拍（144 绿 + 6 条有据白名单） |
-| P2 界面面 | 完成 | 日志面板、预览工作台、设置页（45 项、四页）、双语表、标记/文件图标；GUI 走查待 IDE 重载 |
+| P2 界面面 | 完成 | 日志面板、预览工作台、设置页（46 项、四页）、双语表、标记/文件图标；GUI 走查待 IDE 重载 |
 | P3 导航与注解 | 完成（默认关） | `documentIndexers` 图、definition/line-markers、injections、inlay、diagnostics；Ctrl+B 真机未验 |
 | P4 捕获链 | 完成（固定端口） | agent ws 旁路（默认 TCP）、`websocket-ready` 消费、事件唤醒、日志文件路径 |
 | P5 sidecar 与执行 | 完成 | 引擎钉值 + sha256、stdio 真往返（204 ms）、Wrapper 文本解析、EXPLAIN 包装与结果模型、schema 缓存；**T5-5 已达成**：引擎自带 PostgreSQL（BSD-2）/ mssql-jdbc（MIT），在 PG16、PG17、SQL Server 2022 三库真跑只读 EXPLAIN（JSON/XML 计划），写语句结构化拒绝 |
 | P6 MCP | 完成 | 11 个 `sqlv_*` 工具 + 11 份 schema，全部 readOnly，`partial` 不冒充 `exact` |
 | P7 发行 | 完成（T7-4 PR 暂缓：用户先自验） | `scripts/release.sh`（真签真 pack 实测）、`release.yml`、Gitee 镜像、自建索引脚本与文档；官方注册表 PR 按用户 2026-11-26 决定**暂缓**，待其自行验收通过后再提交；本地签名包与上游 TOML 已就绪 |
 | P8 上游提案 | 完成（待提交上游） | `docs/upstream/T8-1~T8-3` 三份草案 + 索引；是否另有 CLA 待上游确认 |
-| P9 等 1.18 的提前开发 | 进行中 | 计划：`docs/开发计划/20261127-0010-等1.18期间的提前开发与升级切换-开发计划.md`；L41–L47 与版本无关，可立即开工；L48（弹窗切换）等上游发布含 API 1.18 的 tag |
+| P9 等 1.18 的提前开发 | 完成 | 计划：`docs/开发计划/20261127-0010-等1.18期间的提前开发与升级切换-开发计划.md`；L41–L47 与版本无关，已落地；L48（弹窗切换）随上游 0.1.54 的 API 1.18 落地，见下 |
 
 ## 阶段验收（摘要）
 
@@ -45,7 +45,7 @@
 | P-5 | `injections` 与宿主 PR #3641 不打架 | mapper XML 上同时开两者 | 放弃 injections |
 | P-6 | 自建索引在中国网络可用 | Gitee Pages 托管 index.json 实测 | 只走官方注册表（要求开源） |
 | P-7 | `documentIndexer` 图能驱动 Ctrl+B | 最小插件建假 Mapper 图 | 导航退回 provider 现算 |
-| P-8 | 插件模态弹窗可用（升 SDK 到 API 1.18 后） | 1.18 发布后 `reveal_view(<dialog>)` 真机弹出，Esc／尺寸记忆／`closed` 事件逐项验 | 预览继续落在页签，不改外壳；证据见 `docs/调研报告/20261126-2330-OpenIDEA插件弹窗能力到货验证-调研报告.md` |
+| P-8 | 插件模态弹窗可用（升 SDK 到 API 1.18 后） | **已落地（2026-11-27，SDK/CLI v0.1.54，插件 API 1.18）**：`[[contributes.dialogs]] id = "sqlv-preview"` 已进 `plugin.toml`，`views::reveal` 在命令/事件上下文调用，`closed` 事件清瞬态不清模型，页面按 `openidea.dialog` 是否存在决定是否接 Esc 与关闭按钮；契约、清单闸、单测齐。**真机弹出／Esc／尺寸记忆仍待在 IDE 里逐项走查**（本车道未跑 runIde）。证据见 `docs/调研报告/20261126-2330-OpenIDEA插件弹窗能力到货验证-调研报告.md` | 预览默认回页签（`preview.presentation = tab`），不改外壳——该设置已作为用户可选项保留 |
 
 本版落地后的前提状态（2026-11-25 收口）：
 
@@ -58,9 +58,12 @@
 - **P-6 未实测**：`scripts/build-index.sh` 与 `market/README.md` 已备，Gitee Pages 托管未跑。
 - **P-7 部分验证**：L6 在临时目录用真实 manifest + 导出跑过 `build/check`，键图有单测；
   Ctrl+B 跨文件跳转未在真机验收。
+- **P-8 已落地，真机待验收（2026-11-27）**：清单声明、`views::reveal` 调用点、`closed` 路由、
+  页面 `openidea.dialog` 门控都在代码与单测里钉住；「弹窗真的弹出、Esc 真的关闭、尺寸真的被记住」
+  只有真机看得到，本车道未跑 runIde，交给 UI 验收。
 
 ## 三条工程纪律
 
 1. **不猜**：每条结果带 `exact/partial/unresolved`；`unresolved` 不出 SQL，只给「为什么 + 去哪补」。
 2. **不复制主仓源码**：引擎只认 `engine/ENGINE_VERSION` + sha256；语料走 `cases.jsonl` 对拍。
-3. **1.15 基线**：`engines.openidea = "^1.15"`；1.16 的 `frames`/`markdown_hover`/`customEditors.binary` 不进代码。
+3. **基线 1.18**：`engines.openidea = "^1.18"`（L48 随上游 0.1.54 升上来）；1.16 的 `frames` / `markdown_hover` / `customEditors.binary` 仍不进代码，1.18 只取 `dialogs`。

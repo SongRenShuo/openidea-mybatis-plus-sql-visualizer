@@ -36,10 +36,14 @@ const TEMPLATE = `<!-- Input half (lane L27): the reference's standalone page ac
 <path d="M2.8 6.1C2.64849 5.98637 2.44579 5.96809 2.27639 6.05279C2.107 6.13749 2 6.31062 2 6.5V9.5C2 9.68939 2.107 9.86252 2.27639 9.94722C2.44579 10.0319 2.64849 10.0136 2.8 9.9L4.8 8.4C4.9259 8.30558 5 8.15738 5 8C5 7.84262 4.9259 7.69443 4.8 7.6L2.8 6.1Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
     <button id="pvLoadFile" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.0775 2.44037C10.1656 2.12093 9.97809 1.79054 9.65866 1.70242C9.33922 1.6143 9.00882 1.80182 8.9207 2.12126L5.76529 13.5596C5.67717 13.8791 5.86469 14.2095 6.18412 14.2976C6.50356 14.3857 6.83396 14.1982 6.92208 13.8788L10.0775 2.44037ZM5.41281 4.66699C5.61982 4.92575 5.57786 5.30332 5.31911 5.51033L1.96049 8.19723L5.31911 10.8841C5.57786 11.0911 5.61982 11.4687 5.41281 11.7275C5.20581 11.9862 4.82823 12.0282 4.56947 11.8212L0.625202 8.66575L0.0395508 8.19723L0.625202 7.7287L4.56947 4.57329C4.82823 4.36628 5.20581 4.40823 5.41281 4.66699ZM10.5872 11.7275C10.3802 11.4687 10.4222 11.0911 10.6809 10.8841L14.0395 8.19725L10.6809 5.51035C10.4222 5.30334 10.3802 4.92577 10.5872 4.66701C10.7942 4.40825 11.1718 4.3663 11.4305 4.57331L15.3748 7.72872L15.9605 8.19725L15.3748 8.66577L11.4305 11.8212C11.1718 12.0282 10.7942 11.9862 10.5872 11.7275Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
     <button id="pvClear" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7 2H9C9.55228 2 10 2.44772 10 3H6C6 2.44772 6.44772 2 7 2ZM5 3C5 1.89543 5.89543 1 7 1H9C10.1046 1 11 1.89543 11 3H13C13.5523 3 14 3.44772 14 4V5V6H13V13C13 14.1046 12.1046 15 11 15H5C3.89543 15 3 14.1046 3 13V6H2V5V4C2 3.44772 2.44772 3 3 3H5ZM11 4H10H6H5H3V5H4H12H13V4H11ZM4 6H12V13C12 13.5523 11.5523 14 11 14H5C4.44772 14 4 13.5523 4 13V6ZM6.5 7C6.22386 7 6 7.22386 6 7.5V11.5C6 11.7761 6.22386 12 6.5 12C6.77614 12 7 11.7761 7 11.5V7.5C7 7.22386 6.77614 7 6.5 7ZM9 7.5C9 7.22386 9.22386 7 9.5 7C9.77614 7 10 7.22386 10 7.5V11.5C10 11.7761 9.77614 12 9.5 12C9.22386 12 9 11.7761 9 11.5V7.5Z" fill="currentColor"/></svg><span data-btnlabel></span></button>
-    <button id="pvOpenDialog" class="btn" type="button" disabled><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.00002 3H12C12.5523 3 13 3.44772 13 4V12C13 12.5523 12.5523 13 12 13H7.00002V3ZM6.00002 2H7.00002H12C13.1046 2 14 2.89543 14 4V12C14 13.1046 13.1046 14 12 14H7.00002H6.00002H4C2.89543 14 2 13.1046 2 12V4C2 2.89543 2.89543 2 4 2H6.00002ZM6.00002 13H4C3.44772 13 3 12.5523 3 12V4C3 3.44772 3.44772 3 4 3H6.00002V13Z" fill="currentColor"/>
+    <button id="pvOpenDialog" class="btn" type="button"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.00002 3H12C12.5523 3 13 3.44772 13 4V12C13 12.5523 12.5523 13 12 13H7.00002V3ZM6.00002 2H7.00002H12C13.1046 2 14 2.89543 14 4V12C14 13.1046 13.1046 14 12 14H7.00002H6.00002H4C2.89543 14 2 13.1046 2 12V4C2 2.89543 2.89543 2 4 2H6.00002ZM6.00002 13H4C3.44772 13 3 12.5523 3 12V4C3 3.44772 3.44772 3 4 3H6.00002V13Z" fill="currentColor"/>
 <rect x="8" y="5" width="4" height="1" rx="0.5" fill="currentColor"/>
 <rect x="8" y="7.5" width="4" height="1" rx="0.5" fill="currentColor"/>
 <rect x="8" y="10" width="4" height="1" rx="0.5" fill="currentColor"/></svg><span data-btnlabel></span></button>
+    <!-- Lane L48: shown only in the dialog page, where the host offers the
+         dialog object; the tab mount leaves it hidden (the dialog's own title
+         bar carries the real close button there). -->
+    <button id="pvClose" class="btn pv-btn-text" type="button" hidden><span data-btnlabel></span></button>
   </div>
   <div class="hint" id="pvInputHint"></div>
   <textarea id="pvInput" spellcheck="false" autocomplete="off"></textarea>
@@ -189,7 +193,8 @@ function defaultPost(message) {
 
 const PV_LABEL_KEYS = {
   pvResolve: 'resolve', pvFormat: 'format', pvLoadFile: 'loadFile',
-  pvClear: 'clear', pvOpenDialog: 'openDialog', pvCopy: 'copySql',
+  pvClear: 'clear', pvOpenDialog: 'openDialog', pvClose: 'close',
+  pvCopy: 'copySql',
   pvFormatPreview: 'format', pvExport: 'export', pvExplain: 'explain',
   pvRefresh: 'refresh', pvMore: 'more',
 };
@@ -529,6 +534,14 @@ export function mountPreview(root, deps) {
   deps = deps || {};
   const doc = root.ownerDocument || document;
   const post = typeof deps.post === 'function' ? deps.post : defaultPost;
+  // Lane L48: only a plugin dialog's page gets `openidea.dialog` (API 1.18).
+  // Everything that closes the dialog is behind this one check, so the same
+  // module mounted in the log panel's fifth tab binds nothing and throws
+  // nothing — there is no element or listener that depends on a missing host.
+  const dialogBridge =
+    (typeof window !== 'undefined' && window.openidea && window.openidea.dialog)
+      ? window.openidea.dialog
+      : null;
 
   // The tab is a flex child of the panel page, exactly as before; the class
   // carries the workbench's own CSS (web/preview.css) instead of the id.
@@ -790,7 +803,18 @@ export function mountPreview(root, deps) {
       setText(node(ids[index]), labels[PV_LABEL_KEYS[ids[index]]]);
     }
     const openDialog = node('pvOpenDialog');
-    if (openDialog) { openDialog.title = labels.openDialogNote || ''; }
+    if (openDialog) {
+      // Lane L48: the tab mount can pop the preview out into the dialog; inside
+      // the dialog the entry means nothing, so it hides rather than opening
+      // itself again.
+      openDialog.hidden = !!dialogBridge;
+      openDialog.title = labels.openDialogNote || '';
+    }
+    const closeDialog = node('pvClose');
+    if (closeDialog) {
+      closeDialog.hidden = !dialogBridge;
+      closeDialog.title = labels.dialogNote || '';
+    }
     // Explain stays disabled: this plugin never executes user SQL (the
     // reference runs EXPLAIN through the data source); the tooltip says so
     // and points at the engine side.
@@ -1050,6 +1074,24 @@ export function mountPreview(root, deps) {
   });
   on('pvLoadFile', function () { post({ op: 'preview-load-file' }); });
   on('pvClear', function () { post({ op: 'preview-clear' }); });
+  // Lane L48: the dialog shell. In the tab this entry asks the host to reveal
+  // the dialog (`views::reveal` runs in that message's context); in the dialog
+  // itself the entry is hidden and this handler closes the dialog instead.
+  function closeDialog() {
+    if (!dialogBridge || typeof dialogBridge.close !== 'function') { return; }
+    try {
+      // `openidea.dialog.close()` resolves after the host closed the dialog. A
+      // rejection (already closed, host gone) must not surface as an unhandled
+      // one: this page has no error surface of its own.
+      const result = dialogBridge.close();
+      if (result && typeof result.catch === 'function') { result.catch(function () {}); }
+    } catch (error) { /* the dialog is already gone */ }
+  }
+  on('pvOpenDialog', function () {
+    if (dialogBridge) { closeDialog(); return; }
+    post({ op: 'preview-open-dialog' });
+  });
+  on('pvClose', closeDialog);
   on('pvCopy', function () { post({ op: 'preview-copy' }); });
   on('pvExport', function () { closeMore(); post({ op: 'preview-export' }); });
   // Diff / Share (lane L44): both close the fold first, so the menu never sits
@@ -1089,7 +1131,19 @@ export function mountPreview(root, deps) {
     }
   });
   doc.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape') { closeMore(); }
+    if (event.key !== 'Escape') { return; }
+    const menu = node('pvMoreMenu');
+    const menuOpen = !!(menu && !menu.hidden);
+    closeMore();
+    // Lane L48: in a dialog, Escape closes it — the platform hands the key to
+    // the page first (a page that calls `preventDefault()` keeps it). The one
+    // key the page keeps for itself is the first Escape with the "More" fold
+    // open; the next one closes the dialog. In the tab mount `dialogBridge` is
+    // null, so nothing is prevented and the panel's own behaviour is unchanged.
+    if (dialogBridge && !menuOpen) {
+      event.preventDefault();
+      closeDialog();
+    }
   });
 
   // Lane L27: rebind the edited values into the SQL (no automatic rebind after

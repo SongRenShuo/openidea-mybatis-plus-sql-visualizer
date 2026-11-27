@@ -3458,6 +3458,11 @@ impl Views for crate::Main {
     ) -> Result<View, Error> {
         match view {
             VIEW_ID => Ok(render_panel()),
+            // Lane L48: the preview dialog. Its page comes from
+            // `[[contributes.dialogs]]`, and the host still asks for the view,
+            // so the plugin answers with empty chrome (`web/preview.html`
+            // builds every control).
+            crate::views::workbench::DIALOG_VIEW_ID => Ok(crate::views::workbench::render_dialog()),
             other => Err(Error::NotFound(format!("view {other}"))),
         }
     }
@@ -3465,6 +3470,12 @@ impl Views for crate::Main {
     fn handle(&mut self, view: &str, event: ViewEvent, ctx: &Invocation) -> Result<(), Error> {
         match view {
             VIEW_ID => handle_panel_event(event, ctx),
+            // Lane L48: the dialog's own messages and its `closed` event. The
+            // workbench owns both; this panel only routes them, because the
+            // `Views` impl lives here.
+            crate::views::workbench::DIALOG_VIEW_ID => {
+                crate::views::workbench::handle_dialog_event(event, ctx)
+            }
             other => Err(Error::NotFound(format!("view {other}"))),
         }
     }
@@ -4074,6 +4085,9 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
     #[test]
     fn open_line_message_reveals_the_log_panel_on_the_preview_tab() {
         let (host, _guard) = test_host();
+        // Lane L48: this is the tab shell's behaviour; the dialog (the default)
+        // is covered by `open_line_message_opens_the_preview_dialog` below.
+        host.set_setting("preview.presentation", "\"tab\"");
         set_log_text(MIXED_LOG);
         let line = snapshot()
             .entries
@@ -4097,6 +4111,44 @@ java.sql.SQLException: Table 'demo.user' doesn't exist
                 .as_str()
                 .is_some_and(|sql| !sql.is_empty()),
             "the statement reaches the preview tab"
+        );
+    }
+
+    #[test]
+    fn open_line_message_opens_the_preview_dialog() {
+        // Lane L48: with the default setting the row opens the modal dialog
+        // instead of pulling the tool window forward — the statement is posted
+        // to `sqlv-preview`, and a closed dialog asks for it again on open.
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        let line = snapshot()
+            .entries
+            .iter()
+            .find(|entry| entry.has_sql())
+            .unwrap()
+            .line_no;
+        handle_panel_message(&host, &format!("{{\"op\":\"open-line\",\"line\":{line}}}")).unwrap();
+        assert_eq!(
+            host.revealed_views(),
+            [crate::views::workbench::DIALOG_VIEW_ID.to_string()],
+            "the dialog is revealed, not the tool window"
+        );
+        assert!(
+            !host.revealed_views().contains(&VIEW_ID.to_string()),
+            "no tool window comes forward over the editor"
+        );
+        let posted = host
+            .view_messages()
+            .iter()
+            .find(|(view, _)| view == crate::views::workbench::DIALOG_VIEW_ID)
+            .map(|(_, text)| serde_json::from_str::<serde_json::Value>(text).unwrap())
+            .expect("the dialog receives its payload");
+        assert_eq!(posted["op"], "preview-tab");
+        assert!(
+            posted["tab"]["model"]["sql"]
+                .as_str()
+                .is_some_and(|sql| !sql.is_empty()),
+            "the statement reaches the dialog"
         );
     }
 
@@ -4515,6 +4567,11 @@ Preparing: DELETE FROM users WHERE id = ?
     #[test]
     fn history_actions_open_preview_copy_and_toggle_quick_preview() {
         let (host, _guard) = test_host();
+        // Lane L48: the history double-click opens whatever shell the setting
+        // names; this test follows the tab shell's `selectTab` hand-off. The
+        // dialog default is covered in `views::workbench` and
+        // `open_line_message_opens_the_preview_dialog`.
+        host.set_setting("preview.presentation", "\"tab\"");
         set_log_text(MIXED_LOG);
         handle_panel_message(&host, "{\"op\":\"history-list\"}").unwrap();
         let id = state_of(&host)["tabs"]["history"]["files"][0]["id"]
@@ -6462,5 +6519,74 @@ public interface UserMapper {
             "==>  Preparing: SELECT 1\n==>  Preparing: SELECT 2".len()
         );
         assert_eq!(snapshot().entries.len(), 2);
+    }
+
+    #[test]
+    fn the_preview_dialog_is_routed_to_the_workbench() {
+        // Lane L48: the dialog (`sqlv-preview`) is a view of its own, and the
+        // `Views` impl that the host calls lives in this module, so the router
+        // is the one thing that can break the dialog silently: a missing arm
+        // means `NotFound`, an empty dialog and no `closed` event.
+        let (host, _guard) = test_host();
+        let mut plugin = crate::Main;
+
+        // `render` answers with empty chrome: the page comes from
+        // `[[contributes.dialogs]]` and builds every control itself.
+        let view = plugin
+            .render(
+                crate::views::workbench::DIALOG_VIEW_ID,
+                None,
+                &host.invocation(),
+            )
+            .expect("the dialog has a view");
+        assert!(view.toolbar.is_empty(), "the platform draws the chrome");
+        assert!(matches!(view.body, Body::Html(ref html) if html.is_empty()));
+
+        // A message reaches the workbench and is answered on the dialog view.
+        crate::views::workbench::set_model(crate::views::workbench::WorkbenchModel::new(
+            "SELECT 1",
+            Vec::new(),
+            "MySQL",
+        ));
+        plugin
+            .handle(
+                crate::views::workbench::DIALOG_VIEW_ID,
+                ViewEvent::Message("{\"op\":\"preview-ready\"}".to_string()),
+                &host.invocation(),
+            )
+            .expect("the handshake is answered");
+        assert!(
+            host.view_messages()
+                .iter()
+                .any(|(view, _)| view == crate::views::workbench::DIALOG_VIEW_ID),
+            "the dialog gets its own payload"
+        );
+
+        // `closed` clears the transient flags and keeps the model. The host
+        // delivers it as the newer event kind, which reaches the plugin as an
+        // `Other` event (`ViewEvent::closed`).
+        crate::views::workbench::request_tab();
+        plugin
+            .handle(
+                crate::views::workbench::DIALOG_VIEW_ID,
+                ViewEvent::Other {
+                    kind: "closed".to_string(),
+                    data: "{}".to_string(),
+                },
+                &host.invocation(),
+            )
+            .expect("closed is answered");
+        assert!(
+            crate::views::workbench::select_tab().is_none(),
+            "the open marker is cleared on close"
+        );
+        assert_eq!(crate::views::workbench::model().sql, "SELECT 1");
+
+        // Any other view id is still an error, so the router did not become a
+        // catch-all.
+        assert!(matches!(
+            plugin.render("no-such-view", None, &host.invocation()),
+            Err(Error::NotFound(_))
+        ));
     }
 }
