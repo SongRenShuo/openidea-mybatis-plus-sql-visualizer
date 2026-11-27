@@ -1,88 +1,16 @@
 {
   "properties": {
-    "preview.presentation": {
-      "type": "string",
-      "title": "Open preview in",
-      "group": "Preview",
-      "enum": [
-        "dialog",
-        "tab"
-      ],
-      "default": "dialog"
-    },
-    "preview.injectLogicDelete": {
-      "type": "boolean",
-      "title": "Simulate the logic-delete interceptor",
-      "group": "MyBatis Plus",
-      "default": false
-    },
-    "preview.logicDeleteColumn": {
-      "type": "string",
-      "title": "Logic-delete column",
-      "group": "MyBatis Plus",
-      "default": "deleted"
-    },
-    "preview.logicDeleteValue": {
-      "type": "string",
-      "title": "Logic-delete value",
-      "group": "MyBatis Plus",
-      "default": "0"
-    },
-    "preview.injectTenantLine": {
-      "type": "boolean",
-      "title": "Simulate the tenant-line interceptor",
-      "group": "MyBatis Plus",
-      "default": false
-    },
-    "preview.tenantColumnName": {
-      "type": "string",
-      "title": "Tenant column",
-      "group": "MyBatis Plus",
-      "default": "tenant_id"
-    },
-    "preview.tenantColumnDefault": {
-      "type": "string",
-      "title": "Tenant value",
-      "group": "MyBatis Plus",
-      "default": "1"
-    },
-    "preview.paginationSim": {
-      "type": "boolean",
-      "title": "Simulate the pagination interceptor",
-      "group": "MyBatis Plus",
-      "default": false
-    },
-    "preview.paginationCurrent": {
-      "type": "integer",
-      "title": "Page number",
-      "group": "MyBatis Plus",
-      "default": 1
-    },
-    "preview.paginationSize": {
-      "type": "integer",
-      "title": "Page size",
-      "group": "MyBatis Plus",
-      "default": 10
-    },
-    "preview.tablePrefix": {
-      "type": "string",
-      "title": "Table prefix",
-      "group": "MyBatis Plus",
-      "default": ""
-    },
     "dialect.mode": {
       "type": "string",
-      "title": "Dialect mode",
+      "title": "方言模式",
       "group": "Dialect",
-      "enum": [
-        "auto",
-        "manual"
-      ],
-      "default": "auto"
+      "enum": ["auto", "manual"],
+      "default": "auto",
+      "description": "auto = 按数据源与工程配置智能推断；manual = 固定使用下方「默认方言」。"
     },
     "dialect.default": {
       "type": "string",
-      "title": "Default dialect",
+      "title": "默认方言",
       "group": "Dialect",
       "enum": [
         "MySQL",
@@ -105,100 +33,293 @@
     },
     "dialect.detectFromUrl": {
       "type": "boolean",
-      "title": "Detect dialect from the JDBC URL",
+      "title": "从 JDBC URL 推断方言",
       "group": "Dialect",
       "default": true
     },
     "dialect.autoDetectFromMappers": {
       "type": "boolean",
-      "title": "Detect dialect from mapper statements",
+      "title": "从 mapper 语句推断方言",
       "group": "Dialect",
       "default": true
     },
     "dialect.quoteIdentifiers": {
       "type": "string",
-      "title": "Quote identifiers",
+      "title": "标识符加引号",
       "group": "Dialect",
-      "enum": [
-        "auto",
-        "always",
-        "never"
-      ],
+      "enum": ["auto", "always", "never"],
       "default": "auto"
     },
     "dialect.keywordCase": {
       "type": "string",
-      "title": "Keyword case",
+      "title": "关键字大小写",
       "group": "Dialect",
-      "enum": [
-        "auto",
-        "upper",
-        "lower"
-      ],
+      "enum": ["auto", "upper", "lower"],
       "default": "auto"
+    },
+    "preview.presentation": {
+      "type": "string",
+      "title": "预览打开位置",
+      "group": "Preview",
+      "enum": ["dialog", "tab"],
+      "default": "dialog",
+      "description": "dialog = 独立预览对话框；tab = 日志工具窗的预览页签。"
+    },
+    "preview.replaceParams": {
+      "type": "boolean",
+      "title": "替换 ? 占位符",
+      "group": "Preview",
+      "default": true,
+      "description": "关闭后变量也渲染为 ?。本仓预览面板尚未读取该值。"
+    },
+    "render.formatSql": {
+      "type": "boolean",
+      "title": "格式化输出",
+      "group": "Preview",
+      "default": true,
+      "description": "开 = 多行缩进，关 = 单行。本仓预览面板尚未读取该值。"
+    },
+    "preview.verticalPairAnnotation": {
+      "type": "boolean",
+      "title": "竖向排列值行列名标注",
+      "group": "Preview",
+      "default": true,
+      "description": "竖排展示时在每个值行尾追加 -- 列名 配对注释。本仓预览面板尚未读取该值。"
+    },
+    "preview.autoFoldEnabled": {
+      "type": "boolean",
+      "title": "SQL 预览字段较多时自动折叠",
+      "group": "Preview",
+      "default": false,
+      "description": "超长字段列表收起为「… N 列」占位符。本仓预览面板尚未读取该值。"
+    },
+    "preview.autoFoldThreshold": {
+      "type": "integer",
+      "title": "自动折叠字段数阈值",
+      "group": "Preview",
+      "default": 10,
+      "minimum": 1,
+      "maximum": 1000,
+      "description": "字段列表元素数达到该值且跨多行才折叠。本仓预览面板尚未读取该值。"
+    },
+    "preview.emptyParamFill": {
+      "type": "string",
+      "title": "空参数填充策略",
+      "group": "Preview",
+      "enum": ["placeholder", "null", "empty_string"],
+      "default": "placeholder",
+      "description": "placeholder = 保留 ? 待填；null = 渲染 NULL；empty_string = 渲染空字符串。本仓预览面板尚未读取该值。"
+    },
+    "preview.literalParamRecovery": {
+      "type": "boolean",
+      "title": "零占位符字面量参数恢复",
+      "group": "Preview",
+      "default": true,
+      "description": "日志 SQL 没有 ? 时把字符串字面量识别为可编辑参数。本仓预览面板尚未读取该值。"
     },
     "render.paramsSeparator": {
       "type": "string",
-      "title": "Parameter separator",
+      "title": "参数分隔符",
       "group": "Rendering",
       "default": ", "
     },
     "render.sqlCase": {
       "type": "string",
-      "title": "Rendered SQL case",
+      "title": "渲染 SQL 大小写",
       "group": "Rendering",
-      "enum": [
-        "preserve",
-        "upper",
-        "lower"
-      ],
+      "enum": ["preserve", "upper", "lower"],
       "default": "preserve"
     },
     "render.dateFormat": {
       "type": "string",
-      "title": "Date format",
+      "title": "日期格式",
       "group": "Rendering",
       "default": "yyyy-MM-dd HH:mm:ss"
     },
     "render.showConfidence": {
       "type": "boolean",
-      "title": "Show confidence",
-      "group": "Rendering",
-      "default": true
-    },
-    "render.formatSql": {
-      "type": "boolean",
-      "title": "Format SQL",
+      "title": "显示置信度",
       "group": "Rendering",
       "default": true
     },
     "render.formatOnPreview": {
       "type": "boolean",
-      "title": "Format restored SQL on preview",
+      "title": "预览时格式化还原 SQL",
       "group": "Rendering",
       "default": true
     },
     "render.indentWidth": {
       "type": "integer",
-      "title": "Indent width",
+      "title": "缩进宽度",
       "group": "Rendering",
-      "default": 2
+      "default": 2,
+      "minimum": 1,
+      "maximum": 8
     },
     "render.truncateSql": {
       "type": "integer",
-      "title": "Preview truncation (characters)",
+      "title": "预览截断（字符）",
       "group": "Rendering",
-      "default": 180
+      "default": 180,
+      "minimum": 20
     },
     "render.exportFormat": {
       "type": "string",
-      "title": "Export format",
+      "title": "导出格式",
       "group": "Rendering",
-      "enum": [
-        "sql",
-        "json"
-      ],
+      "enum": ["sql", "json"],
       "default": "sql"
+    },
+    "preview.injectLogicDelete": {
+      "type": "boolean",
+      "title": "模拟逻辑删除拦截器",
+      "group": "MyBatis Plus",
+      "default": false,
+      "description": "开启后查询 / 删除追加 AND 逻辑删除列 = 值。默认关闭：预览期没有实体注解可判断工程是否启用该拦截器。"
+    },
+    "preview.logicDeleteColumn": {
+      "type": "string",
+      "title": "逻辑删除列名",
+      "group": "MyBatis Plus",
+      "default": "deleted"
+    },
+    "preview.logicDeleteValue": {
+      "type": "string",
+      "title": "逻辑删除值",
+      "group": "MyBatis Plus",
+      "default": "0"
+    },
+    "preview.injectTenantLine": {
+      "type": "boolean",
+      "title": "模拟多租户拦截器",
+      "group": "MyBatis Plus",
+      "default": false
+    },
+    "preview.tenantColumnName": {
+      "type": "string",
+      "title": "租户列名",
+      "group": "MyBatis Plus",
+      "default": "tenant_id"
+    },
+    "preview.tenantColumnDefault": {
+      "type": "string",
+      "title": "租户列默认值",
+      "group": "MyBatis Plus",
+      "default": "1"
+    },
+    "preview.injectTenantOnInsert": {
+      "type": "boolean",
+      "title": "INSERT 时追加租户列",
+      "group": "MyBatis Plus",
+      "default": true,
+      "description": "子开关，需同时开启多租户注入。本仓预览尚未读取该值。"
+    },
+    "preview.dataPermissionHint": {
+      "type": "boolean",
+      "title": "显示 DataPermissionInterceptor 运行时差异提示",
+      "group": "MyBatis Plus",
+      "default": false,
+      "description": "本仓预览尚未读取该值。"
+    },
+    "preview.dataPermissionCondition": {
+      "type": "string",
+      "title": "数据权限模拟条件",
+      "group": "MyBatis Plus",
+      "default": "",
+      "description": "手动填写的 WHERE 片段，如 dept_id IN (1,2,3)。本仓预览尚未读取该值。"
+    },
+    "preview.paginationSim": {
+      "type": "boolean",
+      "title": "模拟分页拦截器",
+      "group": "MyBatis Plus",
+      "default": false
+    },
+    "preview.paginationCurrent": {
+      "type": "integer",
+      "title": "页码",
+      "group": "MyBatis Plus",
+      "default": 1,
+      "minimum": 1
+    },
+    "preview.paginationSize": {
+      "type": "integer",
+      "title": "每页条数",
+      "group": "MyBatis Plus",
+      "default": 10,
+      "minimum": 1
+    },
+    "preview.paginationCount": {
+      "type": "boolean",
+      "title": "附分页 COUNT 查询预览",
+      "group": "MyBatis Plus",
+      "default": true,
+      "description": "分页模拟的子开关：关闭后只追加 LIMIT，不再生成 COUNT 语句。本仓预览尚未读取该值。"
+    },
+    "preview.tablePrefix": {
+      "type": "string",
+      "title": "预览时的表名前缀",
+      "group": "MyBatis Plus",
+      "default": ""
+    },
+    "preview.jdbcPreview": {
+      "type": "boolean",
+      "title": "启用 JdbcTemplate SQL 字符串预览",
+      "group": "Advanced",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓尚未实现 JdbcTemplate 字符串 SQL 预览。"
+    },
+    "preview.explainStructured": {
+      "type": "boolean",
+      "title": "预览面板内结构化渲染 EXPLAIN",
+      "group": "Advanced",
+      "default": false,
+      "description": "仅存储，尚未接线：本仓 EXPLAIN 走引擎侧执行链，尚未读取该开关。"
+    },
+    "preview.explainRetention": {
+      "type": "boolean",
+      "title": "跨会话保留原始 EXPLAIN 计划",
+      "group": "Advanced",
+      "default": false,
+      "description": "仅存储，尚未接线：本仓尚未实现计划快照留存。"
+    },
+    "preview.executionTimeoutSeconds": {
+      "type": "integer",
+      "title": "执行超时（秒，0 = 不限）",
+      "group": "Advanced",
+      "default": 30,
+      "minimum": 0,
+      "maximum": 3600,
+      "description": "执行 / EXPLAIN 链的超时护栏。仅存储，尚未接线：本仓执行链尚未读取该值。"
+    },
+    "preview.embeddedColumnNaming": {
+      "type": "string",
+      "title": "嵌入列命名",
+      "group": "Advanced",
+      "enum": ["auto", "none", "component_path"],
+      "default": "auto",
+      "description": "auto = 按工程 Hibernate 命名配置判定；none = 无前缀（JPA 默认）；component_path = 组件路径前缀。仅存储，尚未接线：本仓尚未实现嵌入列展平。"
+    },
+    "codegen.reverseWrapperFormat": {
+      "type": "string",
+      "title": "SQL → Java 默认 Wrapper 形态",
+      "group": "Code generation",
+      "enum": ["auto", "query", "lambda", "wrappers", "mpj_lambda"],
+      "default": "auto",
+      "description": "仅存储，尚未接线：本仓没有 SQL → Java 转换命令。"
+    },
+    "codegen.manualEntitySelection": {
+      "type": "boolean",
+      "title": "自动推断失败时允许手动选择实体类",
+      "group": "Code generation",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓没有 SQL → Java 转换命令。"
+    },
+    "codegen.libraryEntitySweep": {
+      "type": "boolean",
+      "title": "后台扫描依赖库以反查实体",
+      "group": "Code generation",
+      "default": true,
+      "description": "仅存储，尚未接线：本仓没有 SQL → Java 转换命令。"
     }
   }
 }

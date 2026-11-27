@@ -43,6 +43,8 @@ pub const GROUPS: &[&str] = &[
     "Dialect",
     "Rendering",
     "MyBatis Plus",
+    "Advanced",
+    "Code generation",
     "Table Mapping",
     "Log",
     "Shortcuts",
@@ -93,7 +95,7 @@ pub struct SettingDef {
 /// The first release's settings, the L34 parity keys, the L48 preview shell,
 /// the C14 MyBatis-Plus interceptor simulation and the L-SettingsParity
 /// expansion to the IntelliJ edition's 81 application-level fields.
-pub static DEFINITIONS: [SettingDef; 82] = [
+pub static DEFINITIONS: [SettingDef; 106] = [
     // Preview -------------------------------------------------------------
     // Lane L48: where the preview opens. The dialog is the IntelliJ edition's
     // `SqlPreviewDialog`; the tab is the fifth tab of the log panel, which the
@@ -101,7 +103,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     // applies to the next preview without a restart.
     SettingDef {
         key: "preview.presentation",
-        title: "Open preview in",
+        title: "预览打开位置",
         group: "Preview",
         kind: Kind::Enum(&["dialog", "tab"]),
         default: DefaultValue::Str("dialog"),
@@ -115,7 +117,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     // default. Read on every render, so a change applies to the next preview.
     SettingDef {
         key: "preview.injectLogicDelete",
-        title: "Simulate the logic-delete interceptor",
+        title: "模拟逻辑删除拦截器",
         group: "MyBatis Plus",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
@@ -123,7 +125,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "preview.logicDeleteColumn",
-        title: "Logic-delete column",
+        title: "逻辑删除列名",
         group: "MyBatis Plus",
         kind: Kind::String,
         default: DefaultValue::Str("deleted"),
@@ -131,7 +133,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "preview.logicDeleteValue",
-        title: "Logic-delete value",
+        title: "逻辑删除值",
         group: "MyBatis Plus",
         kind: Kind::String,
         default: DefaultValue::Str("0"),
@@ -139,7 +141,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "preview.injectTenantLine",
-        title: "Simulate the tenant-line interceptor",
+        title: "模拟多租户拦截器",
         group: "MyBatis Plus",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
@@ -147,7 +149,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "preview.tenantColumnName",
-        title: "Tenant column",
+        title: "租户列名",
         group: "MyBatis Plus",
         kind: Kind::String,
         default: DefaultValue::Str("tenant_id"),
@@ -155,7 +157,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "preview.tenantColumnDefault",
-        title: "Tenant value",
+        title: "租户列默认值",
         group: "MyBatis Plus",
         kind: Kind::String,
         default: DefaultValue::Str("1"),
@@ -163,7 +165,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "preview.paginationSim",
-        title: "Simulate the pagination interceptor",
+        title: "模拟分页拦截器",
         group: "MyBatis Plus",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
@@ -171,7 +173,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "preview.paginationCurrent",
-        title: "Page number",
+        title: "页码",
         group: "MyBatis Plus",
         kind: Kind::Integer,
         default: DefaultValue::Int(1),
@@ -179,7 +181,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "preview.paginationSize",
-        title: "Page size",
+        title: "每页条数",
         group: "MyBatis Plus",
         kind: Kind::Integer,
         default: DefaultValue::Int(10),
@@ -187,7 +189,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "preview.tablePrefix",
-        title: "Table prefix",
+        title: "预览时的表名前缀",
         group: "MyBatis Plus",
         kind: Kind::String,
         default: DefaultValue::Str(""),
@@ -196,7 +198,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     // Dialect -------------------------------------------------------------
     SettingDef {
         key: "dialect.mode",
-        title: "Dialect mode",
+        title: "方言模式",
         group: "Dialect",
         kind: Kind::Enum(&["auto", "manual"]),
         default: DefaultValue::Str("auto"),
@@ -204,7 +206,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "dialect.default",
-        title: "Default dialect",
+        title: "默认方言",
         group: "Dialect",
         kind: Kind::Enum(DIALECTS),
         default: DefaultValue::Str("MySQL"),
@@ -212,7 +214,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "dialect.detectFromUrl",
-        title: "Detect dialect from the JDBC URL",
+        title: "从 JDBC URL 推断方言",
         group: "Dialect",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -220,7 +222,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "dialect.autoDetectFromMappers",
-        title: "Detect dialect from mapper statements",
+        title: "从 mapper 语句推断方言",
         group: "Dialect",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -228,7 +230,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "dialect.quoteIdentifiers",
-        title: "Quote identifiers",
+        title: "标识符加引号",
         group: "Dialect",
         kind: Kind::Enum(&["auto", "always", "never"]),
         default: DefaultValue::Str("auto"),
@@ -236,10 +238,214 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "dialect.keywordCase",
-        title: "Keyword case",
+        title: "关键字大小写",
         group: "Dialect",
         kind: Kind::Enum(&["auto", "upper", "lower"]),
         default: DefaultValue::Str("auto"),
+        needs_restart: false,
+    },
+    // SQL Preview page, L-SettingsParity ----------------------------------
+    // Reference parity for the preview panel. `preview.injectTenantOnInsert`,
+    // `preview.dataPermissionHint/Condition`, `preview.paginationCount`,
+    // `preview.jdbcPreview`, the EXPLAIN switches, the execution timeout and the
+    // embedded-column naming are stored, not wired: this build's Rust preview
+    // has no consumer for them yet, and the panel description says so.
+    SettingDef {
+        key: "preview.replaceParams",
+        title: "替换 ? 占位符",
+        group: "Preview",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.verticalPairAnnotation",
+        title: "竖向排列值行列名标注",
+        group: "Preview",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.autoFoldEnabled",
+        title: "SQL 预览字段较多时自动折叠",
+        group: "Preview",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.autoFoldThreshold",
+        title: "自动折叠字段数阈值",
+        group: "Preview",
+        kind: Kind::Integer,
+        default: DefaultValue::Int(10),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.emptyParamFill",
+        title: "空参数填充策略",
+        group: "Preview",
+        kind: Kind::Enum(&["placeholder", "null", "empty_string"]),
+        default: DefaultValue::Str("placeholder"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.literalParamRecovery",
+        title: "零占位符字面量参数恢复",
+        group: "Preview",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.injectTenantOnInsert",
+        title: "INSERT 时追加租户列",
+        group: "MyBatis Plus",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.dataPermissionHint",
+        title: "显示 DataPermissionInterceptor 运行时差异提示",
+        group: "MyBatis Plus",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.dataPermissionCondition",
+        title: "数据权限模拟条件",
+        group: "MyBatis Plus",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.paginationCount",
+        title: "附分页 COUNT 查询预览",
+        group: "MyBatis Plus",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.jdbcPreview",
+        title: "启用 JdbcTemplate SQL 字符串预览",
+        group: "Advanced",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.explainStructured",
+        title: "预览面板内结构化渲染 EXPLAIN",
+        group: "Advanced",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.explainRetention",
+        title: "跨会话保留原始 EXPLAIN 计划",
+        group: "Advanced",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.executionTimeoutSeconds",
+        title: "执行超时（秒，0 = 不限）",
+        group: "Advanced",
+        kind: Kind::Integer,
+        default: DefaultValue::Int(30),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.embeddedColumnNaming",
+        title: "嵌入列命名",
+        group: "Advanced",
+        kind: Kind::Enum(&["auto", "none", "component_path"]),
+        default: DefaultValue::Str("auto"),
+        needs_restart: false,
+    },
+    // Code generation group of the SQL Preview page. The port has no SQL → Java
+    // command, so these three are stored, not wired.
+    SettingDef {
+        key: "codegen.reverseWrapperFormat",
+        title: "SQL → Java 默认 Wrapper 形态",
+        group: "Code generation",
+        kind: Kind::Enum(&["auto", "query", "lambda", "wrappers", "mpj_lambda"]),
+        default: DefaultValue::Str("auto"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "codegen.manualEntitySelection",
+        title: "自动推断失败时允许手动选择实体类",
+        group: "Code generation",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "codegen.libraryEntitySweep",
+        title: "后台扫描依赖库以反查实体",
+        group: "Code generation",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    // Table Name Mapping page, L-SettingsParity ---------------------------
+    // Entity table-name inference in this port is fixed to camel → snake and the
+    // preview only reads `preview.tablePrefix`; every key below is stored, not
+    // wired (the panel description says so).
+    SettingDef {
+        key: "table.suffix",
+        title: "表名后缀",
+        group: "Table Mapping",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "table.removePrefix",
+        title: "移除表名前缀",
+        group: "Table Mapping",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "table.removeSuffix",
+        title: "移除表名后缀",
+        group: "Table Mapping",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "table.ignoredFields",
+        title: "忽略字段名",
+        group: "Table Mapping",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "table.inferenceStrategy",
+        title: "表名推断策略",
+        group: "Table Mapping",
+        kind: Kind::Enum(&["snake", "camel"]),
+        default: DefaultValue::Str("snake"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "table.columnCalibration",
+        title: "按数据源校正列名",
+        group: "Table Mapping",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
         needs_restart: false,
     },
     // Log -----------------------------------------------------------------
@@ -358,7 +564,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     // Rendering -----------------------------------------------------------
     SettingDef {
         key: "render.paramsSeparator",
-        title: "Parameter separator",
+        title: "参数分隔符",
         group: "Rendering",
         kind: Kind::String,
         default: DefaultValue::Str(", "),
@@ -366,7 +572,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "render.sqlCase",
-        title: "Rendered SQL case",
+        title: "渲染 SQL 大小写",
         group: "Rendering",
         kind: Kind::Enum(&["preserve", "upper", "lower"]),
         default: DefaultValue::Str("preserve"),
@@ -374,7 +580,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "render.dateFormat",
-        title: "Date format",
+        title: "日期格式",
         group: "Rendering",
         kind: Kind::String,
         default: DefaultValue::Str("yyyy-MM-dd HH:mm:ss"),
@@ -382,7 +588,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "render.showConfidence",
-        title: "Show confidence",
+        title: "显示置信度",
         group: "Rendering",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -390,15 +596,15 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "render.formatSql",
-        title: "Format SQL",
-        group: "Rendering",
+        title: "格式化输出",
+        group: "Preview",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
         needs_restart: false,
     },
     SettingDef {
         key: "render.formatOnPreview",
-        title: "Format restored SQL on preview",
+        title: "预览时格式化还原 SQL",
         group: "Rendering",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -406,7 +612,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "render.indentWidth",
-        title: "Indent width",
+        title: "缩进宽度",
         group: "Rendering",
         kind: Kind::Integer,
         default: DefaultValue::Int(2),
@@ -414,7 +620,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "render.truncateSql",
-        title: "Preview truncation (characters)",
+        title: "预览截断（字符）",
         group: "Rendering",
         kind: Kind::Integer,
         default: DefaultValue::Int(180),
@@ -422,7 +628,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "render.exportFormat",
-        title: "Export format",
+        title: "导出格式",
         group: "Rendering",
         kind: Kind::Enum(&["sql", "json"]),
         default: DefaultValue::Str("sql"),
@@ -704,7 +910,7 @@ pub static DEFINITIONS: [SettingDef; 82] = [
     },
     SettingDef {
         key: "table.prefix",
-        title: "Table name prefix",
+        title: "表名前缀",
         group: "Table Mapping",
         kind: Kind::String,
         default: DefaultValue::Str(""),

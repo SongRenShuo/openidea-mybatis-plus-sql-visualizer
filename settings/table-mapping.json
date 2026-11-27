@@ -2,9 +2,53 @@
   "properties": {
     "table.prefix": {
       "type": "string",
-      "title": "Table name prefix",
+      "title": "表名前缀",
       "group": "Table Mapping",
-      "default": ""
+      "default": "",
+      "description": "统一加在推断表名前，如 sys_ + device_info。仅存储，尚未接线：本仓预览只读取 MyBatis Plus 组的预览表前缀。"
+    },
+    "table.suffix": {
+      "type": "string",
+      "title": "表名后缀",
+      "group": "Table Mapping",
+      "default": "",
+      "description": "统一加在推断表名后，如 device_info + _log；分号分隔时按序拼接。仅存储，尚未接线。"
+    },
+    "table.removePrefix": {
+      "type": "string",
+      "title": "移除表名前缀",
+      "group": "Table Mapping",
+      "default": "",
+      "description": "分号分隔，最终表名以哪个开头就移除哪个（首个匹配、区分大小写）。仅存储，尚未接线。"
+    },
+    "table.removeSuffix": {
+      "type": "string",
+      "title": "移除表名后缀",
+      "group": "Table Mapping",
+      "default": "",
+      "description": "分号分隔，最终表名以哪个结尾就移除哪个（首个匹配、区分大小写）。仅存储，尚未接线。"
+    },
+    "table.ignoredFields": {
+      "type": "string",
+      "title": "忽略字段名",
+      "group": "Table Mapping",
+      "default": "",
+      "description": "分号分隔的 Java 字段名，不进 SELECT 展开与参数对照。仅存储，尚未接线。"
+    },
+    "table.inferenceStrategy": {
+      "type": "string",
+      "title": "表名推断策略",
+      "group": "Table Mapping",
+      "enum": ["snake", "camel"],
+      "default": "snake",
+      "description": "snake = 驼峰转下划线（对齐 MyBatis-Plus）；camel = 保留驼峰，仅首字母小写。仅存储，尚未接线：本仓实体表名推断固定为驼峰转下划线。"
+    },
+    "table.columnCalibration": {
+      "type": "boolean",
+      "title": "按数据源校正列名",
+      "group": "Table Mapping",
+      "default": true,
+      "description": "实体字段名与库真实列名不一致时用真实列集合纠正。仅存储，尚未接线：本仓尚未实现该校正。"
     }
   }
 }
