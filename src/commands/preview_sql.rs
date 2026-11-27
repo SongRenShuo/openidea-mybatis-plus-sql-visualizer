@@ -1463,4 +1463,64 @@ public class User {
             assert!(reason.contains("Ghost"), "{reason}");
         });
     }
+
+    #[test]
+    fn commands_preview_sql_annotation_with_a_degraded_script_is_partial() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file(
+                "/project/ByIds.java",
+                r#"public interface ByIds {
+    @Select("<script>SELECT * FROM users WHERE id IN <foreach collection='ids' item='i' open='(' separator=',' close=')'>#{i}</foreach></script>")
+    java.util.List<User> byIds(@Param("ids") java.util.List<Long> ids);
+}
+"#,
+            );
+            run(&host.invocation(), Some("/project/ByIds.java#byIds")).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "partial", "{model}");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.starts_with("SELECT * FROM users WHERE id IN")),
+                "{model}"
+            );
+            assert!(
+                model["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("xml.foreach.null_collection")),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_ibatis_degradation_is_partial_with_its_reason() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file(
+                "/project/Broken.xml",
+                r#"<sqlMap namespace="User">
+    <select id="selectGone">SELECT <include refid="gone"/> FROM users</select>
+</sqlMap>"#,
+            );
+            run(&host.invocation(), Some("/project/Broken.xml#selectGone")).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "partial", "{model}");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.contains("FROM users")),
+                "{model}"
+            );
+            assert!(
+                model["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("ibatis.include.not_found")),
+                "{model}"
+            );
+        });
+    }
 }
