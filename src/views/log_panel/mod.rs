@@ -123,7 +123,7 @@ fn build_state() -> Value {
         rows
     } else {
         rows.into_iter()
-            .filter(|row| !suppression.hidden(&row.sql))
+            .filter(|row| !suppression.hidden(&row.sql, &row.raw_sql))
             .collect()
     };
 
@@ -415,6 +415,7 @@ fn labels_base() -> Value {
         "menuFocusTemplate": t("view.logs.menu.focus_template"),
         "menuDelete": t("view.logs.menu.delete"),
         "menuBlockMethod": t("view.logs.menu.block_method"),
+        "menuSuppress": t("view.logs.menu.suppress"),
         // Lane L32: the two "发送到" hand-offs into the input tabs.
         "menuSendSqlToJava": t("view.logs.menu.send_sql_to_java"),
         "menuSendLogToSql": t("view.logs.menu.send_log_to_sql"),
@@ -687,6 +688,10 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
         "jump-xml" => logs::jump_xml_op(&message)?,
         "delete-line" => logs::delete_line(&message)?,
         "block-method" => logs::block_method(&message)?,
+        // The reference's row action of the same name: a rule from the row's
+        // own text, no dialog round-trip (lane E deferred it; added 2026-11-27
+        // when a rule pasted by hand failed to hide its own row).
+        "suppress-sql" => logs::suppress_sql(&message)?,
         "clear-blocked" => logs::clear_blocked()?,
         // The eye-off toolbar action (the reference's fifth action,
         // `ManageSuppressAction`) opens the suppression-rule manager (lane E).
@@ -1720,6 +1725,7 @@ mod tests {
             "menuFocusRequest",
             "menuDelete",
             "menuBlockMethod",
+            "menuSuppress",
             "focusMethodPrefix",
             "focusRequestPrefix",
             "focusClear",
@@ -1742,6 +1748,7 @@ mod tests {
             "focus-template",
             "delete-line",
             "block-method",
+            "suppress-sql",
             "copy-sql",
             "copy-time",
             "send-sql-to-java",
@@ -1754,7 +1761,8 @@ mod tests {
             );
         }
         // The reference's twelve row actions in its order
-        // (`SqlLogPanelActions.showContextMenu`).
+        // (`SqlLogPanelActions.showContextMenu`), plus this port's
+        // mute-method item (the `blocked` feature has no reference row action).
         let menu_start = page.find("id=\"ctxMenu\"").expect("context menu");
         let menu_end = menu_start + page[menu_start..].find("</div>").expect("menu ends");
         let menu = &page[menu_start..menu_end];
@@ -1764,6 +1772,7 @@ mod tests {
             "copy-time",
             "delete-line",
             "block-method",
+            "suppress-sql",
             "send-sql-to-java",
             "send-log-to-sql",
             "jump-java",
@@ -1779,16 +1788,27 @@ mod tests {
             assert!(at >= previous, "{act} is out of the reference order");
             previous = at;
         }
-        assert_eq!(menu.matches("<button").count(), 12, "twelve row actions");
+        assert_eq!(
+            menu.matches("<button").count(),
+            13,
+            "twelve row actions + mute"
+        );
         // An item is disabled exactly when the row does not state the dimension.
         assert!(page.contains("enableItem('jump-java', !!(row && row.jump_file))"));
         assert!(page.contains("enableItem('jump-xml', !!(row && row.xml_file))"));
         assert!(page.contains("enableItem('focus-method', !!(row && row.focus_key))"));
         assert!(page.contains("enableItem('focus-request', !!(row && row.request_id))"));
         assert!(page.contains("enableItem('block-method', !!(row && row.focus_key))"));
+        assert!(page.contains("enableItem('suppress-sql', !!(row && row.sql))"));
         assert!(page.contains(".ctxmenu button[disabled]"));
         // The host ops the items post.
-        for op in ["jump-java", "jump-xml", "delete-line", "block-method"] {
+        for op in [
+            "jump-java",
+            "jump-xml",
+            "delete-line",
+            "block-method",
+            "suppress-sql",
+        ] {
             assert!(page.contains(&format!("op: '{op}'")), "missing op {op}");
         }
     }

@@ -51,7 +51,7 @@ const BASE: &str = "suppress";
 
 /// The reference's rule cap (`SqlSuppressRuleManager.MAX_RULES`): the oldest
 /// rule wins, a new one is refused rather than silently evicting an old rule.
-const MAX_RULES: usize = 500;
+pub const MAX_RULES: usize = 500;
 
 /// Summary length of a rule in the list (the reference's
 /// `MAX_PATTERN_SUMMARY_LEN`).
@@ -338,17 +338,28 @@ impl Matcher {
         self.exact.is_empty() && self.structure.is_empty()
     }
 
-    /// Whether a rule hides this SQL. Exact rules are tried first, then the
-    /// structure rules — the reference's gate order.
-    pub fn hidden(&self, sql: &str) -> bool {
-        if self.is_empty() {
-            return false;
-        }
-        if !self.exact.is_empty() && self.exact.contains(&suppress_fingerprint(sql)) {
-            return true;
-        }
-        !self.structure.is_empty() && self.structure.contains(&structure_fingerprint(sql))
+    /// Whether a rule hides this statement. Exact rules are tried first, then
+    /// the structure rules — the reference's gate order.
+    ///
+    /// A row carries the statement in two forms: `sql` is the restored text
+    /// (parameters substituted) and `raw_sql` keeps the `?` placeholders. A
+    /// rule can come from either: pasting the console's `Preparing:` line
+    /// yields the placeholder form, while copying a list row yields the
+    /// restored form. Matching only one of them made a pasted rule never hide
+    /// the row it was made from (2026-11-27, live IDE).
+    pub fn hidden(&self, sql: &str, raw_sql: &str) -> bool {
+        matches_one(self, sql) || matches_one(self, raw_sql)
     }
+}
+
+fn matches_one(matcher: &Matcher, sql: &str) -> bool {
+    if sql.is_empty() {
+        return false;
+    }
+    if !matcher.exact.is_empty() && matcher.exact.contains(&suppress_fingerprint(sql)) {
+        return true;
+    }
+    !matcher.structure.is_empty() && matcher.structure.contains(&structure_fingerprint(sql))
 }
 
 /// The matcher for the current rule set.
@@ -365,24 +376,34 @@ pub fn matcher() -> Matcher {
     out
 }
 
-fn hit_index(rules: &[SuppressRule], sql: &str) -> Option<usize> {
+fn hit_index(rules: &[SuppressRule], sql: &str, raw_sql: &str) -> Option<usize> {
     let exact = suppress_fingerprint(sql);
-    if let Some(index) = rules
-        .iter()
-        .position(|rule| !rule.structure && rule.key == exact)
-    {
+    let exact_raw = if raw_sql.is_empty() {
+        None
+    } else {
+        Some(suppress_fingerprint(raw_sql))
+    };
+    if let Some(index) = rules.iter().position(|rule| {
+        !rule.structure && (rule.key == exact || exact_raw.as_deref() == Some(rule.key.as_str()))
+    }) {
         return Some(index);
     }
     let structure = structure_fingerprint(sql);
-    rules
-        .iter()
-        .position(|rule| rule.structure && rule.key == structure)
+    let structure_raw = if raw_sql.is_empty() {
+        None
+    } else {
+        Some(structure_fingerprint(raw_sql))
+    };
+    rules.iter().position(|rule| {
+        rule.structure
+            && (rule.key == structure || structure_raw.as_deref() == Some(rule.key.as_str()))
+    })
 }
 
 /// Counts one interception on the rule a row matches. The caller keeps the
 /// store lock.
-fn record_hit(rules: &mut [SuppressRule], sql: &str) -> bool {
-    let Some(index) = hit_index(rules, sql) else {
+fn record_hit(rules: &mut [SuppressRule], sql: &str, raw_sql: &str) -> bool {
+    let Some(index) = hit_index(rules, sql, raw_sql) else {
         return false;
     };
     rules[index].hits = rules[index].hits.saturating_add(1);
@@ -410,7 +431,7 @@ pub fn note_new_entries(entries: &[LogEntry]) {
             continue;
         }
         counted = counted.max(entry.line_no);
-        if record_hit(&mut guard.rules, &entry.sql) {
+        if record_hit(&mut guard.rules, &entry.sql, &entry.raw_sql) {
             hits += 1;
         }
     }
@@ -911,9 +932,37 @@ mod tests {
         let (_host, _guard) = test_host();
         add_rule("SELECT * FROM t WHERE id = 1;");
         let matcher = matcher();
-        assert!(matcher.hidden("SELECT  *  FROM t\nWHERE id = 1"));
-        assert!(!matcher.hidden("SELECT * FROM t WHERE id = 2"));
-        assert!(!matcher.hidden("select * from t where id = 1"));
+        assert!(matcher.hidden("SELECT  *  FROM t\nWHERE id = 1", ""));
+        assert!(!matcher.hidden("SELECT * FROM t WHERE id = 2", ""));
+        assert!(!matcher.hidden("select * from t where id = 1", ""));
+    }
+
+    #[test]
+    fn a_rule_pasted_from_the_placeholder_form_hides_the_restored_row() {
+        // The console prints `Preparing: … id = ?` and the row keeps the
+        // restored `… id = 1`. A rule made from the console line must still
+        // hide the row (2026-11-27, live IDE: it did not).
+        let (_host, _guard) = test_host();
+        add_rule("SELECT * FROM heartbeat WHERE id = ?");
+        assert!(matcher().hidden(
+            "SELECT * FROM heartbeat WHERE id = 1",
+            "SELECT * FROM heartbeat WHERE id = ?"
+        ));
+    }
+
+    #[test]
+    fn a_rule_copied_from_the_restored_row_hides_the_placeholder_row() {
+        let (_host, _guard) = test_host();
+        add_rule("SELECT * FROM heartbeat WHERE id = 5");
+        assert!(matcher().hidden(
+            "SELECT * FROM heartbeat WHERE id = 5",
+            "SELECT * FROM heartbeat WHERE id = ?"
+        ));
+        // Exact matching still keeps two different values apart.
+        assert!(!matcher().hidden(
+            "SELECT * FROM heartbeat WHERE id = 6",
+            "SELECT * FROM heartbeat WHERE id = ?"
+        ));
     }
 
     #[test]
@@ -921,17 +970,17 @@ mod tests {
         let (_host, _guard) = test_host();
         add_rule("SELECT * FROM t WHERE id = 1 AND name = 'a'");
         let id = rules()[0].id.clone();
-        assert!(!matcher().hidden("SELECT * FROM t WHERE id = 2 AND name = 'b'"));
+        assert!(!matcher().hidden("SELECT * FROM t WHERE id = 2 AND name = 'b'", ""));
 
         assert_eq!(set_structure(&id, true), Some(true));
         let structure = matcher();
-        assert!(structure.hidden("SELECT * FROM t WHERE id = 2 AND name = 'b'"));
-        assert!(structure.hidden("SELECT * FROM t WHERE id = 99 AND name = 'other'"));
+        assert!(structure.hidden("SELECT * FROM t WHERE id = 2 AND name = 'b'", ""));
+        assert!(structure.hidden("SELECT * FROM t WHERE id = 99 AND name = 'other'", ""));
         // A different table/column is a different shape.
-        assert!(!structure.hidden("SELECT * FROM other WHERE id = 2 AND name = 'b'"));
+        assert!(!structure.hidden("SELECT * FROM other WHERE id = 2 AND name = 'b'", ""));
 
         assert_eq!(set_structure(&id, false), Some(true));
-        assert!(!matcher().hidden("SELECT * FROM t WHERE id = 2 AND name = 'b'"));
+        assert!(!matcher().hidden("SELECT * FROM t WHERE id = 2 AND name = 'b'", ""));
     }
 
     #[test]
@@ -975,6 +1024,33 @@ mod tests {
     }
 
     #[test]
+    fn the_suppress_row_action_hides_the_row_it_was_used_on() {
+        // The whole chain, with the real fixture: the console line keeps `?`,
+        // the row keeps the restored SQL. The row action must create the rule
+        // from the placeholder form and the row must vanish (2026-11-27).
+        let (host, _guard) = test_host();
+        set_log_text(TEX_ONE);
+        let state = panel_op(&host, "ready");
+        let line = state["rows"][0]["line"].as_u64().expect("one row");
+        handle_panel_event(
+            ViewEvent::Message(json!({ "op": "suppress-sql", "line": line }).to_string()),
+            &host.invocation(),
+        )
+        .unwrap();
+        let state = log_state(&host);
+        assert_eq!(
+            state["rows"].as_array().unwrap().len(),
+            0,
+            "the row it was used on is hidden: {state}"
+        );
+        assert_eq!(
+            rules()[0].pattern,
+            "SELECT * FROM heartbeat WHERE id = ?",
+            "the rule takes the placeholder form"
+        );
+    }
+
+    #[test]
     fn deleting_a_rule_brings_the_buffered_rows_back() {
         let (host, _guard) = test_host();
         set_log_text(TEX_ONE);
@@ -1011,7 +1087,7 @@ mod tests {
         assert_eq!(rules.len(), 1, "the rule came back from storage");
         assert_eq!(rules[0].hits, 1);
         assert!(rules[0].structure);
-        assert!(matcher().hidden("SELECT * FROM heartbeat WHERE id = 7"));
+        assert!(matcher().hidden("SELECT * FROM heartbeat WHERE id = 7", ""));
     }
 
     #[test]

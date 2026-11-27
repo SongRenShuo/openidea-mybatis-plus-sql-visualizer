@@ -109,6 +109,11 @@ pub struct PanelRow {
     pub duration_ms: Option<f64>,
     /// Restored SQL; empty for error rows.
     pub sql: String,
+    /// Placeholder form (`?` intact) as the source printed it; empty when the
+    /// source had none. Suppression rules must match this form too: a rule
+    /// pasted from the console's `Preparing:` line is placeholder text, while
+    /// [`Self::sql`] has the parameters substituted.
+    pub raw_sql: String,
     pub params: Vec<String>,
     pub category: RowCategory,
     pub sql_type: SqlType,
@@ -580,6 +585,7 @@ fn row_of(
         timestamp_ms: entry.timestamp_ms,
         duration_ms: entry.duration_ms,
         sql: entry.sql.clone(),
+        raw_sql: entry.raw_sql.clone(),
         params: entry.params.clone(),
         category,
         sql_type,

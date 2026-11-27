@@ -154,6 +154,12 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "Mute this method",
         "屏蔽此方法",
     ),
+    ("view.logs.menu.suppress", "Suppress this SQL", "屏蔽此 SQL"),
+    (
+        "view.logs.suppress.added",
+        "Suppression rule added for this SQL; the row disappears from the list, copy and export.",
+        "已把这条 SQL 加入屏蔽规则；该行不再出现在列表、复制与导出结果里。",
+    ),
     ("view.logs.focus.method_prefix", "Method", "方法"),
     ("view.logs.focus.request_prefix", "Request", "请求"),
     ("view.logs.focus.clear", "Clear focus", "清除聚焦"),
@@ -1169,8 +1175,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ("view.suppress.clear_no", "Cancel", "取消"),
     (
         "view.suppress.note",
-        "Rules apply immediately. Removing a rule brings back entries still kept in the buffer; SQL discarded while the rule was active cannot be recovered.",
-        "规则即时生效。删除规则后，仍在列表缓冲中的条目会重新显示；屏蔽期间新产生的 SQL 已被丢弃、无法恢复。",
+        "Rules hide rows at display time: matching statements leave the list, copy and export, but stay in the buffer and the SQL history, so removing a rule shows them again.",
+        "规则即时生效，只过滤显示：命中的 SQL 不再出现在列表、复制与导出结果里，但仍留在缓冲与 SQL 历史中，删掉规则后重新显示。",
     ),
     (
         "view.suppress.status.added",

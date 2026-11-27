@@ -268,7 +268,7 @@ pub(super) fn all_sql() -> String {
     snapshot()
         .entries
         .iter()
-        .filter(|entry| entry.has_sql() && !suppression.hidden(&entry.sql))
+        .filter(|entry| entry.has_sql() && !suppression.hidden(&entry.sql, &entry.raw_sql))
         .map(|entry| entry.sql.as_str())
         .collect::<Vec<_>>()
         .join(";\n")
@@ -302,7 +302,7 @@ pub fn visible_sql() -> String {
         rows
     } else {
         rows.into_iter()
-            .filter(|row| !suppression.hidden(&row.sql))
+            .filter(|row| !suppression.hidden(&row.sql, &row.raw_sql))
             .collect()
     };
     let filtered = filter_rows(&rows, &filter, slow_threshold_ms);
@@ -456,6 +456,48 @@ pub(super) fn clear_blocked() -> Result<(), Error> {
 /// A dialog is revealed from a command or a view event — this is one.
 pub(super) fn manage_suppress(ctx: &Invocation) -> Result<(), Error> {
     suppress::reveal(ctx)
+}
+
+/// `suppress-sql`: turns the row's own statement into a suppression rule.
+///
+/// The placeholder form wins when the row has one: that is the text the
+/// console prints on a `Preparing:` line, so a rule made here and a rule
+/// pasted from the console are the same rule and match the same rows. The
+/// restored form is the fallback for rows that never had placeholders.
+pub(super) fn suppress_sql(message: &Value) -> Result<(), Error> {
+    let Some(line) = message_line(message) else {
+        return Ok(());
+    };
+    let Some(entry) = snapshot()
+        .entries
+        .into_iter()
+        .find(|entry| entry.line_no == line && entry.has_sql())
+    else {
+        return Ok(());
+    };
+    let source = if entry.raw_sql.trim().is_empty() {
+        entry.sql
+    } else {
+        entry.raw_sql
+    };
+    let text = match suppress::add_rule(&source) {
+        suppress::AddOutcome::Added => t("view.logs.suppress.added"),
+        suppress::AddOutcome::LimitReached => {
+            t("view.suppress.status.limit").replace("{n}", &suppress::MAX_RULES.to_string())
+        }
+        // The row is already hidden (the action is only reachable from a
+        // visible row) or the statement was blank: nothing to say.
+        suppress::AddOutcome::Duplicate | suppress::AddOutcome::Blank => {
+            let _ = push_state();
+            return Ok(());
+        }
+    };
+    // Appended, never cleared: this line lands under whatever the capture
+    // diagnostics wrote, and losing those would hide the reason a stream is
+    // empty.
+    let _ = host::output_append(common::CHANNEL, &format!("-- suppress: {text}\n"));
+    let _ = push_state();
+    Ok(())
 }
 
 /// `capture-start`: forwards to the capture command, which writes its own

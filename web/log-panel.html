@@ -794,6 +794,7 @@
     <button type="button" data-act="copy-time"></button>
     <button type="button" data-act="delete-line"></button>
     <button type="button" data-act="block-method"></button>
+    <button type="button" data-act="suppress-sql"></button>
     <button type="button" data-act="send-sql-to-java"></button>
     <button type="button" data-act="send-log-to-sql"></button>
     <button type="button" data-act="jump-java"></button>
@@ -1185,6 +1186,7 @@
         setText($('ctxMenu').querySelector('[data-act="focus-template"]'), L.menuFocusTemplate);
         setText($('ctxMenu').querySelector('[data-act="delete-line"]'), L.menuDelete);
         setText($('ctxMenu').querySelector('[data-act="block-method"]'), L.menuBlockMethod);
+        setText($('ctxMenu').querySelector('[data-act="suppress-sql"]'), L.menuSuppress);
         setText($('ctxMenu').querySelector('[data-act="send-sql-to-java"]'), L.menuSendSqlToJava);
         setText($('ctxMenu').querySelector('[data-act="send-log-to-sql"]'), L.menuSendLogToSql);
         renderEmpty();
@@ -2102,6 +2104,8 @@
         enableItem('focus-method', !!(row && row.focus_key));
         enableItem('focus-request', !!(row && row.request_id));
         enableItem('block-method', !!(row && row.focus_key));
+        // Suppression needs the row's own statement; an error row has none.
+        enableItem('suppress-sql', !!(row && row.sql));
         // The template focus clusters by the structure key the `×N` badge
         // counts, so a row outside any such group has no template to focus on.
         enableItem('focus-template', !!(row && row.n_plus_one_key));
@@ -2409,6 +2413,7 @@
         else if (act === 'send-log-to-sql') { post({ op: 'send-to-tab', tab: 'logToSql', line: ctxLine }); }
         else if (act === 'delete-line') { post({ op: 'delete-line', line: ctxLine }); }
         else if (act === 'block-method') { post({ op: 'block-method', line: ctxLine }); }
+        else if (act === 'suppress-sql') { post({ op: 'suppress-sql', line: ctxLine }); }
         closeCtx();
       });
 
