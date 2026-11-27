@@ -5,12 +5,16 @@
 //! preview pane below, a parameter column beside the SQL column, and the tabs
 //! SQL / 原文 / 列信息. In the IntelliJ edition that panel is the fifth
 //! (closable) tab of the SQL Log tool window, not a tool window of its own, so
-//! this build renders it inside `web/log-panel.html` (`#panelPreview`).
+//! this build mounts it on that panel's fifth tab (lane L42: the page is the
+//! module `web/preview.js`, injected into `#panelPreview`; the same module is
+//! the whole page of `web/preview.html`, the shell the API 1.18 dialog will
+//! load).
 //!
 //! This module therefore owns the model and the op handling only; it posts no
-//! view message any more. The log panel carries [`preview_tab`] in its state
-//! (`tabs.preview`) and routes `preview-*` messages here, so both tabs share
-//! one push channel and one page.
+//! view message of its own. The log panel carries [`preview_tab`] in its state
+//! (`tabs.preview`) and routes `preview-*` messages here, so both halves share
+//! one push channel and one page — and [`preview_target`] names the channel
+//! when a second mount point exists.
 //!
 //! Two facts of the OpenIDEA platform shape this panel:
 //!
@@ -585,6 +589,87 @@ pub fn select_tab() -> Option<&'static str> {
     preview_store().select_pending.then_some("preview")
 }
 
+// ---------------------------------------------------------------------------
+// Where the preview is pushed
+// ---------------------------------------------------------------------------
+
+/// How the preview workbench is carried.
+///
+/// The workbench is one implementation (`web/preview.js`) with two mount
+/// points, so the host has to name the live one before it pushes. Until API
+/// 1.18 brings `[[contributes.dialogs]]` the answer is always
+/// [`PreviewTarget::Tab`]: the preview rides the log panel's own `state` push,
+/// and that panel (`sqlv-logs`) is the single view its messages go to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewTarget {
+    /// The fifth tab of the log panel: the preview is part of that page's state.
+    Tab,
+}
+
+impl PreviewTarget {
+    /// The view a preview message is addressed to.
+    ///
+    /// The tab target is the log panel, because the tab *is* part of that page:
+    /// the panel carries `tabs.preview` in the same `state` push as everything
+    /// else, so one channel serves both halves of the view.
+    pub fn view_id(self) -> &'static str {
+        match self {
+            Self::Tab => crate::views::log_panel::VIEW_ID,
+        }
+    }
+}
+
+/// Which mount point carries the preview right now.
+///
+/// This is the one place that answers it (lane L42). Callers must not hard-code
+/// a view id: they ask this function, or [`Self::view_id`] on its answer. Moving
+/// the preview to a dialog is a change here and in the `match` of
+/// [`send_to_preview`], nowhere else.
+pub fn preview_target() -> PreviewTarget {
+    // The dialog mount (`web/preview.html` as its own `[[contributes.dialogs]]`
+    // entry, view id `sqlv-preview`) needs API 1.18. It becomes a second
+    // variant here; `send_to_preview` then posts `{op:"preview-tab", tab}` to
+    // `PreviewTarget::view_id()` instead of leaving the delivery to the panel.
+    PreviewTarget::Tab
+}
+
+/// The cross-view "send this statement to the preview" op (lane L42).
+///
+/// The log panel's quick-preview button posts `{op:"preview-send", line,
+/// selectTab}`; the host resolves the line against the log it already holds,
+/// renders it, retargets the input box, and lets [`preview_target`] decide where
+/// the result goes. Written as a message crossing views so the two mounts stay
+/// interchangeable: today both ends resolve to the same view id.
+///
+/// It stores and does not push: the panel answers every `preview*` op with one
+/// `state` push, which is exactly how the tab mount delivers.
+pub fn send_to_preview(line: usize, select_tab: bool) {
+    let statement = crate::views::log_panel::snapshot()
+        .entries
+        .into_iter()
+        .find(|entry| entry.line_no == line)
+        .map(|entry| entry.sql)
+        .filter(|sql| !sql.is_empty());
+    if let Some(text) = statement {
+        let (dialect_name, _) = configured_dialect();
+        render_input_state(&text, "");
+        preview_store().model.dialect = dialect_name;
+        // A hand-off rewrites the input box, and it is what
+        // `render.formatOnPreview` applies to (lane L34) — the same rule a
+        // command handing a statement over gets.
+        request_input_replace();
+    }
+    if select_tab {
+        request_tab();
+    }
+    // The target itself is asked, so the branch that names a channel lives
+    // here in one place instead of at each call site.
+    match preview_target() {
+        // The payload rides the panel's `state` push right after this op.
+        PreviewTarget::Tab => {}
+    }
+}
+
 fn labels(confidence: &str) -> Value {
     json!({
         "title": t("view.workbench.title"),
@@ -705,6 +790,35 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
         // The dialect is read-only: it comes from the settings page. The op is
         // still answered so an older page does not wait for a reply.
         "dialect" => set_status(t("view.workbench.status.dialect_readonly"), false),
+        // Lane L42: a row handed over from the log list. Resolving it here (not
+        // in the page) keeps the log's parsed rows the single source, and the
+        // destination is `preview_target`'s call, not this handler's.
+        "send" => {
+            let line = message
+                .get("line")
+                .and_then(Value::as_u64)
+                .map(|v| v as usize);
+            let select_tab = message
+                .get("selectTab")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            match line {
+                // Whether the row is renderable and where the result goes are
+                // `send_to_preview`'s business; the tab request it sets is
+                // cleared when the page reports its tab.
+                Some(line) => {
+                    send_to_preview(line, select_tab);
+                }
+                // No row chosen: the page still asked for the preview, so the
+                // tab comes forward over the same boundary.
+                None => {
+                    if select_tab {
+                        request_tab();
+                    }
+                    set_status(t("view.workbench.status.params_empty"), false);
+                }
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -1299,21 +1413,29 @@ mod tests {
         // tabs right), then a status-only footer. The duplicate bottom Copy
         // SQL and the disabled Execute are gone: Explain replaces the latter
         // in the toolbar and Export / Rollback fold behind "More".
+        //
+        // Lane L42: the workbench moved out of the panel page into the module
+        // `web/preview.js` (with `web/preview.css`); the layout assertions
+        // follow it there, and the panel page keeps only the mount host.
         let page = include_str!("../../web/log-panel.html");
-        let pane_start = page.find("id=\"panelPreview\"").expect("the preview panel");
-        let pane_end = page.find("id=\"ctxMenu\"").expect("the row menu follows");
-        let pane = &page[pane_start..pane_end];
+        let module = include_str!("../../web/preview.js");
+        let css = include_str!("../../web/preview.css");
+        let pane_start = module.find("id=\"pvPaneTop\"").expect("the preview markup");
+        let pane_end = module
+            .find("id=\"pvParamsList\"")
+            .expect("the parameter list");
+        let pane = &module[pane_start..pane_end];
 
         // Vertical order: meta row, toolbar, degradation strip, columns. The
         // input half above has a toolbar of its own, so the preview toolbar is
         // the first one *after* the meta row.
-        let meta = pane.find("class=\"pv-meta\"").expect("meta row");
+        let meta = module.find("class=\"pv-meta\"").expect("meta row");
         let toolbar = meta
-            + pane[meta..]
+            + module[meta..]
                 .find("class=\"pv-toolbar\"")
                 .expect("preview toolbar");
-        let banner = pane.find("id=\"pvBanner\"").expect("degradation strip");
-        let cols = pane.find("class=\"pv-cols\"").expect("split columns");
+        let banner = module.find("id=\"pvBanner\"").expect("degradation strip");
+        let cols = module.find("class=\"pv-cols\"").expect("split columns");
         assert!(meta < toolbar, "the meta row sits above the toolbar");
         assert!(toolbar < banner, "the strip sits under the toolbar");
         assert!(banner < cols, "the strip keeps clear of the columns");
@@ -1329,7 +1451,7 @@ mod tests {
         ];
         let mut previous = 0;
         for id in order {
-            let at = pane
+            let at = module
                 .find(id)
                 .unwrap_or_else(|| panic!("missing toolbar entry {id}"));
             assert!(at >= previous, "{id} is out of the reference order");
@@ -1338,29 +1460,34 @@ mod tests {
         // Explain is disabled and explains itself; the fold holds Export and
         // the (disabled) Rollback.
         assert!(
-            pane.contains("id=\"pvExplain\" class=\"btn\" type=\"button\" disabled"),
+            module.contains("id=\"pvExplain\" class=\"btn\" type=\"button\" disabled"),
             "Explain stays disabled"
         );
         assert!(
-            page.contains("explainButton.title = labels.explainNote"),
+            module.contains("explainButton.title = labels.explainNote"),
             "the reason"
         );
-        assert!(pane.contains("id=\"pvExport\""), "Export lives in More");
-        assert!(pane.contains("id=\"pvRollback\""), "Rollback lives in More");
-        assert!(pane.contains("role=\"menu\""), "the fold is a menu");
+        assert!(module.contains("id=\"pvExport\""), "Export lives in More");
+        assert!(
+            module.contains("id=\"pvRollback\""),
+            "Rollback lives in More"
+        );
+        assert!(module.contains("role=\"menu\""), "the fold is a menu");
 
         // Two columns: parameters at 30%, result tabs beside them, in the
         // reference tab order SQL / Original / Columns.
-        let params = pane.find("class=\"pv-params\"").expect("parameter column");
-        let sqlside = pane.find("class=\"pv-sqlside\"").expect("result column");
+        let params = module
+            .find("class=\"pv-params\"")
+            .expect("parameter column");
+        let sqlside = module.find("class=\"pv-sqlside\"").expect("result column");
         assert!(params < sqlside, "parameters sit left of the result tabs");
         assert!(
-            page.contains("#panelPreview .pv-params {"),
+            css.contains(".pv-root .pv-params {"),
             "the parameter column has its own rule"
         );
         let mut previous = 0;
         for tab in ["sql", "raw", "columns"] {
-            let at = pane
+            let at = module
                 .find(&format!("data-pvtab=\"{tab}\""))
                 .unwrap_or_else(|| panic!("missing result tab {tab}"));
             assert!(at >= previous, "result tab {tab} is out of order");
@@ -1370,50 +1497,165 @@ mod tests {
         // Editable parameters in two columns (name, value) — the reference's
         // name-beside-input layout — and the empty state.
         assert!(
-            pane.contains("class=\"pv-params-actions\""),
+            module.contains("class=\"pv-params-actions\""),
             "Rebind / Import stay"
         );
         assert!(
-            pane.contains("id=\"pvParamsList\""),
+            module.contains("id=\"pvParamsList\""),
             "the parameter list host"
         );
-        assert!(page.contains(".pv-param-name"), "the name column");
-        assert!(page.contains("pv-param-input"), "the value input");
+        assert!(css.contains(".pv-param-name"), "the name column");
+        assert!(css.contains("pv-param-input"), "the value input");
         assert!(
-            page.contains("grid-template-columns: minmax(48px, 38%) minmax(0, 1fr)"),
+            css.contains("grid-template-columns: minmax(48px, 38%) minmax(0, 1fr)"),
             "name and value share the row"
         );
-        assert!(page.contains("pv-params-empty"), "the no-parameter state");
+        assert!(css.contains("pv-params-empty"), "the no-parameter state");
         assert!(
-            page.contains("labels.columnsEmpty"),
+            module.contains("labels.columnsEmpty"),
             "the columns tab keeps its empty state text"
         );
 
         // Status-only footer: the duplicate Copy SQL and the old Execute are
         // gone, and nothing else lives down there.
-        let footer_start = pane.find("<div class=\"pv-footer\">").expect("footer");
-        let footer_end = footer_start + pane[footer_start..].find("</div>").expect("footer end");
-        let footer = &pane[footer_start..footer_end];
+        let footer_start = module.find("<div class=\"pv-footer\">").expect("footer");
+        let footer_end = footer_start + module[footer_start..].find("</div>").expect("footer end");
+        let footer = &module[footer_start..footer_end];
         assert!(footer.contains("id=\"pvStatus\""), "the status line");
         assert!(
             !footer.contains("class=\"btn\""),
             "the footer holds no controls: {footer}"
         );
         for gone in ["id=\"pvCopySql\"", "id=\"pvExecute\""] {
-            assert!(!page.contains(gone), "the duplicate control {gone} is gone");
+            assert!(
+                !module.contains(gone),
+                "the duplicate control {gone} is gone"
+            );
         }
 
         // The degradation strip is closable and driven by the state's flag.
-        assert!(pane.contains("class=\"pv-banner\""), "the strip");
-        assert!(pane.contains("id=\"pvBannerClose\""), "the strip closes");
+        assert!(module.contains("class=\"pv-banner\""), "the strip");
+        assert!(module.contains("id=\"pvBannerClose\""), "the strip closes");
         assert!(
-            page.contains("if (!m.degraded) {"),
+            module.contains("if (!m.degraded) {"),
             "the strip follows the model's flag"
         );
         assert!(
-            page.contains("pvBannerDismissed"),
+            module.contains("pvBannerDismissed"),
             "a dismissed strip stays hidden until the next render"
         );
+        // The panel page mounts the module on the fifth tab and carries no
+        // workbench DOM of its own: one implementation, two mount points.
+        assert!(
+            page.contains("import { mountPreview } from './preview.js'"),
+            "the panel imports the module"
+        );
+        assert!(
+            page.contains("mountPreview($('panelPreview'), { post: post })"),
+            "the module is mounted on the fifth tab"
+        );
+        assert!(
+            !page.contains("id=\"pvDialectChip\""),
+            "the workbench markup lives in the module now"
+        );
+        assert!(
+            !page.contains("iframe"),
+            "a packaged page cannot nest one: the bridge is not in this frame's children"
+        );
+    }
+
+    #[test]
+    fn the_preview_target_is_the_fifth_tab_of_the_log_panel() {
+        // Lane L42: one function answers where the preview is pushed, so the
+        // switch to the API 1.18 dialog is a return value, not a hunt. Today
+        // the answer is the tab, and the tab *is* the log panel's page.
+        assert_eq!(preview_target(), PreviewTarget::Tab);
+        assert_eq!(preview_target().view_id(), crate::views::log_panel::VIEW_ID);
+        // No view id is hard-coded at a call site: the one address used is the
+        // target's own.
+        let source = include_str!("workbench.rs");
+        assert!(
+            !source.contains("post_view_message(\"sqlv-preview\""),
+            "a dialog view id may not be hard-coded before it exists"
+        );
+    }
+
+    #[test]
+    fn a_send_op_renders_the_row_and_asks_for_the_tab() {
+        // Lane L42: the log list hands a row over by line; the host resolves it
+        // and renders it exactly as a typed statement would be. The panel's op
+        // loop pushes the state right after, and the tab request rides it.
+        let (_host, _guard) = test_host();
+        note_page_tab();
+        handle_preview_message(&json!({
+            "op": "preview-send",
+            "selectTab": true,
+        }))
+        .expect("a hand-off without a line is answered");
+        assert!(
+            select_tab().is_some(),
+            "the tab still comes forward with no row chosen"
+        );
+
+        // A row the log does not hold renders nothing but still opens the tab.
+        note_page_tab();
+        handle_preview_message(&json!({ "op": "preview-send", "line": 999_999 })).unwrap();
+        assert!(model().sql.is_empty(), "no row, no statement");
+        assert!(select_tab().is_some(), "the tab is still requested");
+
+        // With a row present the statement lands in the model.
+        crate::views::log_panel::set_log_text(
+            "==>  Preparing: SELECT id FROM user WHERE id = ?\n\
+             ==> Parameters: 7(Long)\n\
+             <==      Total: 1",
+        );
+        note_page_tab();
+        let line = crate::views::log_panel::snapshot()
+            .entries
+            .iter()
+            .find(|entry| entry.has_sql())
+            .expect("a parsed row")
+            .line_no;
+        handle_preview_message(&json!({ "op": "preview-send", "line": line })).unwrap();
+        let current = model();
+        assert!(
+            current.sql.to_uppercase().contains("SELECT ID FROM USER"),
+            "the row's statement is rendered: {}",
+            current.sql
+        );
+        // The log row's SQL is already restored, so it arrives with no `?`
+        // placeholders and the model carries no parameter list: the value is
+        // inlined in the statement, exactly as the row shows it.
+        assert!(
+            current.params.is_empty(),
+            "a restored statement has no placeholders: {:?}",
+            current.params
+        );
+        assert!(
+            current.sql.contains('7'),
+            "the restored value is inlined: {}",
+            current.sql
+        );
+        assert!(select_tab().is_some(), "the hand-off opens the preview tab");
+    }
+
+    #[test]
+    fn preview_send_resolves_the_line_through_the_shared_log_snapshot() {
+        // The op is the cross-view "send to preview": the panel names a line,
+        // the host renders it. A line whose row carries no SQL (an error row)
+        // leaves the model alone instead of blanking it.
+        let (_host, _guard) = test_host();
+        set_model(sample());
+        crate::views::log_panel::set_log_text(
+            "### Error updating database. Cause: java.sql.SQLException: boom",
+        );
+        let error_line = crate::views::log_panel::snapshot()
+            .entries
+            .first()
+            .map(|entry| entry.line_no)
+            .expect("the error row");
+        handle_preview_message(&json!({ "op": "preview-send", "line": error_line })).unwrap();
+        assert_eq!(model().sql, sample().sql, "a row without SQL never blanks");
     }
 
     #[test]
