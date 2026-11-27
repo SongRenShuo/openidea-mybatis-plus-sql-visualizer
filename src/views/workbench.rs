@@ -93,6 +93,17 @@ pub struct WorkbenchModel {
     /// Localised performance-advice line for the rendered SQL.
     #[serde(default)]
     pub advice: String,
+    /// Every statement id this render can switch between (lane L45). Empty for
+    /// inline SQL, a log row, and a mapper that holds no statement: the page
+    /// then hides the statement picker instead of showing a fake choice. A
+    /// mapper with one statement also lists that one, so the picker can tell
+    /// "no choice" (one entry) from "not a mapper" (none).
+    #[serde(default)]
+    pub statements: Vec<String>,
+    /// The id of the statement `sql` was rendered from (lane L45); empty when
+    /// the render is not a mapper statement.
+    #[serde(default)]
+    pub statement: String,
 }
 
 impl Default for WorkbenchModel {
@@ -108,6 +119,8 @@ impl Default for WorkbenchModel {
             kind: String::new(),
             reason: String::new(),
             advice: String::new(),
+            statements: Vec::new(),
+            statement: String::new(),
         }
     }
 }
@@ -309,9 +322,23 @@ fn plain_sql(text: &str, dialect_name: &str) -> WorkbenchModel {
 }
 
 /// A mapper fragment goes through [`MapperSet`]; only its first statement is
-/// previewed (the reference panel does the same and asks the user to split the
-/// fragment to see the others).
+/// previewed until the page picks another one (lane L45 asks for a different id
+/// through the `preview-statement` op, which re-enters this function with it).
 fn render_mapper(text: &str, dialect_name: &str) -> WorkbenchModel {
+    render_mapper_statement(text, None, dialect_name)
+}
+
+/// Renders one statement of a mapper document (`None` = the first one).
+///
+/// The model lists every statement id the picker may offer (lane L45), so the
+/// page can switch without the host shipping the whole file again: the ids and
+/// the chosen one travel in the model, and the mapper text itself stays in the
+/// preview store ([`set_mapper_source`]).
+pub(crate) fn render_mapper_statement(
+    text: &str,
+    statement: Option<&str>,
+    dialect_name: &str,
+) -> WorkbenchModel {
     let mut model = WorkbenchModel::new("", Vec::new(), dialect_name);
     model.raw = text.to_string();
     model.kind = KIND_XML.to_string();
@@ -322,17 +349,23 @@ fn render_mapper(text: &str, dialect_name: &str) -> WorkbenchModel {
         .map(|issue| format!("[{}] {}: {}", issue.message_key, issue.path, issue.detail))
         .collect();
 
-    let ids = set.statement_ids();
-    let Some(id) = ids.first() else {
+    let ids = statement_ids(&set);
+    model.statements = ids.clone();
+    let chosen = match statement {
+        Some(id) => Some(id.to_string()),
+        None => ids.first().cloned(),
+    };
+    let Some(id) = chosen else {
         model.confidence = "unresolved".to_string();
         reasons.push(format!("[{}]", crate::core::xml::KEY_STATEMENT_NOT_FOUND));
         model.reason = reasons.join("\n");
         return model;
     };
 
-    let out = set.render(id, &json!({}));
+    let out = set.render(&id, &json!({}));
     model.confidence = confidence_str(out.confidence).to_string();
     model.source = id.clone();
+    model.statement = id;
     if out.confidence == Confidence::Unresolved {
         // `unresolved` never carries SQL: only the reason goes to the page.
         model.sql.clear();
@@ -345,6 +378,29 @@ fn render_mapper(text: &str, dialect_name: &str) -> WorkbenchModel {
     model.reason = reasons.join("\n");
     model.advice = advice_text(&model.sql, dialect_name);
     model
+}
+
+/// The statement ids a picker may offer (lane L45).
+///
+/// [`MapperSet::statement_ids`] lists each namespaced statement twice — bare
+/// `findById` then qualified `ns.findById` — and the preview has always shown
+/// the bare form. Keep that form (the id the model's `source` carries) and drop
+/// the qualified twin, so the picker never offers the same statement twice.
+pub(crate) fn statement_ids(set: &MapperSet) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in set.statement_ids() {
+        // A qualified twin directly follows its bare id: `ns.` + an id already
+        // kept. Same statement, one entry.
+        let twin = out.last().is_some_and(|kept: &String| {
+            id.len() > kept.len() + 1
+                && id.ends_with(kept.as_str())
+                && id.as_bytes()[id.len() - kept.len() - 1] == b'.'
+        });
+        if !twin && !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
 }
 
 fn confidence_str(confidence: Confidence) -> &'static str {
@@ -418,6 +474,16 @@ fn advice_text(sql: &str, dialect_name: &str) -> String {
 // Model store
 // ---------------------------------------------------------------------------
 
+/// The preview's two display switches (lane L45). Pure presentation: the page
+/// shapes the text it paints, the model's SQL is never rewritten.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DisplayPrefs {
+    /// Break the shown SQL before each top-level keyword.
+    pub keyword_wrap: bool,
+    /// Put each top-level comma-separated item on its own line.
+    pub vertical: bool,
+}
+
 /// What the preview tab keeps between state pushes.
 #[derive(Default)]
 struct PreviewStore {
@@ -437,6 +503,16 @@ struct PreviewStore {
     /// reports its tab, so only handed-over SQL — never what the user typed —
     /// goes through `render.formatOnPreview`.
     handoff: bool,
+    /// The mapper document the current render came from (lane L45), kept so the
+    /// page can switch statements by id without shipping the file back. `None`
+    /// for inline SQL and log rows, which have nothing to switch.
+    mapper_xml: Option<String>,
+    /// The two display switches (lane L45): break before top-level keywords, and
+    /// one comma-separated item per line. Page state that rides the `state`
+    /// push, so a remount (or the standalone page reloading) restores what the
+    /// reader chose. Host memory only — no setting key, and the SQL itself is
+    /// never touched.
+    display: DisplayPrefs,
 }
 
 static PREVIEW: OnceLock<Mutex<PreviewStore>> = OnceLock::new();
@@ -449,8 +525,34 @@ fn preview_store() -> MutexGuard<'static, PreviewStore> {
 }
 
 /// Replaces what the preview tab shows (called by the lanes that render).
+///
+/// The statement stash is cleared too: a model set by hand carries no document
+/// for the picker to switch within. Callers that do hold the mapper text call
+/// [`set_mapper_source`] right after, which is the only way the stash is set.
 pub fn set_model(model: WorkbenchModel) {
-    preview_store().model = model;
+    let mut store = preview_store();
+    store.model = model;
+    store.mapper_xml = None;
+}
+
+/// Hands a mapper document to the store as well as the model (lane L45).
+///
+/// The statement picker switches by id, so the host has to keep the document
+/// the ids were read from: the page never holds the file, and a state push does
+/// not carry it. Inline SQL and log rows clear the stash — they have no
+/// statements to switch between.
+pub fn set_mapper_source(xml: Option<String>) {
+    preview_store().mapper_xml = xml;
+}
+
+/// The mapper document the current render came from, if any (lane L45).
+pub fn mapper_source() -> Option<String> {
+    preview_store().mapper_xml.clone()
+}
+
+/// The two display switches as the page last set them (lane L45).
+pub fn display_prefs() -> DisplayPrefs {
+    preview_store().display
 }
 
 /// The current model.
@@ -489,6 +591,8 @@ pub fn clear() {
     // Nothing is left to replace or format once the model is gone.
     store.replace_input = false;
     store.handoff = false;
+    // No statements to switch between once the render is gone.
+    store.mapper_xml = None;
 }
 
 /// Asks the page to open and select the "SQL 预览" tab on the next push.
@@ -569,6 +673,7 @@ pub fn preview_tab() -> Value {
     let replace_input = std::mem::take(&mut store.replace_input);
     let current = store.model.clone();
     let status = store.status.clone();
+    let display = store.display;
     drop(store);
 
     let (dialect_name, is_default) = configured_dialect();
@@ -594,6 +699,12 @@ pub fn preview_tab() -> Value {
             // `unresolved` render carries no SQL, only reasons (lane L35b).
             "degraded": current.confidence == "unresolved",
             "advice": &current.advice,
+            // Lane L45: the statement picker's data. `statements` is empty for
+            // inline SQL and log rows (the page hides the picker), and holds one
+            // entry for a mapper with a single statement (the page disables it
+            // instead of pretending there is a choice).
+            "statements": &current.statements,
+            "statement": &current.statement,
             "tabs": {
                 "sql": &current.sql,
                 "formatted": current.formatted_sql(&dialect_name),
@@ -608,6 +719,12 @@ pub fn preview_tab() -> Value {
         },
         "labels": labels(&current.confidence),
         "status": { "text": status },
+        // Lane L45: the two display switches ride every push, so a remount or
+        // the standalone page restores them without a settings key.
+        "display": {
+            "keywordWrap": display.keyword_wrap,
+            "vertical": display.vertical,
+        },
     })
 }
 
@@ -763,6 +880,18 @@ fn labels(confidence: &str) -> Value {
         "shareNote": t("view.workbench.share.note"),
         "qualify": t("view.workbench.action.qualify"),
         "qualifyNote": t("view.workbench.qualify.note"),
+        // Lane L45: the statement picker and the two display switches. The
+        // switches are page state (they never reach the host), but their text
+        // is localised here like every other label.
+        "statementLabel": t("view.workbench.statement"),
+        "statementNote": t("view.workbench.statement.note"),
+        "statementNone": t("view.workbench.statement.none"),
+        "noStatements": t("view.workbench.status.no_statements"),
+        "statementUnknown": t("view.workbench.status.statement_unknown"),
+        "keywordWrap": t("view.workbench.display.keyword_wrap"),
+        "keywordWrapNote": t("view.workbench.display.keyword_wrap.note"),
+        "vertical": t("view.workbench.display.vertical"),
+        "verticalNote": t("view.workbench.display.vertical.note"),
     })
 }
 
@@ -811,6 +940,33 @@ pub fn handle_preview_message(message: &Value) -> Result<(), Error> {
             render_input_state(&text, "");
         }
         "load-file" => load_file_state()?,
+        // Statement switching (lane L45): the picker names an id from
+        // `model.statements`, and the host re-renders that one out of the
+        // mapper document it kept (`set_mapper_source`). Parameters, dialect
+        // and display mode are the page's own state and are untouched; only the
+        // model changes, so the push carries `replaceInput` for the input box
+        // to follow the newly chosen statement.
+        "statement" => {
+            let id = message.get("id").and_then(Value::as_str).unwrap_or("");
+            select_statement_state(id);
+        }
+        // Display switches (lane L45): the page reports the two toggles, the
+        // host only remembers them so the next `state` push (and a page that
+        // remounts) carries them back. Pure presentation — the model, its SQL
+        // and the input box are untouched.
+        "display" => {
+            let mut store = preview_store();
+            store.display = DisplayPrefs {
+                keyword_wrap: message
+                    .get("keywordWrap")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(store.display.keyword_wrap),
+                vertical: message
+                    .get("vertical")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(store.display.vertical),
+            };
+        }
         "clear" => {
             clear();
             set_status(t("view.workbench.status.cleared"), true);
@@ -889,7 +1045,55 @@ fn render_input_state(input: &str, kind: &str) {
     };
     next.dialect = dialect_name;
     let status = status_for(&next);
+    // Lane L45: a mapper render keeps its document, so the picker can switch.
+    // Inline SQL has no statements to switch between and clears the stash.
+    let mapper = (next.kind == KIND_XML).then(|| input.to_string());
     set_model(next);
+    set_mapper_source(mapper);
+    set_status(status, true);
+}
+
+/// Re-renders the statement the picker named (lane L45).
+///
+/// The document comes from the store, not from the page: the page only knows
+/// the ids. An id the current model does not list — or a render with no mapper
+/// behind it — is refused with a status line instead of guessing a statement.
+fn select_statement_state(id: &str) {
+    let Some(xml) = mapper_source() else {
+        return set_status(t("view.workbench.status.no_statements"), false);
+    };
+    let current = model();
+    // Accept both spellings: the list may carry `ns.id` while a caller still
+    // names the bare `id` (the two renderers label statements differently).
+    let listed = current
+        .statements
+        .iter()
+        .find(|known| known.as_str() == id || known.ends_with(&format!(".{id}")));
+    let Some(id) = listed.map(|known| known.to_string()) else {
+        return set_status(
+            t("view.workbench.status.statement_unknown").replace("{0}", id),
+            false,
+        );
+    };
+    let id = id.as_str();
+    if current.statement == id {
+        // The picker re-selected the statement already shown: nothing to
+        // re-render, and the parameters the reader typed stay as they are.
+        return;
+    }
+    let (dialect_name, _) = configured_dialect();
+    let mut next = render_mapper_statement(&xml, Some(id), &dialect_name);
+    next.dialect = dialect_name;
+    // The picker keeps its own list: `preview-sql` lists a statement by its
+    // qualified id, the input box by its bare one, and re-deriving the list
+    // here would change every option under the reader's cursor. `source` and
+    // `statement` both follow the choice.
+    next.statements = current.statements;
+    next.source = id.to_string();
+    next.statement = id.to_string();
+    let status = status_for(&next);
+    set_model(next);
+    set_mapper_source(Some(xml));
     set_status(status, true);
 }
 
@@ -899,6 +1103,9 @@ fn format_input_state(input: &str) {
         let mut next = render_input(input, KIND_XML, &dialect_name);
         next.dialect = dialect_name;
         set_model(next);
+        // The re-render is a fresh mapper document: the picker keeps working on
+        // the statement the user is looking at (lane L45).
+        set_mapper_source(Some(input.to_string()));
         return set_status(t("view.workbench.status.format_xml_skipped"), true);
     }
     let Some(found) = dialect::by_name(&dialect_name) else {
@@ -1185,7 +1392,11 @@ fn load_file_state() -> Result<(), Error> {
     let mut next = render_input(&text, kind_from_path(&path), &dialect_name);
     next.dialect = dialect_name;
     next.source = path.clone();
+    // Lane L45: a loaded mapper file keeps its document for the statement
+    // picker; a loaded .sql file has nothing to switch between.
+    let mapper = (next.kind == KIND_XML).then(|| text.clone());
     set_model(next);
+    set_mapper_source(mapper);
     set_status(
         t("view.workbench.status.loaded").replace("{0}", &path),
         true,
@@ -1250,6 +1461,9 @@ mod tests {
         store.status.clear();
         store.replace_input = false;
         store.handoff = false;
+        // Lane L45: the display switches are process-wide too, so a test that
+        // toggled them must not decide the next test's starting state.
+        store.display = DisplayPrefs::default();
         drop(store);
         (host, guard)
     }
@@ -2053,6 +2267,220 @@ mod tests {
         // The bare `copy` op is the log panel's own and must not reach here.
         send(json!({ "op": "copy" }));
         assert_eq!(model(), sample());
+    }
+
+    // Statement switching and the display switches (lane L45) -------------
+
+    const TWO_STATEMENTS: &str = r#"<mapper namespace="com.example.UserMapper">
+        <select id="findById">SELECT id FROM users WHERE id = #{id}</select>
+        <update id="touch">UPDATE users SET name = #{name} WHERE id = #{id}</update>
+    </mapper>"#;
+
+    #[test]
+    fn a_mapper_render_lists_its_statements_and_marks_the_chosen_one() {
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": TWO_STATEMENTS, "kind": "xml" }));
+        let current = model();
+        assert_eq!(current.statements, vec!["findById", "touch"]);
+        assert_eq!(current.statement, "findById", "the first one is shown");
+        let state = tab();
+        assert_eq!(state["model"]["statements"], json!(["findById", "touch"]));
+        assert_eq!(state["model"]["statement"], "findById");
+        // The document is kept, so a later switch needs no file from the page.
+        assert!(mapper_source().is_some());
+    }
+
+    #[test]
+    fn inline_sql_offers_no_statements_and_keeps_no_document() {
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": "select 1" }));
+        let current = model();
+        assert!(current.statements.is_empty(), "no fake options");
+        assert!(current.statement.is_empty());
+        assert!(mapper_source().is_none());
+        let state = tab();
+        assert_eq!(state["model"]["statements"], json!([]));
+    }
+
+    #[test]
+    fn a_single_statement_mapper_lists_one_entry() {
+        // One entry is how the page tells "a mapper with nothing to choose"
+        // (disable the picker) from "not a mapper" (hide it).
+        let (_host, _guard) = test_host();
+        send(json!({
+            "op": "preview-render",
+            "text": "<mapper namespace=\"a\"><select id=\"one\">select 1</select></mapper>",
+        }));
+        assert_eq!(model().statements, vec!["one"]);
+    }
+
+    #[test]
+    fn the_statement_op_re_renders_the_chosen_statement() {
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": TWO_STATEMENTS, "kind": "xml" }));
+        assert!(compact(&model().sql).contains("SELECT id FROM users"));
+        send(json!({ "op": "preview-statement", "id": "touch" }));
+        let current = model();
+        assert_eq!(current.statement, "touch");
+        assert_eq!(current.source, "touch");
+        assert!(
+            compact(&current.sql).contains("UPDATE users SET name = ?"),
+            "{}",
+            current.sql
+        );
+        // The picker's list survives the switch.
+        assert_eq!(current.statements, vec!["findById", "touch"]);
+        let state = tab();
+        assert_eq!(
+            state["replaceInput"], true,
+            "the input box follows the chosen statement"
+        );
+        assert_eq!(state["model"]["statement"], "touch");
+        // The document is still held: a second switch works too.
+        send(json!({ "op": "preview-statement", "id": "findById" }));
+        assert!(compact(&model().sql).contains("SELECT id FROM users"));
+    }
+
+    #[test]
+    fn the_statement_op_refuses_an_unknown_id_and_a_non_mapper_render() {
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-render", "text": TWO_STATEMENTS, "kind": "xml" }));
+        send(json!({ "op": "preview-statement", "id": "noSuchStatement" }));
+        assert_eq!(model().statement, "findById", "the shown one stays");
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.statement_unknown").replace("{0}", "noSuchStatement")
+        );
+
+        send(json!({ "op": "preview-render", "text": "select 1" }));
+        set_status(String::new(), false);
+        send(json!({ "op": "preview-statement", "id": "findById" }));
+        assert_eq!(model().sql, "select 1", "nothing to switch to");
+        assert_eq!(
+            tab()["status"]["text"],
+            t("view.workbench.status.no_statements")
+        );
+    }
+
+    #[test]
+    fn the_statement_op_keeps_the_display_state_alone() {
+        // A statement switch must not touch the two display switches, and the
+        // switches must survive the push that follows it.
+        let (_host, _guard) = test_host();
+        send(json!({ "op": "preview-display", "keywordWrap": true, "vertical": false }));
+        send(json!({ "op": "preview-render", "text": TWO_STATEMENTS, "kind": "xml" }));
+        let before = display_prefs();
+        send(json!({ "op": "preview-statement", "id": "touch" }));
+        assert_eq!(display_prefs(), before);
+        let state = tab();
+        assert_eq!(state["display"]["keywordWrap"], true);
+        assert_eq!(state["display"]["vertical"], false);
+    }
+
+    #[test]
+    fn the_display_op_remembers_both_switches_and_never_touches_the_sql() {
+        let (_host, _guard) = test_host();
+        set_model(WorkbenchModel::new(
+            "select a, b from t",
+            Vec::new(),
+            "MySQL",
+        ));
+        let sql = model().sql;
+
+        send(json!({ "op": "preview-display", "keywordWrap": true }));
+        assert_eq!(
+            display_prefs(),
+            DisplayPrefs {
+                keyword_wrap: true,
+                vertical: false
+            }
+        );
+        send(json!({ "op": "preview-display", "vertical": true }));
+        assert_eq!(
+            display_prefs(),
+            DisplayPrefs {
+                keyword_wrap: true,
+                vertical: true
+            }
+        );
+        // A partial message keeps the field it does not carry.
+        send(json!({ "op": "preview-display", "vertical": false }));
+        assert!(display_prefs().keyword_wrap);
+
+        let state = tab();
+        assert_eq!(state["display"]["keywordWrap"], true);
+        assert_eq!(state["display"]["vertical"], false);
+        // Presentation only: the model's SQL is byte-identical, and the push
+        // does not ask for the input box to be rewritten.
+        assert_eq!(model().sql, sql);
+        assert_eq!(state["replaceInput"], false);
+        assert_eq!(state["model"]["tabs"]["sql"], sql);
+    }
+
+    #[test]
+    fn the_display_state_defaults_to_off() {
+        let (_host, _guard) = test_host();
+        set_model(sample());
+        let state = tab();
+        assert_eq!(state["display"]["keywordWrap"], false);
+        assert_eq!(state["display"]["vertical"], false);
+        assert_eq!(display_prefs(), DisplayPrefs::default());
+    }
+
+    #[test]
+    fn the_new_model_fields_round_trip_and_default_when_absent() {
+        // Backward compatibility: an older push (or a stored model) without
+        // `statements` / `statement` decodes with empty values, never an error.
+        let decoded: WorkbenchModel =
+            serde_json::from_str(r#"{"sql":"select 1","dialect":"MySQL"}"#)
+                .expect("the older shape still decodes");
+        assert!(decoded.statements.is_empty());
+        assert!(decoded.statement.is_empty());
+
+        let mut model = sample();
+        model.statements = vec!["one".to_string(), "two".to_string()];
+        model.statement = "two".to_string();
+        let json = serde_json::to_string(&model).unwrap();
+        let back: WorkbenchModel = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, model);
+    }
+
+    #[test]
+    fn the_statement_picker_control_is_in_the_module() {
+        // Lane L45: the picker lives in the meta row of `web/preview.js`, and
+        // the two display toggles live in the "More" menu (where L44 also
+        // adds items, so this only asserts L45's own ids are present).
+        let module = include_str!("../../web/preview.js");
+        for id in [
+            "pvStatement",
+            "pvStatementWrap",
+            "pvKeywordWrap",
+            "pvVertical",
+        ] {
+            assert!(module.contains(&format!("id=\"{id}\"")), "missing {id}");
+        }
+        assert!(
+            module.contains("preview-statement"),
+            "the picker posts its own op"
+        );
+        assert!(
+            module.contains("preview-display"),
+            "the switches report their state"
+        );
+        // The shaping is display-side: the model's SQL is what Copy reads, not
+        // the shaped text.
+        assert!(
+            module.contains("export function wrapKeywords"),
+            "the wrap helper"
+        );
+        assert!(
+            module.contains("export function verticalItems"),
+            "the vertical helper"
+        );
+        assert!(
+            module.contains("text = shapeForDisplay(text, preview.display);"),
+            "only the painted text is shaped"
+        );
     }
 
     // Parameters, clipboard import and rollback (lane L27) ----------------

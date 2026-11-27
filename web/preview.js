@@ -54,6 +54,13 @@ const TEMPLATE = `<!-- Input half (lane L27): the reference's standalone page ac
   <div class="pv-meta">
     <span class="pv-chip" id="pvDialectChip"></span>
     <span class="muted" id="pvDialectHint"></span>
+    <!-- Statement picker (lane L45): only a mapper render offers it. Hidden
+         when there is no statement list (inline SQL, a log row), disabled when
+         the mapper holds a single statement. -->
+    <span class="pv-statement-wrap" id="pvStatementWrap" hidden>
+      <label class="muted" id="pvStatementLabel" for="pvStatement"></label>
+      <select id="pvStatement" class="btn"></select>
+    </span>
     <span class="pv-badge" id="pvConfidence" hidden></span>
     <span class="pv-advice muted" id="pvAdvice"></span>
   </div>
@@ -105,6 +112,12 @@ const TEMPLATE = `<!-- Input half (lane L27): the reference's standalone page ac
              tooltip. -->
         <button id="pvRollback" class="pv-more-item" type="button" role="menuitem"
                 disabled></button>
+        <!-- Display switches (lane L45): pure presentation, the SQL text is
+             untouched. Each is a toggle that keeps its state across pushes. -->
+        <button id="pvKeywordWrap" class="pv-more-item" type="button" role="menuitemcheckbox"
+                aria-checked="false"></button>
+        <button id="pvVertical" class="pv-more-item" type="button" role="menuitemcheckbox"
+                aria-checked="false"></button>
       </div>
     </span>
   </div>
@@ -177,6 +190,206 @@ const PV_LABEL_KEYS = {
 const PV_TAB_KEYS = { sql: 'tabSql', raw: 'tabRaw', columns: 'tabColumns' };
 const PV_TAB_ORDER = ['sql', 'raw', 'columns'];
 
+/* ---- Display-only SQL shaping (lane L45) --------------------------------
+ *
+ * Both helpers take the SQL the preview shows and return the text to paint.
+ * They never run on the model: the executable SQL the host holds, the Copy /
+ * Export paths and the formatted tab are untouched — these two switches are
+ * presentation, nothing else. Called on every render, so they stay linear and
+ * allocate little.
+ */
+
+/* The top-level keywords the wrap breaks before. Longest-first so `GROUP BY`
+   and `ORDER BY` win over a bare `GROUP` / `ORDER`, and `LEFT JOIN` style
+   two-word joins are covered by the trailing JOIN entry. */
+const PV_WRAP_KEYWORDS = [
+  'LEFT OUTER JOIN', 'RIGHT OUTER JOIN', 'FULL OUTER JOIN',
+  'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN', 'INNER JOIN', 'CROSS JOIN',
+  'UNION ALL', 'GROUP BY', 'ORDER BY',
+  'SELECT', 'FROM', 'WHERE', 'HAVING', 'LIMIT', 'OFFSET', 'JOIN', 'ON',
+  'AND', 'OR', 'UNION', 'INSERT INTO', 'INSERT', 'UPDATE', 'DELETE FROM',
+  'DELETE', 'VALUES', 'SET', 'WITH',
+];
+
+/* Characters that end a string / quoted identifier / comment; the scanner
+   below never breaks inside one. */
+function isQuote(ch) { return ch === '\'' || ch === '"' || ch === '`'; }
+
+function isWordStart(ch) { return /[A-Za-z_]/.test(ch); }
+function isWordChar(ch) { return /[A-Za-z0-9_$]/.test(ch); }
+
+/**
+ * Walks `text` and hands each plain (unquoted, uncommented) character to
+ * `visit`; quoted spans, line comments and block comments arrive as one opaque
+ * chunk so no rule can fire inside them. Shared by both display shapers.
+ */
+function walkSql(text, visit) {
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (isQuote(ch)) {
+      let j = i + 1;
+      while (j < text.length) {
+        if (text[j] === ch) {
+          if (text[j + 1] === ch) { j += 2; continue; } // doubled-quote escape
+          break;
+        }
+        j += 1;
+      }
+      const stop = Math.min(j + 1, text.length);
+      visit(text.slice(i, stop), i, stop, 'opaque');
+      i = stop;
+      continue;
+    }
+    if (ch === '-' && text[i + 1] === '-') {
+      const end = text.indexOf('\n', i);
+      const stop = end < 0 ? text.length : end + 1;
+      visit(text.slice(i, stop), i, stop, 'opaque');
+      i = stop;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      visit(text.slice(i, stop), i, stop, 'opaque');
+      i = stop;
+      continue;
+    }
+    visit(ch, i, i + 1, 'plain');
+    i += 1;
+  }
+}
+
+/**
+ * Breaks the SQL before each top-level keyword and returns the display text.
+ *
+ * Only whitespace is inserted at those points: no token is dropped, renamed or
+ * reordered, and text inside string literals, quoted identifiers and comments
+ * is left alone. Pure: same input, same output, no state.
+ */
+export function wrapKeywords(sql) {
+  const text = String(sql == null ? '' : sql);
+  if (!text) { return text; }
+  const upper = text.toUpperCase();
+  const breaks = [];
+  let seenToken = false;
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (isQuote(ch) || (ch === '-' && text[i + 1] === '-')
+        || (ch === '/' && text[i + 1] === '*')) {
+      // One opaque chunk (string, identifier, comment): never break in it.
+      let stop;
+      if (isQuote(ch)) {
+        let j = i + 1;
+        while (j < text.length) {
+          if (text[j] === ch) {
+            if (text[j + 1] === ch) { j += 2; continue; }
+            break;
+          }
+          j += 1;
+        }
+        stop = Math.min(j + 1, text.length);
+      } else if (ch === '-') {
+        const end = text.indexOf('\n', i);
+        stop = end < 0 ? text.length : end + 1;
+      } else {
+        const end = text.indexOf('*/', i + 2);
+        stop = end < 0 ? text.length : end + 2;
+      }
+      seenToken = true;
+      i = stop;
+      continue;
+    }
+    if (isWordStart(ch)) {
+      let matched = null;
+      // Longest-first: the list is ordered that way, so the first hit wins.
+      for (let k = 0; k < PV_WRAP_KEYWORDS.length; k++) {
+        const keyword = PV_WRAP_KEYWORDS[k];
+        if (!upper.startsWith(keyword, i)) { continue; }
+        const after = i + keyword.length;
+        // `SELECTED` must not match `SELECT`: a word character right after the
+        // keyword means this is a longer identifier.
+        if (after < text.length && isWordChar(text[after])) { continue; }
+        matched = after;
+        break;
+      }
+      if (matched !== null) {
+        if (seenToken) { breaks.push(i); }
+        seenToken = true;
+        i = matched;
+        continue;
+      }
+      // An ordinary word: skip it whole, so a keyword inside it never matches.
+      let j = i;
+      while (j < text.length && isWordChar(text[j])) { j += 1; }
+      seenToken = true;
+      i = j;
+      continue;
+    }
+    if (!/\s/.test(ch)) { seenToken = true; }
+    i += 1;
+  }
+  if (breaks.length === 0) { return text; }
+  let out = '';
+  let cursor = 0;
+  for (let index = 0; index < breaks.length; index++) {
+    const at = breaks[index];
+    // Collapse the whitespace already before the keyword into one newline, so
+    // a wrapped line does not keep the original indentation.
+    let start = at;
+    while (start > cursor && /\s/.test(text[start - 1])) { start -= 1; }
+    out += text.slice(cursor, start);
+    if (out.length > 0 && out[out.length - 1] !== '\n') { out += '\n'; }
+    cursor = at;
+  }
+  out += text.slice(cursor);
+  return out;
+}
+
+/**
+ * Puts each top-level comma-separated item on its own line.
+ *
+ * Commas inside parentheses (function arguments, `IN (…)`, subqueries) and
+ * inside strings / comments stay put: only the commas at depth 0 break the
+ * line, which is the "one item per line" reading of a SELECT list. Pure.
+ */
+export function verticalItems(sql) {
+  const text = String(sql == null ? '' : sql);
+  if (!text) { return text; }
+  let out = '';
+  let depth = 0;
+  let pendingSkip = 0;
+  walkSql(text, function (chunk, start, stop, kind) {
+    if (kind === 'opaque') { out += chunk; return; }
+    const ch = chunk;
+    if (ch === '(') { depth += 1; out += ch; return; }
+    if (ch === ')') { depth = Math.max(0, depth - 1); out += ch; return; }
+    if (ch === ',' && depth === 0) {
+      out += ',\n';
+      // Drop the indentation that used to follow the comma.
+      pendingSkip = 1;
+      return;
+    }
+    if (pendingSkip && (ch === ' ' || ch === '\t')) { return; }
+    pendingSkip = 0;
+    out += ch;
+  });
+  return out;
+}
+
+/**
+ * The text the SQL tab paints: the chosen display shaping, or the raw text.
+ * `options` carries the two toggles; both off returns the input unchanged.
+ */
+export function shapeForDisplay(sql, options) {
+  const opts = options || {};
+  let text = String(sql == null ? '' : sql);
+  if (opts.vertical) { text = verticalItems(text); }
+  if (opts.keywordWrap) { text = wrapKeywords(text); }
+  return text;
+}
+
 /**
  * Builds the workbench inside `root`.
  *
@@ -205,7 +418,13 @@ export function mountPreview(root, deps) {
   }
   root.appendChild(staged);
 
-  const preview = { model: {}, labels: {}, dialect: {}, tab: 'sql', mode: 'normal' };
+  const preview = {
+    model: {}, labels: {}, dialect: {}, tab: 'sql', mode: 'normal',
+    // Lane L45: the two display switches. Seeded from the state push and
+    // seeded back to the host when the reader toggles them, so the next
+    // remount — or the panel page reloading — shows the same text.
+    display: { keywordWrap: false, vertical: false },
+  };
   if (deps.labels) { preview.labels = deps.labels; }
   // Signature of what the tab body shows: a state push that changes none of it
   // must not re-render (the reader keeps their scroll position).
@@ -229,10 +448,14 @@ export function mountPreview(root, deps) {
     const m = preview.model || {};
     const t = tabs();
     const l = preview.labels || {};
+    const d = preview.display || {};
     return [
       m.sql, m.reason, m.confidence, (m.params || []).join(','),
       t.formatted, t.raw, t.columns, preview.tab, preview.mode,
       l.empty, l.columnsEmpty, l.reasonTitle,
+      // The display switches change the painted text, so a toggle must
+      // re-render even when the model is unchanged (lane L45).
+      d.keywordWrap ? 'kw' : '', d.vertical ? 'v' : '',
     ].join('\u0001');
   }
 
@@ -259,6 +482,11 @@ export function mountPreview(root, deps) {
         text = preview.mode === 'formatted'
           ? (source.formatted || source.sql || '')
           : (source.sql || '');
+        // Lane L45: the two display switches shape what the tab paints. The
+        // model, the Copy / Export paths and the input box keep the original
+        // text — this is presentation only. The 原文 and 列信息 tabs stay
+        // verbatim on purpose.
+        text = shapeForDisplay(text, preview.display);
         if (m.reason) {
           // A partial render keeps its SQL and explains itself below it the
           // way `render-xml` prints reasons as comments.
@@ -301,6 +529,76 @@ export function mountPreview(root, deps) {
     const select = node('pvMode');
     if (select && select.value !== preview.mode) { select.value = preview.mode; }
     renderTab();
+  }
+
+  // Statement picker (lane L45) -----------------------------------------
+  // The model lists the ids this render can switch between, and which one it
+  // shows. No list (inline SQL, a log row) hides the control; a single entry
+  // disables it, so the reader never picks a statement that cannot change.
+  function applyStatementPicker() {
+    const wrap = node('pvStatementWrap');
+    const select = node('pvStatement');
+    if (!wrap || !select) { return; }
+    const labels = preview.labels || {};
+    const m = preview.model || {};
+    const ids = Array.isArray(m.statements) ? m.statements : [];
+    setText(node('pvStatementLabel'), labels.statementLabel || '');
+    if (ids.length === 0) {
+      wrap.hidden = true;
+      return;
+    }
+    wrap.hidden = false;
+    // Rebuild only when the option set changed: a push that carries the same
+    // list must not reset the reader's focus or emit a change event.
+    const current = [];
+    for (let i = 0; i < select.options.length; i++) { current.push(select.options[i].value); }
+    if (current.join('\u0001') !== ids.join('\u0001')) {
+      while (select.firstChild) { select.removeChild(select.firstChild); }
+      for (let i = 0; i < ids.length; i++) {
+        const option = doc.createElement('option');
+        option.value = ids[i];
+        option.textContent = ids[i];
+        select.appendChild(option);
+      }
+    }
+    const chosen = ids.indexOf(m.statement) >= 0 ? m.statement : ids[0];
+    if (select.value !== chosen) { select.value = chosen; }
+    select.disabled = ids.length < 2;
+    select.title = ids.length < 2
+      ? (labels.statementNone || '')
+      : (labels.statementNote || '');
+  }
+
+  // Display switches (lane L45) ----------------------------------------
+  // Two menu toggles; both are presentation, and both report their new state
+  // to the host so the next push carries it back.
+  function applyDisplaySwitches() {
+    const labels = preview.labels || {};
+    const display = preview.display || {};
+    const pairs = [['pvKeywordWrap', 'keywordWrap', 'keywordWrapNote'],
+      ['pvVertical', 'vertical', 'verticalNote']];
+    for (let i = 0; i < pairs.length; i++) {
+      const button = node(pairs[i][0]);
+      if (!button) { continue; }
+      const on = !!display[pairs[i][1]];
+      button.setAttribute('aria-checked', on ? 'true' : 'false');
+      button.textContent = (labels[pairs[i][1]] || '') + (on ? ' \u2713' : '');
+      button.title = labels[pairs[i][2]] || '';
+    }
+  }
+
+  function toggleDisplay(key) {
+    const display = preview.display || {};
+    display[key] = !display[key];
+    preview.display = display;
+    applyDisplaySwitches();
+    renderTab();
+    // Tell the host, so a later push (a filter, a tab switch) keeps the state.
+    post({
+      op: 'preview-display',
+      keywordWrap: !!display.keywordWrap,
+      vertical: !!display.vertical,
+    });
   }
 
   function applyLabels() {
@@ -495,6 +793,11 @@ export function mountPreview(root, deps) {
         ? (labels.columnsEmpty || '') : '';
     }
     applyBanner();
+    // Lane L45: the statement picker and the two display toggles follow every
+    // model push, so switching statements or toggling a switch never needs a
+    // second round trip.
+    applyStatementPicker();
+    applyDisplaySwitches();
   }
 
   /**
@@ -507,6 +810,15 @@ export function mountPreview(root, deps) {
     preview.model = tab.model || {};
     preview.labels = tab.labels || {};
     preview.dialect = tab.dialect || {};
+    // Lane L45: the display switches travel with every push. Absent (an older
+    // host, the standalone page's first paint) keeps what the page has, so a
+    // missing field never resets a choice the reader made.
+    if (tab.display) {
+      preview.display = {
+        keywordWrap: !!tab.display.keywordWrap,
+        vertical: !!tab.display.vertical,
+      };
+    }
     applyLabels();
     // A render that rewrote the input also re-arms the degradation strip: a
     // dismissed banner must come back when the render changed.
@@ -630,6 +942,18 @@ export function mountPreview(root, deps) {
     });
   });
   on('pvRollback', function () { post({ op: 'preview-rollback' }); });
+
+  // Statement picker (lane L45): the host re-renders the chosen id out of the
+  // mapper document it kept, and the push that follows carries the new SQL.
+  const statementSelect = node('pvStatement');
+  if (statementSelect) {
+    statementSelect.addEventListener('change', function () {
+      post({ op: 'preview-statement', id: statementSelect.value });
+    });
+  }
+  // Display switches (lane L45): each toggles locally and reports the pair.
+  on('pvKeywordWrap', function () { closeMore(); toggleDisplay('keywordWrap'); });
+  on('pvVertical', function () { closeMore(); toggleDisplay('vertical'); });
 
   const modeSelect = node('pvMode');
   if (modeSelect) {
