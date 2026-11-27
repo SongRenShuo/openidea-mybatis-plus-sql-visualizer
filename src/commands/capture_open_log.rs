@@ -101,8 +101,12 @@ Parameters: 2(Long)
 
     /// The panel's row store is process-wide: `views::log_panel` tests hold the
     /// same lock, so this test never sees their rows and they never see ours.
+    /// Resetting matters as much as locking — without it the count asserted
+    /// below depends on which test happened to hold the lock last, which is how
+    /// this case went red in CI while passing locally.
     fn host_with_store_lock() -> (MockHost, std::sync::MutexGuard<'static, ()>) {
         let guard = crate::views::test_state_lock();
+        crate::views::log_panel::reset_for_tests();
         (MockHost::install(), guard)
     }
 

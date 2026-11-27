@@ -339,18 +339,32 @@ pub fn disconnect() -> Result<Stats, BridgeError> {
 /// Drops every staged panel row (the panel's own Clear button does this too);
 /// used by tests before a fresh session.
 #[cfg(test)]
-fn reset_for_tests() {
+pub(crate) fn reset_for_tests() {
     let _ = disconnect();
 }
 
-/// Serialises every test that touches the process-wide session, across modules
-/// (`capture::*` and `commands::capture_*` tests both take it).
+/// Resets the capture session **without** taking the test lock. Only for tests
+/// that already hold it (`views::test_state_lock`) — taking it twice on one
+/// thread is a deadlock, not an error, because `std::sync::Mutex` is not
+/// reentrant.
+#[cfg(test)]
+pub(crate) fn reset_capture_for_tests() {
+    let _ = disconnect();
+}
+
+/// The one test lock for every process-wide store: the capture session, the
+/// panel row store and the workbench model. Callers get the same
+/// [`crate::views::test_state_lock`] guard, so a test cannot hold "the capture
+/// lock" while another holds "the views lock" — that split let a poll test
+/// append a panel row while an open-log test counted rows, which is how
+/// `commands_capture_open_log_parses_a_file_and_reveals_the_panel` saw three
+/// rows instead of two in CI while passing locally.
+///
+/// Tests that already hold the lock must call [`reset_capture_for_tests`]
+/// instead of this.
 #[cfg(test)]
 pub(crate) fn test_guard() -> MutexGuard<'static, ()> {
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-    let guard = TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let guard = crate::views::test_state_lock();
     reset_for_tests();
     guard
 }
@@ -632,6 +646,8 @@ mod tests {
     use openidea_plugin::mock::MockHost;
     use serde_json::json;
 
+    /// The same guard `views::test_state_lock` hands out: one lock for the
+    /// capture session, the panel rows and the workbench model.
     fn guard() -> std::sync::MutexGuard<'static, ()> {
         test_guard()
     }

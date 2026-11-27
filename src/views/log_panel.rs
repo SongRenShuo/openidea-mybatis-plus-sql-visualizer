@@ -1155,6 +1155,20 @@ pub fn clear() {
     state.history = HistoryTab::default();
 }
 
+/// Puts the process-wide panel store back to a fresh baseline. Tests in several
+/// modules share it (they take `views::test_state_lock`), so every one of them
+/// must start from the same state — otherwise a `rows.len()` assertion depends
+/// on which test happened to hold the lock last.
+#[cfg(test)]
+pub(crate) fn reset_for_tests() {
+    clear();
+    // The two input tabs survive `clear()` by design, so a test resets them
+    // explicitly rather than relying on the previous test having done so.
+    let mut state = store();
+    state.log_to_sql = LogToSqlTab::default();
+    state.sql_to_java = SqlToJavaTab::default();
+}
+
 /// Whether live refresh is paused (rows keep accumulating meanwhile).
 pub fn is_paused() -> bool {
     store().paused
@@ -3232,14 +3246,9 @@ mod tests {
     fn test_host() -> (MockHost, MutexGuard<'static, ()>) {
         let guard = super::super::test_state_lock();
         let host = MockHost::install();
-        clear();
-        // The two input tabs are independent of the buffer (lane L33), so a
-        // test starts them from a clean state explicitly.
-        {
-            let mut state = store();
-            state.log_to_sql = LogToSqlTab::default();
-            state.sql_to_java = SqlToJavaTab::default();
-        }
+        // One shared reset: the same baseline the `commands` tests use, so a
+        // leftover from whichever test held the lock last cannot leak in.
+        super::reset_for_tests();
         set_filter(Filter::default());
         set_paused(false);
         // The location indexes are process-wide too (lane L28).
@@ -5500,7 +5509,9 @@ public interface UserMapper {
     #[test]
     fn capture_start_message_forwards_to_the_capture_command() {
         let (host, _guard) = test_host();
-        let _bridge = crate::capture::bridge::test_guard();
+        // Already holding the one test lock via `test_host()`; take only the
+        // capture-session reset (a second lock on this thread would deadlock).
+        crate::capture::bridge::reset_capture_for_tests();
         host.set_project_root(Some("/project"));
         handle_panel_message(&host, "{\"op\":\"capture-start\"}").unwrap();
         let out = &host.output()[common::CHANNEL];
@@ -5518,7 +5529,9 @@ public interface UserMapper {
     #[test]
     fn capture_stop_message_forwards_to_the_capture_command() {
         let (host, _guard) = test_host();
-        let _bridge = crate::capture::bridge::test_guard();
+        // Already holding the one test lock via `test_host()`; take only the
+        // capture-session reset (a second lock on this thread would deadlock).
+        crate::capture::bridge::reset_capture_for_tests();
         handle_panel_message(&host, "{\"op\":\"capture-stop\"}").unwrap();
         let out = &host.output()[common::CHANNEL];
         assert!(out.contains("-- capture-stop:"), "{out}");
