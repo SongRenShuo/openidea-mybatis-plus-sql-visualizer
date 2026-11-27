@@ -7,7 +7,7 @@
 
 ### 新增
 
-- 16 个命令：渲染 mapper XML、校验 SQL、性能建议、生成 CRUD、回滚计划、渲染 SQL 日志、捕获启停与状态、打开日志、索引统计，以及**预览 SQL**（`<mapper.xml>#<语句>` / 路径 / 行内 SQL / 当前编辑器）与**差异预览**（原文↔SQL，可在窗口中打开）。
+- 16 个命令：渲染 mapper XML、校验 SQL、性能建议、生成 CRUD、回滚计划、渲染 SQL 日志、捕获启停与状态、打开日志、索引统计，以及**预览 SQL**（`<mapper.xml>#<语句>` / 路径 / 行内 SQL / 当前编辑器 / 注解 SQL 的 `<Mapper.java>#<方法>` / iBatis 2 的 `<sqlMap.xml>#<id>` / MyBatis-Plus Wrapper 链）与**差异预览**（原文↔SQL，可在窗口中打开）。
 - 预览是主入口：mapper 语句行的 gutter 预览按钮、`Alt+Shift+Q`、右键都能打开它；预览页签按原版排布（方言与建议行、复制/格式化/显示模式/刷新、参数左、SQL·原文·列信息右）。
 - SQL 预览默认开在独立的模态弹窗里：Esc 或关闭按钮关掉，窗口大小会被记住，再打开还是上次的语句；想回到工具窗页签，在设置 `SQL Preview › Open preview in` 选 `tab`，页签里的「在弹框中打开」也能随时弹出当前语句。
 - `SQL Visualizer` 工具窗与五个页签（SQL 日志 / 日志转 SQL / SQL 转 Java / 历史 / SQL 预览），46 项设置分四页（UI and Actions / SQL Preview / SQL Log / Engine），界面中英双语；项目视图与编辑器右键都收进 `SQL Visualizer` 一级菜单，导航、SQL 注入与 inlay 默认开启，诊断默认关闭。SQL 转 Java 选项区按原版排布：形态与实体整行、调用类与返回类型半宽。

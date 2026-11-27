@@ -136,6 +136,7 @@ impl Status {
     }
 }
 
+#[derive(Default)]
 struct Store {
     /// Hash of the project root the loaded rules belong to.
     scope: String,
@@ -150,19 +151,6 @@ struct Store {
     keep_add: bool,
     /// One-shot: the rule the dialog should select after a change.
     select: Option<String>,
-}
-
-impl Default for Store {
-    fn default() -> Self {
-        Self {
-            scope: String::new(),
-            rules: Vec::new(),
-            counted_upto: 0,
-            status: Status::default(),
-            keep_add: false,
-            select: None,
-        }
-    }
 }
 
 static STORE: OnceLock<Mutex<Store>> = OnceLock::new();
@@ -1056,8 +1044,8 @@ mod tests {
         assert_eq!(rules[0]["structure"], false);
         assert_eq!(state["empty"], false);
         assert_eq!(state["allStructure"], false);
-        assert!(state["labels"]["add"].as_str().unwrap().len() > 0);
-        assert!(state["labels"]["note"].as_str().unwrap().len() > 0);
+        assert!(!state["labels"]["add"].as_str().unwrap().is_empty());
+        assert!(!state["labels"]["note"].as_str().unwrap().is_empty());
     }
 
     #[test]

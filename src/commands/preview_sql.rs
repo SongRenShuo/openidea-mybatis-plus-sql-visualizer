@@ -14,10 +14,27 @@
 //! | argument | what is previewed |
 //! | --- | --- |
 //! | `<mapper.xml>#<statement>` | that statement (bare id or `namespace.id`) |
-//! | `<mapper.xml>` / `@<mapper.xml>` | every statement; the first one in the tab |
-//! | `@<path>` / a readable bare path | the file: mapper XML renders, anything else is SQL text |
+//! | `<sqlMap.xml>#<statement>` | the same shape for an iBatis 2 document (root `<sqlMap>`) |
+//! | `<mapper.xml>` / `@<mapper.xml>` / `<sqlMap.xml>` | every statement; the first one in the tab (iBatis: only when the file holds one) |
+//! | `<Mapper.java>#<method>` | the statement annotation on that method (`@Select` / `@Insert` / `@Update` / `@Delete`) |
+//! | `<Mapper>#<method>` | the same, with the class looked up in the project index |
+//! | `@<path>` / a readable bare path | the file, dispatched by type: mapper XML, iBatis `<sqlMap>`, Java annotations, otherwise SQL text |
+//! | wrapper chain text | `render`ed through `analyze::wrapper` (the entity class is read from the project) |
 //! | inline text | that text (XML is rendered, SQL is used verbatim) |
 //! | none | the focused editor: the first non-empty selection, else the document |
+//!
+//! Lane F wired the three sources that had a renderer but no entry:
+//! `core::annotation`, `core::ibatis` and `analyze::wrapper`. The "which source
+//! is this" decision lives in `analyze::sources`, shared with the
+//! `sqlv_render_sql` MCP tool; this module only adds the project lookups it
+//! needs (an entity class, the file behind `Class#method`) and the preview
+//! model shell.
+//!
+//! Every route ends in a model that carries `exact` / `partial` /
+//! `unresolved`: an `unresolved` render fills `reason` and leaves `sql` empty.
+//! Nothing here guesses — several annotated statements with no method and no
+//! caret is an `unresolved` render listing what the file offers, not "the first
+//! one".
 //!
 //! `editor.read` is optional. Without it the no-argument form reports
 //! [`KEY_EDITOR_UNREADABLE`]; the argument forms keep working, which is the
@@ -26,11 +43,14 @@
 
 use std::fmt::Write as _;
 
-use openidea_plugin::{Error, Invocation, host};
+use openidea_plugin::{Document, Error, Invocation, Position, Range, host};
 use serde_json::json;
 
+use crate::analyze::sources::{self, KEY_IBATIS_STATEMENT_REQUIRED};
+use crate::analyze::{EntityColumns, entity};
 use crate::capture::bridge;
 use crate::commands::common::{self, CliError};
+use crate::core::dialect::{self, Dialect};
 use crate::core::xml::{Confidence, MapperSet, RenderOutput};
 use crate::views::{log_panel, workbench};
 
@@ -38,7 +58,7 @@ use crate::views::{log_panel, workbench};
 pub const ID: &str = "preview-sql";
 
 /// What the command accepts as `arg` (also the text of a missing-argument error).
-pub const USAGE: &str = "<mapper.xml>#<statement> | <mapper.xml> | @<path> | <SQL text> | (no argument: current editor)";
+pub const USAGE: &str = "<mapper.xml|sqlMap.xml>#<statement> | <path> | <Class>#<method> | @<path> | <wrapper chain> | <SQL text> | (no argument: current editor)";
 
 /// Same key `render-xml` reports, so the two commands describe an empty mapper
 /// the same way.
@@ -50,6 +70,9 @@ pub const KEY_NO_INPUT: &str = "preview.error.no_input";
 /// The focused editor exists but its text cannot be read (`editor.read` missing,
 /// or the document changed between the two host calls).
 pub const KEY_EDITOR_UNREADABLE: &str = "preview.error.editor_unreadable";
+
+/// `Class#method` was given but no Java class of that name is in the project.
+pub const KEY_ANNOTATION_CLASS_UNKNOWN: &str = "preview.error.annotation_class_unknown";
 
 /// Used when the settings page has no dialect; the workbench does the same.
 const FALLBACK_DIALECT: &str = "MySQL";
@@ -91,6 +114,57 @@ pub fn model_for(
             );
             Ok((model, detail, xml))
         }
+        Input::Ibatis {
+            path,
+            xml,
+            statement,
+        } => {
+            let (model, source) = ibatis_model(&path, &xml, statement.as_deref(), &dialect);
+            let detail = format!(
+                "{source} (kind: {}, confidence: {}, sql: {} chars)",
+                non_empty(&model.kind),
+                non_empty(&model.confidence),
+                model.sql.chars().count()
+            );
+            Ok((model, detail, xml))
+        }
+        Input::Annotation {
+            path,
+            java,
+            method,
+            caret,
+        } => {
+            let (model, source) =
+                annotation_model(&path, &java, method.as_deref(), caret, &dialect);
+            let detail = format!(
+                "{source} (kind: {}, confidence: {}, sql: {} chars)",
+                non_empty(&model.kind),
+                non_empty(&model.confidence),
+                model.sql.chars().count()
+            );
+            Ok((model, detail, java))
+        }
+        Input::Wrapper {
+            text,
+            source,
+            class,
+            projection,
+        } => {
+            let (model, label) = wrapper_model(
+                &text,
+                source.as_deref(),
+                class.as_deref(),
+                &projection,
+                &dialect,
+            );
+            let detail = format!(
+                "{label} (kind: {}, confidence: {}, sql: {} chars)",
+                non_empty(&model.kind),
+                non_empty(&model.confidence),
+                model.sql.chars().count()
+            );
+            Ok((model, detail, text))
+        }
         Input::Text { text, source } => {
             let mut model = workbench::render_input(&text, "", &dialect);
             if let Some(source) = &source {
@@ -99,21 +173,18 @@ pub fn model_for(
             let detail = format!(
                 "{} (kind: {}, confidence: {}, sql: {} chars)",
                 source.as_deref().unwrap_or("<inline>"),
-                if model.kind.is_empty() {
-                    "none"
-                } else {
-                    model.kind.as_str()
-                },
-                if model.confidence.is_empty() {
-                    "none"
-                } else {
-                    model.confidence.as_str()
-                },
+                non_empty(&model.kind),
+                non_empty(&model.confidence),
                 model.sql.chars().count()
             );
             Ok((model, detail, text))
         }
     }
+}
+
+/// A model field that may legitimately be empty, for a one-line summary.
+fn non_empty(value: &str) -> &str {
+    if value.is_empty() { "none" } else { value }
 }
 
 /// Resolve the input, render it into the workbench model, push the log panel's
@@ -172,6 +243,30 @@ enum Input {
         /// `None` renders every statement (the first one in the tab).
         statement: Option<String>,
     },
+    /// An iBatis 2 `<sqlMap>` document rendered through `core::ibatis`.
+    Ibatis {
+        path: String,
+        xml: String,
+        statement: Option<String>,
+    },
+    /// Java source whose `@Select` / `@Insert` / `@Update` / `@Delete` bodies are
+    /// rendered through `core::annotation`. `method` and `caret` are the two
+    /// ways to choose one; both `None` only works for a one-statement file.
+    Annotation {
+        path: String,
+        java: String,
+        method: Option<String>,
+        caret: Option<usize>,
+    },
+    /// A `LambdaQueryWrapper` / `QueryWrapper` chain rendered through
+    /// `analyze::wrapper`. The renderer needs a field→column projection;
+    /// `projection` says whether the project could supply one.
+    Wrapper {
+        text: String,
+        source: Option<String>,
+        class: Option<String>,
+        projection: Projection,
+    },
     /// Free text: the workbench decides whether it is SQL or mapper XML.
     Text {
         text: String,
@@ -189,26 +284,48 @@ fn resolve(ctx: &Invocation, arg: Option<&str>) -> Result<Input, CliError> {
 fn resolve_argument(ctx: &Invocation, raw: &str) -> Result<Input, CliError> {
     if let Some((path, statement)) = split_statement_arg(raw) {
         let xml = common::read_file(ctx, &path)?;
+        // `<sqlMap>` and `<mapper>` both take `path#id`; the root element says
+        // which renderer, not the file name.
+        if sources::looks_like_ibatis(&xml) {
+            return Ok(Input::Ibatis {
+                path,
+                xml,
+                statement: Some(statement),
+            });
+        }
         return Ok(Input::Mapper {
             path,
             xml,
             statement: Some(statement),
         });
     }
+    // `<Mapper.java>#<method>`: the path names the file, so no lookup is needed.
+    if let Some((path, method)) = split_java_arg(raw) {
+        let java = common::read_file(ctx, &path)?;
+        return Ok(Input::Annotation {
+            path,
+            java,
+            method: Some(method),
+            caret: None,
+        });
+    }
+    // `<Class>#<method>`: the class is looked up in the project index.
+    if let Some((class, method)) = annotation_arg(raw) {
+        return annotation_by_class(ctx, &class, Some(&method), None);
+    }
+    // A wrapper chain pasted inline or selected in an editor.
+    if sources::looks_like_wrapper(raw) {
+        return Ok(wrapper_input(ctx, raw, None));
+    }
     // `@<path>` / bare path / inline text, with the same probe rules as
     // `open-workbench`: only an argument free of whitespace is tried as a file,
     // and a failed read falls back to literal text.
     let (text, source) = common::sql_arg(ctx, Some(raw))?;
-    if let Some(path) = &source
-        && looks_like_mapper(&text)
-    {
-        return Ok(Input::Mapper {
-            path: path.clone(),
-            xml: text,
-            statement: None,
-        });
-    }
-    Ok(Input::Text { text, source })
+    Ok(match source {
+        // A whole file: its type decides before its content does.
+        Some(path) => document_input(ctx, &path, text),
+        None => text_input(ctx, text, None),
+    })
 }
 
 /// `path#statement` for a mapper file. Inline SQL keeps its `#`: the prefix of
@@ -230,6 +347,196 @@ fn split_statement_arg(arg: &str) -> Option<(String, String)> {
         return None;
     }
     Some((path.to_string(), statement.to_string()))
+}
+
+/// `path.java#method` → `(path, method)`.
+fn split_java_arg(arg: &str) -> Option<(String, String)> {
+    let (path, method) = arg.rsplit_once('#')?;
+    let path = path.trim();
+    let path = path.strip_prefix('@').unwrap_or(path);
+    let method = method.trim();
+    if path.is_empty() || path.chars().any(char::is_whitespace) {
+        return None;
+    }
+    if !path.to_ascii_lowercase().ends_with(".java") || !is_identifier(method) {
+        return None;
+    }
+    Some((path.to_string(), method.to_string()))
+}
+
+/// `Class#method` (no path): the shape a user types to reach an annotated
+/// mapper without opening the file.
+///
+/// The class part must contain a lower-case letter, so `SELECT#x` and other
+/// upper-case SQL fragments keep being read as literal text.
+fn annotation_arg(arg: &str) -> Option<(String, String)> {
+    if arg.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let (class, method) = arg.rsplit_once('#')?;
+    let class = class.trim();
+    let method = method.trim();
+    if class.is_empty() || !is_identifier(method) || !is_class_name(class) {
+        return None;
+    }
+    Some((class.to_string(), method.to_string()))
+}
+
+fn is_class_name(text: &str) -> bool {
+    text.chars().any(|ch| ch.is_lowercase()) && text.split('.').all(is_identifier)
+}
+
+fn is_identifier(text: &str) -> bool {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) if first.is_alphabetic() || first == '_' || first == '$' => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch.is_alphanumeric() || ch == '_' || ch == '$')
+}
+
+/// The `Class#method` route: find the class file, then treat it like any other
+/// annotated Java document.
+fn annotation_by_class(
+    ctx: &Invocation,
+    class: &str,
+    method: Option<&str>,
+    caret: Option<usize>,
+) -> Result<Input, CliError> {
+    let path = resolve_class_path(ctx, class).ok_or_else(|| {
+        CliError::new(
+            KEY_ANNOTATION_CLASS_UNKNOWN,
+            format!("{class}: no Java class of that name is in the project index"),
+        )
+    })?;
+    let java = common::read_file(ctx, &path)?;
+    Ok(Input::Annotation {
+        path,
+        java,
+        method: method.map(str::to_string),
+        caret,
+    })
+}
+
+/// The first indexed class of that name, as a readable Java path.
+fn resolve_class_path(ctx: &Invocation, class: &str) -> Option<String> {
+    let project = common::project(ctx).ok()?;
+    let simple = entity::simple_name(class);
+    let qualified = format!(".{simple}");
+    let symbols = project.symbols(&simple, 50).ok()?;
+    symbols
+        .iter()
+        .filter(|symbol| symbol.kind.eq_ignore_ascii_case("class"))
+        .filter(|symbol| {
+            symbol.name == simple || symbol.name == class || symbol.name.ends_with(&qualified)
+        })
+        .map(|symbol| symbol.location.path.clone())
+        .find(|path| path.to_ascii_lowercase().ends_with(".java"))
+}
+
+/// Text from a selection or inline argument: content decides.
+fn text_input(ctx: &Invocation, text: String, source: Option<String>) -> Input {
+    if looks_like_mapper(&text) {
+        return Input::Mapper {
+            path: source.unwrap_or_else(|| "<inline>".to_string()),
+            xml: text,
+            statement: None,
+        };
+    }
+    if sources::looks_like_ibatis(&text) {
+        return Input::Ibatis {
+            path: source.unwrap_or_else(|| "<inline>".to_string()),
+            xml: text,
+            statement: None,
+        };
+    }
+    if sources::looks_like_wrapper(&text) {
+        return wrapper_input(ctx, &text, source);
+    }
+    Input::Text { text, source }
+}
+
+/// A whole file: its type decides first, its content second.
+fn document_input(ctx: &Invocation, path: &str, text: String) -> Input {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".java") {
+        // Even a Java file with no annotation goes to the annotation model: it
+        // renders `unresolved` with "no @Select … found", which is the truth,
+        // instead of pasting the class into the preview as if it were SQL.
+        if sources::annotation_statements(&text).is_empty() && sources::looks_like_wrapper(&text) {
+            return wrapper_input(ctx, &text, Some(path.to_string()));
+        }
+        return Input::Annotation {
+            path: path.to_string(),
+            java: text,
+            method: None,
+            caret: None,
+        };
+    }
+    if lower.ends_with(".xml") && !looks_like_mapper(&text) && !sources::looks_like_ibatis(&text) {
+        // A non-mapper XML file is not SQL; keep it as text so the workbench
+        // reports an empty render instead of pasting markup as a statement.
+        return Input::Text {
+            text,
+            source: Some(path.to_string()),
+        };
+    }
+    text_input(ctx, text, Some(path.to_string()))
+}
+
+/// What the project said about a wrapper's entity class.
+///
+/// The wrapper renderer cannot run without a field→column projection, and the
+/// reason it has none is what the preview explains, so the four outcomes stay
+/// apart instead of collapsing into "not found".
+#[derive(Debug, Clone)]
+enum Projection {
+    /// The class was read; `fully_declared` is false when the table or a column
+    /// came from MyBatis-Plus defaults, which makes the render `partial`.
+    Read {
+        columns: EntityColumns,
+        fully_declared: bool,
+    },
+    /// No indexed class of that name.
+    Unknown,
+    /// The class is indexed but its file could not be read.
+    Unreadable,
+    /// The class was read and declares no field this reader treats as a column.
+    NoColumns,
+}
+
+/// The wrapper route: read the entity class, then let the renderer decide.
+fn wrapper_input(ctx: &Invocation, text: &str, source: Option<String>) -> Input {
+    let class = sources::wrapper_entity_class(text);
+    let projection = match class.as_deref() {
+        Some(class) => entity_projection(ctx, class),
+        // No class in the source: the renderer reports that itself.
+        None => Projection::Unknown,
+    };
+    Input::Wrapper {
+        text: text.to_string(),
+        source,
+        class,
+        projection,
+    }
+}
+
+/// The field/column projection of `class`, read from its source in the project.
+fn entity_projection(ctx: &Invocation, class: &str) -> Projection {
+    let Some(path) = resolve_class_path(ctx, class) else {
+        return Projection::Unknown;
+    };
+    let Ok(java) = common::read_file(ctx, &path) else {
+        return Projection::Unreadable;
+    };
+    let model = entity::parse_entity(class, &java);
+    if model.columns.is_empty() {
+        return Projection::NoColumns;
+    }
+    Projection::Read {
+        fully_declared: model.fully_declared(),
+        columns: model.columns(),
+    }
 }
 
 /// True when the text is a mapper document (`<mapper …>` root).
@@ -258,10 +565,9 @@ fn editor_input(ctx: &Invocation) -> Result<Input, CliError> {
         .find(|text| !text.trim().is_empty())
         .map(str::to_string);
     if let Some(text) = selected {
-        return Ok(Input::Text {
-            text,
-            source: Some(path),
-        });
+        // A selection is a fragment: its content decides, never the file name
+        // (a SQL snippet selected inside a Java file is still SQL).
+        return Ok(text_input(ctx, text, Some(path)));
     }
     if document.text.trim().is_empty() {
         return Err(CliError::new(
@@ -269,20 +575,39 @@ fn editor_input(ctx: &Invocation) -> Result<Input, CliError> {
             format!("{path}: the editor is empty; usage: {USAGE}"),
         ));
     }
-    // A whole mapper document goes through `core::xml` (all statements), which
-    // resolves includes against the real file path; a selection is always text,
-    // because the fragment may sit outside its `<sql>` definitions.
-    if looks_like_mapper(&document.text) && crate::providers::is_xml(&path) {
-        return Ok(Input::Mapper {
+    // A whole Java document: render the annotation under the caret. The
+    // annotation model reports "no @Select … found" when the class has none.
+    if path.to_ascii_lowercase().ends_with(".java") {
+        let caret = caret_offset(&document, &selections);
+        if sources::annotation_statements(&document.text).is_empty()
+            && sources::looks_like_wrapper(&document.text)
+        {
+            return Ok(wrapper_input(ctx, &document.text, Some(path)));
+        }
+        return Ok(Input::Annotation {
             path,
-            xml: document.text,
-            statement: None,
+            java: document.text,
+            method: None,
+            caret,
         });
     }
-    Ok(Input::Text {
-        text: document.text,
-        source: Some(path),
-    })
+    Ok(document_input(ctx, &path, document.text))
+}
+
+/// The caret as a byte offset into `document`, when the selection is empty.
+///
+/// A cursor is an empty range (SDK `Range` docs); a real selection was already
+/// handled as text, so its end is the closest thing to "where the user is".
+fn caret_offset(document: &Document, selections: &[Range]) -> Option<usize> {
+    let range = selections.first()?;
+    let position = if range.is_empty() {
+        range.start
+    } else {
+        range.end
+    };
+    document
+        .text_in(Range::new(Position::new(0, 0), position))
+        .map(str::len)
 }
 
 fn editor_error(path: &str, error: &Error) -> CliError {
@@ -408,6 +733,165 @@ fn confidence_str(confidence: Confidence) -> &'static str {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The three wired sources: one model builder each
+// ---------------------------------------------------------------------------
+//
+// All three end in `output_model`, which keeps the same contract as the mapper
+// path: `confidence` is always set, `reason` explains a `partial`/`unresolved`
+// render, and `unresolved` never carries SQL.
+
+/// Render one iBatis `<sqlMap>` statement into the workbench model.
+///
+/// A document with several statements needs `#id`: the preview page's statement
+/// picker is a mapper-XML feature (`KIND_XML`), and offering "the first" of a
+/// list the user cannot switch would be a silent pick.
+fn ibatis_model(
+    path: &str,
+    xml: &str,
+    statement: Option<&str>,
+    dialect: &str,
+) -> (workbench::WorkbenchModel, String) {
+    let ids = match sources::ibatis_statement_ids(xml) {
+        Ok(ids) => ids,
+        Err(out) => return (output_model(&out, xml, path, dialect), path.to_string()),
+    };
+    if ids.is_empty() {
+        let out = RenderOutput::unresolved(
+            KEY_NO_STATEMENTS,
+            format!(
+                "{path}: no <select>/<insert>/<update>/<delete>/<statement>/<procedure> in the <sqlMap>"
+            ),
+        );
+        return (output_model(&out, xml, path, dialect), path.to_string());
+    }
+    let chosen = match statement {
+        Some(requested) => match sources::ibatis_resolve_id(&ids, requested) {
+            Some(id) => Some(id),
+            None => {
+                let out = RenderOutput::unresolved(
+                    crate::core::ibatis::KEY_STATEMENT_NOT_FOUND,
+                    format!(
+                        "{path}: no statement `{requested}`; the file has: {}",
+                        ids.join(", ")
+                    ),
+                );
+                return (output_model(&out, xml, path, dialect), path.to_string());
+            }
+        },
+        None if ids.len() == 1 => ids.first().cloned(),
+        None => {
+            let out = RenderOutput::unresolved(
+                KEY_IBATIS_STATEMENT_REQUIRED,
+                format!(
+                    "{path}: {} statements; pass `{path}#<id>`, one of: {}",
+                    ids.len(),
+                    ids.join(", ")
+                ),
+            );
+            return (output_model(&out, xml, path, dialect), path.to_string());
+        }
+    };
+    let id = chosen.expect("a single-statement document has an id");
+    let out = crate::core::ibatis::render(xml, &id, &json!({}));
+    let label = format!("{path}#{id}");
+    (output_model(&out, &id, &label, dialect), label)
+}
+
+/// Render the statement annotation on one Java method into the model.
+fn annotation_model(
+    path: &str,
+    java: &str,
+    method: Option<&str>,
+    caret: Option<usize>,
+    dialect: &str,
+) -> (workbench::WorkbenchModel, String) {
+    let statements = sources::annotation_statements(java);
+    match sources::annotation_pick(java, &statements, method, caret, path) {
+        Ok(statement) => {
+            let label = match &statement.method_name {
+                Some(name) => format!("{path}#{name}"),
+                None => format!("{path}#L{}", statement.line),
+            };
+            let out = sources::render_annotation(statement, &json!({}));
+            (output_model(&out, java, &label, dialect), label)
+        }
+        Err(out) => (output_model(&out, java, path, dialect), path.to_string()),
+    }
+}
+
+/// Render a wrapper chain into the model.
+///
+/// Without a field/column projection there is no SQL to emit: the render is
+/// `unresolved` and says which class could not be used, and why.
+fn wrapper_model(
+    text: &str,
+    source: Option<&str>,
+    class: Option<&str>,
+    projection: &Projection,
+    dialect: &str,
+) -> (workbench::WorkbenchModel, String) {
+    let label = source.unwrap_or("<wrapper>");
+    let out = match projection {
+        Projection::Read {
+            columns,
+            fully_declared,
+        } => sources::wrapper_render(text, columns, !fully_declared, dialect_of(dialect)),
+        Projection::Unknown => sources::entity_unknown(
+            label,
+            class,
+            "is not in the project index, so there is no field/column mapping",
+        ),
+        Projection::Unreadable => {
+            sources::entity_unknown(label, class, "is indexed but its file could not be read")
+        }
+        Projection::NoColumns => sources::entity_unknown(
+            label,
+            class,
+            "declares no column this reader understands (static and collection fields are skipped)",
+        ),
+    };
+    (output_model(&out, text, label, dialect), label.to_string())
+}
+
+/// The settings dialect by name, falling back to [`FALLBACK_DIALECT`] for a
+/// name the dialect table does not know.
+fn dialect_of(name: &str) -> &'static Dialect {
+    dialect::by_name(name)
+        .or_else(|| {
+            dialect::all()
+                .iter()
+                .find(|known| known.name.eq_ignore_ascii_case(name))
+        })
+        .unwrap_or_else(|| dialect::by_name(FALLBACK_DIALECT).expect("the fallback dialect exists"))
+}
+
+/// The workbench model for a render that is not a mapper document.
+fn output_model(
+    out: &RenderOutput,
+    raw: &str,
+    source: &str,
+    dialect: &str,
+) -> workbench::WorkbenchModel {
+    let unresolved = out.confidence == Confidence::Unresolved;
+    let sql = if unresolved { "" } else { out.sql.trim_end() };
+    let mut model = workbench::render_input(sql, workbench::KIND_SQL, dialect);
+    model.kind = workbench::KIND_SQL.to_string();
+    model.source = source.to_string();
+    model.raw = raw.to_string();
+    model.confidence = confidence_str(out.confidence).to_string();
+    if unresolved {
+        // `unresolved` never carries SQL: only the reason goes to the page.
+        model.sql.clear();
+        model.params.clear();
+        model.advice.clear();
+    } else {
+        model.params = out.params.iter().map(param_text).collect();
+    }
+    model.reason = reason_lines(out).join("\n");
+    model
+}
+
 /// A parameter value as the page shows it: strings bare, everything else as JSON.
 fn param_text(value: &serde_json::Value) -> String {
     match value {
@@ -435,7 +919,7 @@ fn reason_lines(out: &RenderOutput) -> Vec<String> {
 mod tests {
     use super::*;
     use openidea_plugin::mock::MockHost;
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     const MAPPER: &str = r#"<mapper namespace="com.example.UserMapper">
     <sql id="cols">id, name</sql>
@@ -721,6 +1205,380 @@ mod tests {
                     .revealed_views()
                     .contains(&workbench::DIALOG_VIEW_ID.to_string()),
                 "no dialog in the tab shell"
+            );
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Lane F: the three wired sources
+    // -----------------------------------------------------------------------
+
+    const ANNOTATED: &str = r#"package com.example;
+
+public interface UserMapper {
+    @Select("SELECT id, name FROM users WHERE id = #{id}")
+    User findById(@Param("id") Long id);
+
+    @Update("UPDATE users SET name = #{name} WHERE id = #{id}")
+    int rename(@Param("name") String name, @Param("id") Long id);
+}
+"#;
+
+    const ONE_ANNOTATION: &str = r#"public interface SimpleMapper {
+    @Delete("DELETE FROM users WHERE id = #{id}")
+    int deleteById(Long id);
+}
+"#;
+
+    const SQLMAP: &str = r#"<?xml version="1.0"?>
+<sqlMap namespace="User">
+    <select id="selectAll">SELECT * FROM users</select>
+    <select id="selectById">SELECT * FROM users WHERE id = #id#</select>
+</sqlMap>"#;
+
+    fn symbol_of(name: &str, path: &str) -> openidea_plugin::SymbolInfo {
+        openidea_plugin::SymbolInfo {
+            name: name.to_string(),
+            kind: "class".to_string(),
+            container: None,
+            location: openidea_plugin::Location {
+                path: path.to_string(),
+                range: Range::default(),
+            },
+        }
+    }
+
+    #[test]
+    fn commands_preview_sql_renders_an_annotation_from_a_java_path() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/UserMapper.java", ANNOTATED);
+            run(&host.invocation(), Some("/project/UserMapper.java#rename")).unwrap();
+
+            let state = preview_state(&host);
+            assert_eq!(state["selectTab"], "preview");
+            let model = model_of(&state);
+            assert_eq!(model["source"], "/project/UserMapper.java#rename");
+            assert_eq!(model["kind"], "sql");
+            assert_eq!(model["confidence"], "exact");
+            assert!(
+                model["sql"].as_str().is_some_and(
+                    |sql| compact(sql).contains("UPDATE users SET name = ? WHERE id = ?")
+                ),
+                "{model}"
+            );
+            // No mapper document, so the statement picker stays hidden.
+            assert_eq!(model["statements"], json!([]));
+            assert!(!host.output().contains_key(common::CHANNEL));
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_finds_the_class_behind_class_hash_method() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/UserMapper.java", ANNOTATED);
+            host.set_symbols(
+                "/project",
+                vec![symbol_of("UserMapper", "/project/UserMapper.java")],
+            );
+            run(&host.invocation(), Some("UserMapper#findById")).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "exact");
+            assert_eq!(model["source"], "/project/UserMapper.java#findById");
+            assert!(
+                model["sql"].as_str().is_some_and(
+                    |sql| compact(sql).contains("SELECT id, name FROM users WHERE id = ?")
+                ),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_unknown_class_is_an_error_with_its_own_key() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            let err = run(&host.invocation(), Some("GhostMapper#findById")).unwrap_err();
+            assert!(
+                matches!(err, Error::Failed(ref text) if text.contains(KEY_ANNOTATION_CLASS_UNKNOWN)),
+                "{err:?}"
+            );
+            assert!(host.output()[common::CHANNEL].contains(KEY_ANNOTATION_CLASS_UNKNOWN));
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_renders_the_annotation_under_the_caret() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            // Caret inside `rename` (0-based line 6, column 4).
+            host.open_editor(
+                "/project/UserMapper.java",
+                "java",
+                ANNOTATED,
+                &[(6, 4, 6, 4)],
+            );
+            run(&host.invocation(), None).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "exact");
+            assert_eq!(model["source"], "/project/UserMapper.java#rename");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.contains("UPDATE users")),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_annotation_without_a_pick_is_unresolved_and_lists_methods() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            // Caret on the interface declaration, inside no method.
+            host.open_editor(
+                "/project/UserMapper.java",
+                "java",
+                ANNOTATED,
+                &[(1, 2, 1, 2)],
+            );
+            run(&host.invocation(), None).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "unresolved");
+            assert_eq!(model["sql"], "");
+            let reason = model["reason"].as_str().unwrap_or_default();
+            assert!(reason.contains("annotation.method.required"), "{reason}");
+            assert!(reason.contains("findById, rename"), "{reason}");
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_single_annotation_needs_no_method() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/SimpleMapper.java", ONE_ANNOTATION);
+            run(&host.invocation(), Some("/project/SimpleMapper.java")).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "exact");
+            assert_eq!(model["source"], "/project/SimpleMapper.java#deleteById");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.contains("DELETE FROM users WHERE id = ?")),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_renders_an_ibatis_statement_by_id() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/UserSqlMap.xml", SQLMAP);
+            run(
+                &host.invocation(),
+                Some("/project/UserSqlMap.xml#selectById"),
+            )
+            .unwrap();
+
+            let state = preview_state(&host);
+            let model = model_of(&state);
+            assert_eq!(model["confidence"], "exact");
+            assert_eq!(model["kind"], "sql");
+            assert_eq!(model["source"], "/project/UserSqlMap.xml#selectById");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.contains("SELECT * FROM users WHERE id = ?")),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_ibatis_with_several_statements_needs_an_id() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/UserSqlMap.xml", SQLMAP);
+            run(&host.invocation(), Some("/project/UserSqlMap.xml")).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "unresolved");
+            assert_eq!(model["sql"], "");
+            let reason = model["reason"].as_str().unwrap_or_default();
+            assert!(reason.contains(KEY_IBATIS_STATEMENT_REQUIRED), "{reason}");
+            assert!(reason.contains("selectAll, selectById"), "{reason}");
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_ibatis_unknown_statement_is_unresolved() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/UserSqlMap.xml", SQLMAP);
+            run(&host.invocation(), Some("/project/UserSqlMap.xml#nope")).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "unresolved");
+            assert_eq!(model["sql"], "");
+            assert!(
+                model["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("ibatis.statement.not_found")),
+                "{model}"
+            );
+        });
+    }
+
+    const DECLARED_ENTITY: &str = r#"
+@TableName("sys_user")
+public class User {
+    @TableId("id")
+    private Long id;
+
+    @TableField("status")
+    private String status;
+}
+"#;
+
+    const DERIVED_ENTITY: &str = r#"
+@TableName("sys_user")
+public class User {
+    @TableField("status")
+    private String status;
+
+    private Integer age;
+}
+"#;
+
+    #[test]
+    fn commands_preview_sql_renders_a_wrapper_chain_exact_when_every_column_is_declared() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/entity/User.java", DECLARED_ENTITY);
+            host.set_symbols(
+                "/project",
+                vec![symbol_of("User", "/project/entity/User.java")],
+            );
+            run(
+                &host.invocation(),
+                Some(r#"new LambdaQueryWrapper<User>().eq(User::getStatus, "A")"#),
+            )
+            .unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "exact", "{model}");
+            assert_eq!(model["sql"], "SELECT * FROM sys_user WHERE status = 'A'");
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_wrapper_with_a_derived_column_is_partial() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file("/project/entity/User.java", DERIVED_ENTITY);
+            host.set_symbols(
+                "/project",
+                vec![symbol_of("User", "/project/entity/User.java")],
+            );
+            run(
+                &host.invocation(),
+                Some("new LambdaQueryWrapper<User>().eq(User::getAge, 18)"),
+            )
+            .unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "partial", "{model}");
+            assert_eq!(model["sql"], "SELECT * FROM sys_user WHERE age = 18");
+            assert!(
+                model["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("wrapper.column.derived")),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_wrapper_without_its_entity_is_unresolved() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            run(
+                &host.invocation(),
+                Some(r#"new LambdaQueryWrapper<Ghost>().eq(Ghost::getStatus, "A")"#),
+            )
+            .unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "unresolved");
+            assert_eq!(model["sql"], "");
+            let reason = model["reason"].as_str().unwrap_or_default();
+            assert!(reason.contains("wrapper.entity.not_found"), "{reason}");
+            assert!(reason.contains("Ghost"), "{reason}");
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_annotation_with_a_degraded_script_is_partial() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file(
+                "/project/ByIds.java",
+                r#"public interface ByIds {
+    @Select("<script>SELECT * FROM users WHERE id IN <foreach collection='ids' item='i' open='(' separator=',' close=')'>#{i}</foreach></script>")
+    java.util.List<User> byIds(@Param("ids") java.util.List<Long> ids);
+}
+"#,
+            );
+            run(&host.invocation(), Some("/project/ByIds.java#byIds")).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "partial", "{model}");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.starts_with("SELECT * FROM users WHERE id IN")),
+                "{model}"
+            );
+            assert!(
+                model["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("xml.foreach.null_collection")),
+                "{model}"
+            );
+        });
+    }
+
+    #[test]
+    fn commands_preview_sql_ibatis_degradation_is_partial_with_its_reason() {
+        with_model_restore(|| {
+            let host = MockHost::install();
+            host.add_file(
+                "/project/Broken.xml",
+                r#"<sqlMap namespace="User">
+    <select id="selectGone">SELECT <include refid="gone"/> FROM users</select>
+</sqlMap>"#,
+            );
+            run(&host.invocation(), Some("/project/Broken.xml#selectGone")).unwrap();
+
+            let model = model_of(&preview_state(&host));
+            assert_eq!(model["confidence"], "partial", "{model}");
+            assert!(
+                model["sql"]
+                    .as_str()
+                    .is_some_and(|sql| sql.contains("FROM users")),
+                "{model}"
+            );
+            assert!(
+                model["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("ibatis.include.not_found")),
+                "{model}"
             );
         });
     }

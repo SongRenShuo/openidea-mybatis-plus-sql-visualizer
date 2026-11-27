@@ -32,7 +32,7 @@ pub use contract::ToolSpec;
 pub const TOOLS: &[ToolSpec] = &[
     ToolSpec {
         name: "sqlv_render_sql",
-        description: "Render one MyBatis mapper statement to SQL with ? placeholders and bound parameters.",
+        description: "Render one statement to SQL with ? placeholders and bound parameters; kind selects mapper XML (default), a statement annotation, an iBatis 2 sqlMap or a wrapper chain.",
         schema_path: "src/mcp/schemas/sqlv_render_sql.schema.json",
         read_only: true,
         destructive: false,
