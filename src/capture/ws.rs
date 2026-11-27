@@ -711,8 +711,13 @@ impl WsConsumer {
         Ok(outcome)
     }
 
-    /// Sends one UTF-8 text frame (the transport the agent reads).
-    pub fn send_text(&self, text: &str) -> Result<(), WsError> {
+    /// Sends one UTF-8 payload. The host frames it as a **binary** WebSocket
+    /// message (`crates/ide-host/src/plugins/websocket.rs` wraps every
+    /// `websocket.send(bytes)` in `Message::Binary`, and only forwards inbound
+    /// `Message::Binary` to plugins), so the agent must accept binary frames —
+    /// it does, and mirrors the opcode back. The name avoids saying "text":
+    /// that would be a lie the next reader could act on.
+    pub fn send_payload(&self, text: &str) -> Result<(), WsError> {
         self.socket.send(text.as_bytes()).map_err(WsError::from)
     }
 
@@ -720,7 +725,7 @@ impl WsConsumer {
     /// watchdog stops capture if no CONFIG arrives, so the ws transport must
     /// keep that channel alive exactly like TCP.
     pub fn send_control(&self, cmd: i64, body: &str) -> Result<(), WsError> {
-        self.send_text(&encode_envelope(cmd, body))
+        self.send_payload(&encode_envelope(cmd, body))
     }
 
     pub fn close(&mut self) -> Result<(), WsError> {
