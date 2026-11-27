@@ -39,6 +39,10 @@ pub const GROUPS: &[&str] = &[
     "Navigation",
     "Preview",
     "MyBatis Plus",
+    "Shortcuts",
+    "Table Mapping",
+    "MCP",
+    "About",
     "Engine",
 ];
 
@@ -81,9 +85,9 @@ pub struct SettingDef {
     pub needs_restart: bool,
 }
 
-/// The 45 settings of the first release, the L34 parity keys, the L48 preview
+/// The first release's settings, the L34 parity keys, the L48 preview
 /// shell and the C14 MyBatis-Plus interceptor simulation, in page order.
-pub static DEFINITIONS: [SettingDef; 56] = [
+pub static DEFINITIONS: [SettingDef; 60] = [
     // Preview -------------------------------------------------------------
     // Lane L48: where the preview opens. The dialog is the IntelliJ edition's
     // `SqlPreviewDialog`; the tab is the fifth tab of the log panel, which the
@@ -491,6 +495,43 @@ pub static DEFINITIONS: [SettingDef; 56] = [
         default: DefaultValue::Bool(true),
         needs_restart: false,
     },
+    // Shortcuts / Table Mapping / MCP / About ------------------------------
+    // The reference keeps these as four settings pages of its own. This build
+    // declares the pages (manifest order 50/45/40/30/20/15/10) and carries the
+    // keys the IDE can render; keymaps stay in IDE Keymap, which is why the
+    // shortcut row is a read-only reminder rather than a recorder.
+    SettingDef {
+        key: "shortcuts.preview",
+        title: "Preview SQL shortcut (change it in Settings › Keymap)",
+        group: "Shortcuts",
+        kind: Kind::String,
+        default: DefaultValue::Str("Alt+Shift+Q"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "table.prefix",
+        title: "Table name prefix",
+        group: "Table Mapping",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "mcp.enabled",
+        title: "Expose the SQL Visualizer MCP tools",
+        group: "MCP",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "about.updateChannel",
+        title: "Update channel",
+        group: "About",
+        kind: Kind::Enum(&["marketplace", "gitee"]),
+        default: DefaultValue::Str("marketplace"),
+        needs_restart: false,
+    },
     // Engine --------------------------------------------------------------
     SettingDef {
         key: "engine.downloadUrl",
@@ -620,8 +661,12 @@ mod tests {
         let mut merged = serde_json::Map::new();
         for text in [
             include_str!("../settings/ui-actions.json"),
+            include_str!("../settings/shortcuts.json"),
             include_str!("../settings/sql-preview.json"),
+            include_str!("../settings/table-mapping.json"),
             include_str!("../settings/sql-log.json"),
+            include_str!("../settings/mcp.json"),
+            include_str!("../settings/about.json"),
             include_str!("../settings/engine.json"),
         ] {
             let page: Value = serde_json::from_str(text).expect("a page schema is valid JSON");

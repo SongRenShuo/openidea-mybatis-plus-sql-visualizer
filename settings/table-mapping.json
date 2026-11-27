@@ -1,0 +1,10 @@
+{
+  "properties": {
+    "table.prefix": {
+      "type": "string",
+      "title": "Table name prefix",
+      "group": "Table Mapping",
+      "default": ""
+    }
+  }
+}

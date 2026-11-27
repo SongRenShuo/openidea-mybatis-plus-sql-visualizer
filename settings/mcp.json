@@ -1,0 +1,10 @@
+{
+  "properties": {
+    "mcp.enabled": {
+      "type": "boolean",
+      "title": "Expose the SQL Visualizer MCP tools",
+      "group": "MCP",
+      "default": true
+    }
+  }
+}

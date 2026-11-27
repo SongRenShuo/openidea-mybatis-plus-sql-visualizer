@@ -1,0 +1,11 @@
+{
+  "properties": {
+    "about.updateChannel": {
+      "type": "string",
+      "title": "Update channel",
+      "group": "About",
+      "enum": ["marketplace", "gitee"],
+      "default": "marketplace"
+    }
+  }
+}

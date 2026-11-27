@@ -1,0 +1,10 @@
+{
+  "properties": {
+    "shortcuts.preview": {
+      "type": "string",
+      "title": "Preview SQL shortcut (change it in Settings › Keymap)",
+      "group": "Shortcuts",
+      "default": "Alt+Shift+Q"
+    }
+  }
+}

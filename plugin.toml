@@ -240,8 +240,11 @@ width = 900
 height = 640
 
 # Settings: one node named after the plugin, split into pages like the IntelliJ
-# edition's `Tools › SQL Visualizer` (UI and Actions / SQL Preview / SQL Log /
-# Engine). Keys are unchanged; only the page they live on moved.
+# edition's `Tools › SQL Visualizer` (UI and Actions / Shortcuts / SQL Preview /
+# Table Name Mapping / SQL Log / MCP Tools / About), plus an Engine page the
+# IntelliJ edition keeps out of its settings tree. Page order follows the
+# reference's group weights (50/45/40/30/20/15/10). Keys are unchanged; only the
+# page they live on moved.
 [contributes.settings]
 title = "MyBatis SQL Visualizer"
 
@@ -251,14 +254,34 @@ title = "UI and Actions"
 schema = "settings/ui-actions.json"
 
 [[contributes.settings.pages]]
+id = "shortcuts"
+title = "Shortcuts"
+schema = "settings/shortcuts.json"
+
+[[contributes.settings.pages]]
 id = "sql-preview"
 title = "SQL Preview"
 schema = "settings/sql-preview.json"
 
 [[contributes.settings.pages]]
+id = "table-mapping"
+title = "Table Name Mapping"
+schema = "settings/table-mapping.json"
+
+[[contributes.settings.pages]]
 id = "sql-log"
 title = "SQL Log"
 schema = "settings/sql-log.json"
+
+[[contributes.settings.pages]]
+id = "mcp"
+title = "MCP Tools"
+schema = "settings/mcp.json"
+
+[[contributes.settings.pages]]
+id = "about"
+title = "About"
+schema = "settings/about.json"
 
 [[contributes.settings.pages]]
 id = "engine"
