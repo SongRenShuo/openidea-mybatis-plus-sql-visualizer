@@ -1070,6 +1070,14 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "Connected to the target application (port {port})",
         "已接入目标应用（端口 {port}）",
     ),
+    // Stopping while nothing is attached but the plugin is still waiting: the
+    // generic "no WebSocket is open" reads like a mistake, because the user did
+    // start capture and is now stopping it.
+    (
+        "capture.stop.waiting",
+        "Stopped waiting for the target application",
+        "已停止等待目标应用",
+    ),
 ];
 
 /// Localised text for `key` in the IDE's current UI language.
