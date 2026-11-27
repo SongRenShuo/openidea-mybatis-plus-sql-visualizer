@@ -4367,7 +4367,11 @@ Preparing: DELETE FROM users WHERE id = ?
             assert!(page.contains(op), "missing history op {op}");
         }
         // The preview tab's ops carry the `preview-` prefix (lane L23), so the
-        // log panel can route them without colliding with its own names.
+        // log panel can route them without colliding with its own names. Lane
+        // L42 moved the workbench into `web/preview.js`, so most of them live
+        // there; the panel page adds the cross-view `preview-send` (its quick
+        // preview button) on top of its own ops.
+        let module = include_str!("../../web/preview.js");
         for op in [
             "preview-render",
             "preview-format",
@@ -4375,9 +4379,16 @@ Preparing: DELETE FROM users WHERE id = ?
             "preview-clear",
             "preview-copy",
             "preview-export",
+            "preview-params",
+            "preview-refresh",
+            "preview-rollback",
         ] {
-            assert!(page.contains(op), "missing op {op}");
+            assert!(module.contains(op), "missing op {op} in the module");
         }
+        assert!(
+            page.contains("preview-send"),
+            "the panel posts the cross-view hand-off"
+        );
 
         let labels = labels_json();
         for key in [
@@ -4880,6 +4891,27 @@ Preparing: DELETE FROM users WHERE id = ?
     fn the_preview_tab_carries_the_workbench_ui() {
         let (_host, _guard) = test_host();
         let page = include_str!("../../web/log-panel.html");
+        // Lane L42: the workbench is one module (`web/preview.js` plus its
+        // `web/preview.css`) mounted on the fifth tab, so the DOM assertions
+        // follow it there and the panel page keeps only the mount host.
+        let module = include_str!("../../web/preview.js");
+        let css = include_str!("../../web/preview.css");
+        assert!(
+            page.contains("id=\"panelPreview\""),
+            "the fifth tab keeps its mount host"
+        );
+        assert!(
+            page.contains("import { mountPreview } from './preview.js'"),
+            "the panel page imports the module"
+        );
+        assert!(
+            page.contains("mountPreview($('panelPreview'), { post: post })"),
+            "the module mounts on the fifth tab"
+        );
+        assert!(
+            page.contains("href=\"./preview.css\""),
+            "the panel page loads the shared stylesheet"
+        );
         // The input pane: statement box plus the four actions the IntelliJ
         // panel's top half has.
         for id in [
@@ -4890,7 +4922,7 @@ Preparing: DELETE FROM users WHERE id = ?
             "pvClear",
             "pvOpenDialog",
         ] {
-            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+            assert!(module.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
         // The preview pane (lane L35b follows the reference order): meta row,
         // then Copy SQL / Format / Display mode / Explain / Refresh with Export
@@ -4916,11 +4948,11 @@ Preparing: DELETE FROM users WHERE id = ?
             "pvTabBody",
             "pvStatus",
         ] {
-            assert!(page.contains(&format!("id=\"{id}\"")), "missing {id}");
+            assert!(module.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
         for tab in ["sql", "raw", "columns"] {
             assert!(
-                page.contains(&format!("data-pvtab=\"{tab}\"")),
+                module.contains(&format!("data-pvtab=\"{tab}\"")),
                 "missing inner tab {tab}"
             );
         }
@@ -4928,47 +4960,57 @@ Preparing: DELETE FROM users WHERE id = ?
         // and imports a comma/newline separated list from the clipboard; when
         // the clipboard API is absent the import button is greyed with the
         // reason, and the rollback entry explains why it is disabled.
-        assert!(page.contains("pv-param-input"), "editable parameter inputs");
-        assert!(page.contains("op: 'preview-params'"), "the rebind op");
+        assert!(css.contains("pv-param-input"), "editable parameter inputs");
+        assert!(module.contains("op: 'preview-params'"), "the rebind op");
         assert!(
-            page.contains("navigator.clipboard.readText()"),
+            module.contains("navigator.clipboard.readText()"),
             "the clipboard read"
         );
-        assert!(page.contains("importBtn.disabled"), "the degrade branch");
+        assert!(module.contains("importBtn.disabled"), "the degrade branch");
         assert!(
-            page.contains("split(/[\\r\\n,]+/)"),
+            module.contains("split(/[\\r\\n,]+/)"),
             "comma/newline parsing"
         );
-        assert!(page.contains("op: 'preview-rollback'"), "the rollback op");
-        assert!(page.contains("labels.rollbackNote"), "the rollback note");
+        assert!(module.contains("op: 'preview-rollback'"), "the rollback op");
+        assert!(module.contains("labels.rollbackNote"), "the rollback note");
         // Explain stays disabled with the reason in its tooltip; the page has
         // no external link, no storage and builds no markup from data.
-        assert!(page.contains("pvSig"), "the tab body is signature guarded");
-        assert!(page.contains("id=\"pvExplain\" class=\"btn\" type=\"button\" disabled"));
         assert!(
-            page.contains("id=\"pvBanner\" role=\"status\" hidden"),
+            module.contains("pvSig"),
+            "the tab body is signature guarded"
+        );
+        assert!(module.contains("id=\"pvExplain\" class=\"btn\" type=\"button\" disabled"));
+        assert!(
+            module.contains("id=\"pvBanner\" role=\"status\" hidden"),
             "the degradation strip starts hidden"
         );
         assert!(
-            page.contains("buttons[i].getAttribute('data-pvtab')"),
-            "the three result tabs stay page-side"
+            module.contains("buttons[i].getAttribute('data-pvtab')"),
+            "the three result tabs stay module-side"
         );
         assert!(
             page.contains("openidea.postMessage"),
             "the page talks to the plugin only"
         );
-        for needle in [
-            "http://",
-            "https://",
-            "localStorage",
-            "fetch(",
-            "XMLHttpRequest",
-            "innerHTML",
-            "outerHTML",
-            "insertAdjacentHTML",
-            "eval(",
+        for (what, text) in [
+            ("panel page", page),
+            ("preview module", module),
+            ("preview stylesheet", css),
         ] {
-            assert!(!page.contains(needle), "web page must not contain {needle}");
+            for needle in [
+                "http://",
+                "https://",
+                "localStorage",
+                "sessionStorage",
+                "fetch(",
+                "XMLHttpRequest",
+                "innerHTML",
+                "outerHTML",
+                "insertAdjacentHTML",
+                "eval(",
+            ] {
+                assert!(!text.contains(needle), "{what} must not contain {needle}");
+            }
         }
     }
 
