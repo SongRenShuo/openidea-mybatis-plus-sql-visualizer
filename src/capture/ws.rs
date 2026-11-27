@@ -1004,11 +1004,12 @@ mod tests {
         assert_eq!(drain_request(1), 1);
         assert_eq!(drain_request(0), 1, "0 is refused by the host too");
         assert_eq!(HOST_DRAIN_LIMIT, 32, "host DRAIN_BATCH");
-        assert!(
-            HOST_DRAIN_LIMIT <= MAX_QUEUED_FRAMES,
-            "the local queue must be able to hold what one drain returns"
-        );
-        assert!(MAX_DRAIN_ROUNDS >= 1);
+        // Both relations are compile-time facts; a const block keeps clippy's
+        // `assertions_on_constants` quiet without weakening them.
+        const {
+            assert!(HOST_DRAIN_LIMIT <= MAX_QUEUED_FRAMES);
+            assert!(MAX_DRAIN_ROUNDS >= 1);
+        }
     }
 
     #[test]

@@ -156,46 +156,45 @@ pub fn apply(sql: &str, dialect: Option<&Dialect>, config: &InterceptConfig) -> 
         }
     }
 
-    if kind == StatementKind::Select || kind == StatementKind::Delete {
-        if let Some(logic) = &config.logic_delete {
-            if column_mentioned(&text, &logic.column) {
-                out.notes.push(InterceptNote {
-                    message_key: KEY_SKIP_EXISTING,
-                    detail: logic.column.clone(),
-                });
-            } else {
-                let condition = format!("{} = {}", logic.column, literal(&logic.value));
-                text = append_condition(&text, &condition);
-                out.notes.push(InterceptNote {
-                    message_key: KEY_LOGIC_DELETE,
-                    detail: condition,
-                });
-            }
+    if matches!(kind, StatementKind::Select | StatementKind::Delete)
+        && let Some(logic) = &config.logic_delete
+    {
+        if column_mentioned(&text, &logic.column) {
+            out.notes.push(InterceptNote {
+                message_key: KEY_SKIP_EXISTING,
+                detail: logic.column.clone(),
+            });
+        } else {
+            let condition = format!("{} = {}", logic.column, literal(&logic.value));
+            text = append_condition(&text, &condition);
+            out.notes.push(InterceptNote {
+                message_key: KEY_LOGIC_DELETE,
+                detail: condition,
+            });
         }
     }
 
     if matches!(
         kind,
         StatementKind::Select | StatementKind::Update | StatementKind::Delete
-    ) {
-        if let Some(tenant) = &config.tenant {
-            if column_mentioned(&text, &tenant.column) {
-                out.notes.push(InterceptNote {
-                    message_key: KEY_SKIP_EXISTING,
-                    detail: tenant.column.clone(),
-                });
-            } else {
-                let condition = format!("{} = ?", tenant.column);
-                text = append_condition(&text, &condition);
-                out.params.push(InjectedParam {
-                    name: tenant.column.clone(),
-                    value: tenant.value.clone(),
-                });
-                out.notes.push(InterceptNote {
-                    message_key: KEY_TENANT,
-                    detail: condition,
-                });
-            }
+    ) && let Some(tenant) = &config.tenant
+    {
+        if column_mentioned(&text, &tenant.column) {
+            out.notes.push(InterceptNote {
+                message_key: KEY_SKIP_EXISTING,
+                detail: tenant.column.clone(),
+            });
+        } else {
+            let condition = format!("{} = ?", tenant.column);
+            text = append_condition(&text, &condition);
+            out.params.push(InjectedParam {
+                name: tenant.column.clone(),
+                value: tenant.value.clone(),
+            });
+            out.notes.push(InterceptNote {
+                message_key: KEY_TENANT,
+                detail: condition,
+            });
         }
     }
 
