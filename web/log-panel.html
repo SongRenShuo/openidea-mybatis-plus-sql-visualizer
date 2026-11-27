@@ -244,7 +244,29 @@
       border-bottom: 1px solid var(--openidea-border); cursor: default;
     }
     .row.sel { background: var(--openidea-bg-selected); }
-    .row .bar { width: 3px; flex: 0 0 3px; }
+    /* CRUD marker (`logs.crud.style`, default `bar`): the type colour arrives
+       as the row's own `--row-type` custom property, so this stylesheet never
+       names a colour value. DDL (CREATE/DROP) uses a 3px-solid / 3px-gap dash
+       pattern in the same colour — the shape, not the hue, is what tells DDL
+       from DML, exactly like the reference. */
+    .row .bar {
+      width: 3px; flex: 0 0 3px;
+      background: var(--row-type, var(--openidea-fg-muted));
+    }
+    .row .bar.ddl {
+      background: repeating-linear-gradient(
+        to bottom,
+        var(--row-type, var(--openidea-fg-muted)) 0 3px,
+        transparent 3px 6px
+      );
+    }
+    /* `background`: the whole row carries a 14% tint of its type colour. A
+       selected row keeps the platform's selection fill instead. */
+    .list[data-crud="background"] .row:not(.sel) {
+      background: color-mix(in srgb, var(--row-type, var(--openidea-fg-muted)) 14%, var(--openidea-bg));
+    }
+    .list[data-crud="background"] .row .bar,
+    .list[data-crud="off"] .row .bar { display: none; }
     .row .content { flex: 1 1 auto; min-width: 0; padding: 12px 9px 12px 5px; }
     .list[data-mode="single"] .row .content { padding-top: 8px; padding-bottom: 8px; }
     /* Selection paints the row's own ink over the syntax colours, exactly like
@@ -268,7 +290,19 @@
        and the group badges carry their own ink. */
     .meta .seq { font-family: var(--openidea-font-mono, monospace); }
     .meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }
-    .meta .dur.hot { color: var(--openidea-warning); font-weight: 600; }
+    /* Duration ink, four tiers against `log.slowThresholdMs` (T): `≥T` red,
+       `≥T/2` orange, `<T/2` green, unknown grey. An approximated duration (a
+       value the parser inferred from a neighbouring line) carries a `~`
+       prefix; the tier decision is the page's single `durationTier` helper. */
+    .meta .dur.slow { color: var(--openidea-danger); }
+    .meta .dur.warn { color: var(--openidea-warning); }
+    .meta .dur.ok { color: var(--openidea-success); }
+    .meta .dur.none { color: var(--openidea-fg-muted); }
+    /* Metadata ink (the reference's fragments): the database badge is cyan, an
+       MCP-sourced row violet, the affected-row count blue-grey. */
+    .meta .db { color: var(--openidea-info); }
+    .meta .mcp { color: color-mix(in srgb, var(--openidea-link) 50%, var(--openidea-danger)); }
+    .meta .rows { color: color-mix(in srgb, var(--openidea-link) 55%, var(--openidea-fg-muted)); }
     .meta .part { white-space: nowrap; }
     /* Provenance parts that filter on click (lane L28): the class#method and the
        request id behave like links without losing the row's own click. */
@@ -1376,10 +1410,17 @@
         var el = document.createElement('div');
         el.className = 'row';
         el.setAttribute('data-line', String(row.line));
+        // The CRUD marker colour rides a custom property: the stylesheet picks
+        // it up for the bar, the DDL dash pattern and the background tint, so
+        // no colour literal is ever written into this page.
+        el.style.setProperty('--row-type', TYPE_COLORS[row.sql_type] || TYPE_COLORS.other);
 
         var bar = document.createElement('div');
         bar.className = 'bar';
-        bar.style.background = TYPE_COLORS[row.sql_type] || TYPE_COLORS.other;
+        // DDL is marked by the line's shape (dashed), not by a separate hue.
+        if (row.sql_type === 'create' || row.sql_type === 'drop') {
+          bar.classList.add('ddl');
+        }
 
         var content = document.createElement('div');
         content.className = 'content';
@@ -1399,12 +1440,13 @@
         if (showDuration) {
           var dur = document.createElement('span');
           dur.className = 'dur';
+          // `~` marks a duration the parser approximated from a neighbouring
+          // line rather than read from the statement's own close line.
+          var approx = row.duration_approx ? '~' : '';
           dur.textContent = row.duration_ms == null
             ? '—'
-            : formatMs(row.duration_ms) + (L.durationUnit || 'ms');
-          if (row.duration_ms != null && slowThreshold != null && row.duration_ms >= slowThreshold) {
-            dur.classList.add('hot');
-          }
+            : approx + formatMs(row.duration_ms) + (L.durationUnit || 'ms');
+          dur.classList.add(durationTier(row.duration_ms, slowThreshold));
           meta.appendChild(dur);
         }
         var dbText = dbBadge(row.db, dialect);
@@ -1493,7 +1535,9 @@
         if (row.error_text) {
           var err = document.createElement('div');
           err.className = 'err';
-          err.textContent = row.error_text;
+          // The reference prefixes a failed statement with a warning sign so it
+          // reads as an error even before the red ink is noticed.
+          err.textContent = '⛔ ' + row.error_text;
           content.appendChild(err);
         }
 
@@ -1517,6 +1561,18 @@
       function formatMs(ms) {
         if (Math.abs(ms - Math.round(ms)) < 0.001) { return String(Math.round(ms)); }
         return ms.toFixed(1);
+      }
+
+      // Duration tiers against the slow threshold T (`log.slowThresholdMs`):
+      // `≥T` red, `≥T/2` orange, `<T/2` green; an unknown duration is grey.
+      // A threshold of zero makes every measured duration a slow one, which is
+      // what `ms >= T` means — never a guess at another cut-off.
+      function durationTier(ms, threshold) {
+        if (ms == null) { return 'none'; }
+        if (threshold == null || threshold <= 0) { return 'slow'; }
+        if (ms >= threshold) { return 'slow'; }
+        if (ms >= threshold / 2) { return 'warn'; }
+        return 'ok';
       }
 
       // The database badge (L32). The reference draws `[MySQL · conn-3]`; this
@@ -1567,6 +1623,9 @@
         // The cell padding follows the mode (single-line rows are 8px, not 12px);
         // CSS keys off this attribute so no per-row class has to be set.
         list.dataset.mode = state.displayMode || 'keyword_wrap';
+        // `logs.crud.style` (bar / background / off) is a list-level switch: the
+        // bars are always built, the stylesheet decides whether they draw.
+        list.dataset.crud = state.crudStyle || 'bar';
         var wasAtBottom = atBottom();
 
         while (list.firstChild) { list.removeChild(list.firstChild); }
@@ -1734,7 +1793,8 @@
       // captured rows themselves did not move.
       function displayKey(state) {
         return (state.displayMode || 'keyword_wrap') + '/' +
-          (state.showDuration === false ? '0' : '1');
+          (state.showDuration === false ? '0' : '1') + '/' +
+          (state.crudStyle || 'bar');
       }
 
       // "Log → SQL" (L33) ---------------------------------------------------

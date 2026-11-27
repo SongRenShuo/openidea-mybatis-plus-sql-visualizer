@@ -55,8 +55,8 @@ use self::rows::{
     n_plus_one_key_token, xml_target,
 };
 use self::state::{
-    DISPLAY_MODE_SETTING, SHOW_DURATION_SETTING, buffer_cap, dedupe_active, ensure_parsed,
-    slow_threshold, store,
+    CRUD_STYLE_SETTING, DISPLAY_MODE_SETTING, SHOW_DURATION_SETTING, buffer_cap, crud_style,
+    dedupe_active, ensure_parsed, slow_threshold, store,
 };
 use self::tabs::{log_to_sql_state, sql_to_java_state};
 
@@ -231,6 +231,10 @@ fn build_state() -> Value {
     // Lane L34: the duration segment switch. Read on every push, so a change
     // lands with the next state and needs no restart.
     let show_duration = settings::get_bool(SHOW_DURATION_SETTING, true);
+    // Lane L2: `logs.crud.style` — bar / background / off. The settings lane
+    // declares the key; an absent key resolves to the default, so this lane
+    // never waits on it.
+    let crud = crud_style(&settings::get_string(CRUD_STYLE_SETTING, "bar"));
 
     // The fifth tab (lane L23) is the preview workbench: the model and the
     // ops live in `views::workbench`, the state, the page and the push channel
@@ -329,6 +333,8 @@ fn build_state() -> Value {
         // Lane L34: `logs.displayMode` / `log.showDuration`.
         "displayMode": display,
         "showDuration": show_duration,
+        // Lane L2: `logs.crud.style` (bar / background / off).
+        "crudStyle": crud,
         "labels": labels_json(),
     })
 }
@@ -1046,6 +1052,37 @@ mod tests {
     }
 
     #[test]
+    fn the_state_carries_the_crud_marker_style() {
+        // `logs.crud.*` belongs to the settings lane; this panel only consumes
+        // it, so an absent key resolves to the default instead of blocking.
+        let (host, _guard) = test_host();
+        set_log_text(MIXED_LOG);
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["crudStyle"], "bar");
+        for stored in ["background", "off"] {
+            host.set_setting("logs.crud.style", &format!("\"{stored}\""));
+            handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+            assert_eq!(state_of(&host)["crudStyle"], stored);
+        }
+        // An unknown stored value falls back to the bar, never to "no marker".
+        host.set_setting("logs.crud.style", "\"weird\"");
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        assert_eq!(state_of(&host)["crudStyle"], "bar");
+        let page = PAGE;
+        // The three styles are list-level switches; the type colour rides the
+        // row's custom property and DDL is drawn as a dash pattern.
+        assert!(page.contains("list.dataset.crud = state.crudStyle || 'bar';"));
+        assert!(page.contains(".list[data-crud=\"background\"] .row:not(.sel)"));
+        assert!(page.contains(".list[data-crud=\"off\"] .row .bar { display: none; }"));
+        assert!(page.contains("el.style.setProperty('--row-type'"));
+        assert!(page.contains("bar.classList.add('ddl');"));
+        assert!(
+            page.contains("repeating-linear-gradient("),
+            "DDL uses a dashed bar"
+        );
+    }
+
+    #[test]
     fn the_page_applies_the_display_mode_and_the_duration_flag() {
         let (_host, _guard) = test_host();
         let page = PAGE;
@@ -1548,7 +1585,9 @@ mod tests {
         for needle in [
             "min-height: 40px",
             ".row.sel { background: var(--openidea-bg-selected); }",
-            ".row .bar { width: 3px; flex: 0 0 3px; }",
+            ".row .bar {",
+            "width: 3px; flex: 0 0 3px;",
+            "background: var(--row-type, var(--openidea-fg-muted));",
             "padding: 12px 9px 12px 5px;",
             ".list[data-mode=\"single\"] .row .content { padding-top: 8px; padding-bottom: 8px; }",
             "list.dataset.mode = state.displayMode || 'keyword_wrap';",
@@ -1605,9 +1644,34 @@ mod tests {
             let rule = format!("color-mix(in srgb, var(--openidea-{tint}) 16%, transparent)");
             assert!(page.contains(&rule), "missing {tint} tint");
         }
+        // Duration ink has four tiers, keyed off `log.slowThresholdMs`: red at the
+        // threshold, orange at half of it, green below, grey when unknown.
+        for tier in ["slow", "warn", "ok", "none"] {
+            assert!(
+                page.contains(&format!(".meta .dur.{tier} {{ color:")),
+                "missing duration tier {tier}"
+            );
+        }
         assert!(
-            page.contains(".meta .dur.hot { color: var(--openidea-warning);"),
-            "slow duration in warning"
+            page.contains("function durationTier(ms, threshold)"),
+            "the tiers are decided once"
+        );
+        assert!(
+            !page.contains(".meta .dur.hot"),
+            "the old one-tier tint is gone"
+        );
+        // The database badge, an MCP row and the affected-row count carry the
+        // reference's fragment inks, all through host variables.
+        for rule in [
+            ".meta .db { color: var(--openidea-info); }",
+            ".meta .mcp { color: color-mix(in srgb, var(--openidea-link) 50%, var(--openidea-danger)); }",
+            ".meta .rows { color: color-mix(in srgb, var(--openidea-link) 55%, var(--openidea-fg-muted)); }",
+        ] {
+            assert!(page.contains(rule), "missing meta ink {rule}");
+        }
+        assert!(
+            page.contains("err.textContent = '⛔ ' + row.error_text;"),
+            "a failed statement carries the warning prefix"
         );
         assert!(
             page.contains("id=\"slowBadge\" class=\"pill danger\""),

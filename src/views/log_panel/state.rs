@@ -26,6 +26,22 @@ const MAX_BUFFER_CAP: i64 = 100_000;
 pub(super) const DISPLAY_MODE_SETTING: &str = "logs.displayMode";
 /// `log.showDuration` (lane L34): the row header's duration segment.
 pub(super) const SHOW_DURATION_SETTING: &str = "log.showDuration";
+/// `logs.crud.style` (lane L2): how the CRUD type is marked in a list row —
+/// a 3px left bar (default), a whole-row tint, or nothing.
+pub(super) const CRUD_STYLE_SETTING: &str = "logs.crud.style";
+
+/// Normalises `logs.crud.style` to its three tokens; an unknown stored value
+/// falls back to `bar` instead of leaving the list unmarked.
+///
+/// The key is declared by the settings lane (`logs.crud.*`); until it lands the
+/// key is absent and the default applies, so this lane never waits on it.
+pub fn crud_style(value: &str) -> &'static str {
+    match value {
+        "background" => "background",
+        "off" => "off",
+        _ => "bar",
+    }
+}
 
 /// Normalises `logs.displayMode` to its three tokens; an unknown stored value
 /// falls back to `keyword_wrap` instead of guessing a fold.
@@ -477,6 +493,17 @@ mod tests {
         assert_eq!(display_mode("formatted"), "formatted");
         assert_eq!(display_mode("multi"), "formatted");
         assert_eq!(display_mode("weird"), "keyword_wrap");
+    }
+
+    #[test]
+    fn crud_style_normalises_the_setting() {
+        // The settings lane owns the key; this lane only consumes it and never
+        // turns a typo into "no marking at all".
+        assert_eq!(crud_style("bar"), "bar");
+        assert_eq!(crud_style("background"), "background");
+        assert_eq!(crud_style("off"), "off");
+        assert_eq!(crud_style("weird"), "bar");
+        assert_eq!(crud_style(""), "bar");
     }
 
     #[test]
