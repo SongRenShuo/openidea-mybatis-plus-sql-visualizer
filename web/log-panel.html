@@ -231,16 +231,28 @@
     }
 
     /* List — one JBList-style row per statement: a 3px type bar, a muted
-       metadata line and the statement itself, separated by 1px rules. */
+       metadata line and the statement itself, separated by 1px rules.
+
+       No alternating row colours and no hover plate: the reference list paints
+       one flat surface and only the selected row is filled. Vertical breathing
+       room is 12px per cell (8px in single-line mode, where a row holds one
+       statement line), and the 3px gap between the metadata line and the
+       statement is the reference's `EmptyBorder` split. */
     .list { flex: 1 1 auto; overflow: auto; }
     .row {
       display: flex; align-items: stretch; min-height: 40px;
       border-bottom: 1px solid var(--openidea-border); cursor: default;
     }
-    .row:hover { background: var(--openidea-bg-hover); }
     .row.sel { background: var(--openidea-bg-selected); }
     .row .bar { width: 3px; flex: 0 0 3px; }
-    .row .content { flex: 1 1 auto; min-width: 0; padding: 5px 8px; }
+    .row .content { flex: 1 1 auto; min-width: 0; padding: 12px 9px 12px 5px; }
+    .list[data-mode="single"] .row .content { padding-top: 8px; padding-bottom: 8px; }
+    /* Selection paints the row's own ink over the syntax colours, exactly like
+       the reference renderer: every fragment is re-projected with the selection
+       foreground, so keyword/string/table colours disappear while the row is
+       selected. The declaration is scoped to the row's content, not to the
+       rest of the panel. */
+    .row.sel .content span { color: inherit; }
     /* The metadata line is a plain left-to-right flow, the way the reference
        panel draws it: #seq, time, duration, [db], (rows), ⨉N, ×N, N+1,
        [file:line], [Class#method]. Nothing is pushed to the right — the only
@@ -264,7 +276,7 @@
     .meta .focusable:hover { color: var(--openidea-link); text-decoration: underline; }
     .meta .focusable.on { color: var(--openidea-link); font-weight: 600; }
     .sql {
-      margin-top: 2px; font-family: var(--openidea-font-mono, monospace);
+      margin-top: 3px; font-family: var(--openidea-font-ui, sans-serif);
       font-size: 12px; line-height: 1.4;
       white-space: pre-wrap; word-break: break-word; color: var(--openidea-fg);
     }
@@ -812,8 +824,14 @@
 
   <script type="module">
     import { mountPreview } from './preview.js';
+    // Shared lexer (L2 list lane): the list rows colour their statement with the
+    // same token set the preview uses, so the two surfaces cannot drift. The
+    // module writes spans with textContent only, which keeps Ctrl+C on a row
+    // yielding the plain statement text.
+    import { into as highlightInto, installStyles } from './sql-highlight.js';
 
     (function () {
+      installStyles();
       var TYPE_TOKENS = ['select', 'insert', 'update', 'delete', 'create', 'drop'];
       // Statement lines the list shows before it folds the rest behind `(+N)`
       // (L32, the reference's three-line cell).
@@ -1457,7 +1475,11 @@
           var sql = document.createElement('div');
           sql.className = 'sql';
           var fold = foldSql(row.sql);
-          sql.appendChild(document.createTextNode(fold.text));
+          // Only the statement fragment is tokenised; the metadata line keeps
+          // its own hand-written colours. `into` writes text, never markup, and
+          // the concatenation of its spans is the statement itself, so copying
+          // a row still yields plain SQL.
+          highlightInto(sql, fold.text);
           if (fold.tail) {
             // The dropped-line counter is muted, the way the reference draws
             // `… (+N)` at the end of the third line (L32).
@@ -1566,6 +1588,9 @@
         // Lane L34: `logs.displayMode` picks the line limit and `log.showDuration`
         // the header flag; the page only applies what the host pushed.
         sqlLineLimit = modeLineLimit(state.displayMode);
+        // The cell padding follows the mode (single-line rows are 8px, not 12px);
+        // CSS keys off this attribute so no per-row class has to be set.
+        list.dataset.mode = state.displayMode || 'keyword_wrap';
         showDuration = state.showDuration !== false;
         var wasAtBottom = atBottom();
 

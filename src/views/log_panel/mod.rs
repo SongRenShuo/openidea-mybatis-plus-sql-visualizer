@@ -1516,29 +1516,61 @@ mod tests {
 
     #[test]
     fn the_log_list_follows_the_jblist_row_style() {
-        // L24: the rows read like a JBList cell — a 3px type bar, a muted
-        // metadata line, the statement, and a 1px rule between rows.
+        // L2: the rows read like a JBList cell — a 3px type bar, a muted
+        // metadata line, the statement, and a 1px rule between rows. The
+        // reference has no alternating-row fill and no hover plate; only the
+        // selected row is painted.
         let (_host, _guard) = test_host();
         let page = PAGE;
         for needle in [
             "min-height: 40px",
-            ".row:hover { background: var(--openidea-bg-hover); }",
             ".row.sel { background: var(--openidea-bg-selected); }",
             ".row .bar { width: 3px; flex: 0 0 3px; }",
+            "padding: 12px 9px 12px 5px;",
+            ".list[data-mode=\"single\"] .row .content { padding-top: 8px; padding-bottom: 8px; }",
+            "list.dataset.mode = state.displayMode || 'keyword_wrap';",
         ] {
             assert!(page.contains(needle), "missing row style {needle}");
         }
+        assert!(
+            !page.contains(".row:hover"),
+            "the reference list has no hover plate"
+        );
         // Metadata is 11px muted with monospace sequence/time/duration; the
-        // statement is 12px monospace and wraps.
+        // statement is 12px in the UI font (the reference inherits the JBList
+        // font, not the editor font) and wraps.
         for needle in [
             "align-items: center; justify-content: flex-start;",
             "gap: 8px; font-size: 11px;",
             ".meta .time, .meta .dur { font-family: var(--openidea-font-mono, monospace); }",
+            "font-family: var(--openidea-font-ui, sans-serif);",
             "font-size: 12px; line-height: 1.4;",
             "white-space: pre-wrap; word-break: break-word;",
+            "margin-top: 3px;",
         ] {
             assert!(page.contains(needle), "missing text style {needle}");
         }
+        // The statement fragment is tokenised with the shared highlighter, and
+        // a selected row projects every fragment onto the selection foreground
+        // (the reference drops syntax colours while a row is selected).
+        assert!(
+            page.contains(
+                "import { into as highlightInto, installStyles } from './sql-highlight.js';"
+            ),
+            "the list rows use the shared lexer"
+        );
+        assert!(
+            page.contains("installStyles();"),
+            "the token classes are installed"
+        );
+        assert!(
+            page.contains("highlightInto(sql, fold.text);"),
+            "the SQL is coloured"
+        );
+        assert!(
+            page.contains(".row.sel .content span { color: inherit; }"),
+            "selection hides the syntax colours"
+        );
         // Badges are 8px-radius 10px capsules tinted 16% with the semantic
         // host variable; the slow duration and the error line take the
         // warning/danger ink.
