@@ -107,6 +107,16 @@ pub trait McpProvider { fn call(&mut self, tool: &str, arguments: &str, ctx: &In
 - 纯逻辑层只返回 `message_key`（如 `perf.leading_wildcard`）与结构化数据，文案由 `src/i18n.rs` 映射。
 - 新增文案键写 `docs/registration/<lane>.md`，不要改 `locales/*.json`。
 
+**为什么运行时键不能进 `locales/*.json`（2026-11-27 实测核清）**：上游 `plugins/README.md`
+「Plugin locales」一节写明，catalog 是「**英文源文本** → 译文」的映射（例：`{"Count Words": "Compter les mots"}`），
+由 IDE 应用到清单里命令/视图/编辑器/设置/文件模板的标题与 tooltip；而「插件自己产生的文本
+（通知、错误消息、`html` body、cell data）**不翻译**，要读 `host::locale()` 自己做」。
+
+`view.logs.title` 这类点号键是本仓的运行时 messageKey，由 `src/i18n.rs` 的 `TABLE` 翻译，IDE 的 catalog 不会匹配它们。
+实测该文件 282 个键里有 212 个是这种死键（约 75%），另有 87 个 `TABLE` 键在 `locales` 里缺失、6 条文案与 `TABLE` 不一致。
+`openidea-plugin check` 只校验「catalog 是 string→string 的对象」，不查键是否可达，所以这批死数据一直没被发现。
+结论：**新文案只进 `src/i18n.rs` 的 `TABLE`**；`locales/*.json` 是否需要清理是独立议题，别在功能车道里顺手改。
+
 ## 7 门禁
 
 ```
