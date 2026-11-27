@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SQL Preview</title>
+  <!-- The workbench's own stylesheet; the panel page loads the same file. Both
+       pages sit in `web/`, so the relative URL resolves inside the package
+       (the directory of the entry page is what a packaged page may load). -->
+  <link rel="stylesheet" href="./preview.css">
+</head>
+<body>
+  <!-- The standalone mount of the preview workbench (lane L42). The fifth tab
+       of `web/log-panel.html` imports the same module and mounts it there; this
+       page is the shell the API 1.18 dialog will load. `mountPreview` builds
+       every control, so the body starts empty on purpose. -->
+  <script type="module">
+    import { mountPreview } from './preview.js';
+
+    // A standalone page and the tab share the protocol exactly: the host pushes
+    // `{ op: "state", tabs: { preview } }` and `applyTab` renders it. Until the
+    // first push the workbench shows its own empty state, so a plain browser
+    // (no host: no `openidea`) still renders a readable skeleton.
+    const mounted = mountPreview(document.body, {});
+
+    if (window.openidea && window.openidea.onMessage) {
+      window.openidea.onMessage(function (raw) {
+        try {
+          const message = JSON.parse(raw);
+          if (message.op === 'state' && message.tabs) {
+            mounted.applyTab(message.tabs.preview);
+          } else if (message.op === 'preview-tab') {
+            // A host may also push the `tabs.preview` payload on its own (the
+            // "send to preview" hand-off); both shapes land in `applyTab`.
+            mounted.applyTab(message.tab || message);
+          }
+        } catch (error) { /* ignore malformed */ }
+      });
+    }
+    if (window.openidea && window.openidea.postMessage) {
+      window.openidea.postMessage(JSON.stringify({ op: 'preview-ready' }));
+    }
+  </script>
+</body>
+</html>
