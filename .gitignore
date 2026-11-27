@@ -3,3 +3,6 @@
 *.oiplugin
 .worktrees/
 node_modules/
+# IDE-side project state (changelists…) and browser-check scratch output.
+.openidea/
+.playwright-mcp/
