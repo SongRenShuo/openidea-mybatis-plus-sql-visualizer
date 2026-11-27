@@ -91,6 +91,23 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "Enhanced: received",
         "增强：已收事件",
     ),
+    // Why the enhanced channel is empty while its socket is up: the agent's own
+    // heartbeat counters separate "stopped itself", "no hooks" and "never fired".
+    (
+        "view.logs.status.agent_gate",
+        "agent stopped itself (no CONFIG)",
+        "agent 已自停：未收到 CONFIG",
+    ),
+    (
+        "view.logs.status.agent_no_hooks",
+        "no hooks woven",
+        "agent 未织入任何钩子",
+    ),
+    (
+        "view.logs.status.agent_idle",
+        "hooks woven, nothing fired",
+        "钩子已装，未命中任何 SQL",
+    ),
     // Lane A: a capture start that keeps being refused while the plugin dials
     // (the target application is not up yet). `{port}` is filled in by the page.
     (

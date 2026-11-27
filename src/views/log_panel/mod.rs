@@ -80,6 +80,26 @@ pub(super) const SQL_DISPLAY_CHARS: usize = 180;
 // State push
 // ---------------------------------------------------------------------------
 
+/// The agent's newest heartbeat counters, as the page reads them.
+///
+/// `null` before the first heartbeat: the socket being up while the agent has
+/// said nothing is a different state from an agent reporting zero woven classes.
+fn agent_health_json() -> Value {
+    match crate::capture::bridge::agent_health() {
+        Some(health) => json!({
+            "woven": health.woven,
+            "matched": health.matched,
+            "failed": health.failed,
+            "unmodifiable": health.unmodifiable,
+            "skippedByVersion": health.skipped_by_version,
+            "catchAll": health.catch_all,
+            "gate": health.gate,
+            "dropped": health.dropped,
+        }),
+        None => Value::Null,
+    }
+}
+
 /// Builds the full push state (see the lane contract in `docs/registration/L17.md`).
 fn build_state() -> Value {
     let mut state = store();
@@ -292,6 +312,10 @@ fn build_state() -> Value {
             // Non-null while a refused capture start waits for the target
             // application; `null` once it connected or capture stopped.
             "capture_waiting": capture_waiting,
+            // The agent's own counters from its heartbeat (lane W2-1): the only
+            // way to tell "hooks never fired" from "the agent stopped itself"
+            // when the panel is empty while the socket is up.
+            "agent_health": agent_health_json(),
         },
         "sort": sort.token(),
         "slow_threshold_ms": slow_threshold_ms,
@@ -369,6 +393,11 @@ fn labels_base() -> Value {
         // plugin keeps dialling; `{port}` is filled in by the page.
         "statusCaptureWaiting": t("view.logs.status.capture_waiting"),
         "statusAgentEventsPrefix": t("view.logs.status.agent_events_prefix"),
+        // Why the enhanced channel is empty while the socket is up: the agent's
+        // heartbeat counters (lane W2-1).
+        "statusAgentGate": t("view.logs.status.agent_gate"),
+        "statusAgentNoHooks": t("view.logs.status.agent_no_hooks"),
+        "statusAgentIdle": t("view.logs.status.agent_idle"),
         "totalPrefix": t("view.logs.status.total_prefix"),
         "totalSuffix": t("view.logs.status.total_suffix"),
         "truncatedPrefix": t("view.logs.status.truncated_prefix"),
@@ -671,6 +700,10 @@ fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
         "capture-stop" => logs::capture_stop(ctx)?,
         // The page retries a refused capture start every 2 s (lane A).
         "capture-retry" => logs::capture_retry(ctx)?,
+        // The page also ticks this while capture is on: the host's
+        // `websocket-ready` fires per arriving frame, so a wake lost while the
+        // plugin was idle would leave staged frames unread.
+        "capture-poll" => logs::capture_poll()?,
         // Follow (lane L26): the page reports a flip when the user scrolls
         // away from the bottom; "scroll to bottom" restores it.
         "follow" => logs::follow(&message)?,
@@ -1642,6 +1675,9 @@ mod tests {
             "statusConsoleSuffix",
             "statusAgentOff",
             "statusAgentEventsPrefix",
+            "statusAgentGate",
+            "statusAgentNoHooks",
+            "statusAgentIdle",
         ] {
             assert!(labels.get(key).is_some(), "missing label {key}");
         }
@@ -2124,6 +2160,12 @@ mod tests {
         assert!(page.contains("}, 2000);"));
         assert!(page.contains("captureRetryTimer"));
         assert!(page.contains("s.capture_waiting"));
+        // The drain tick: the host's `websocket-ready` is one-shot per arriving
+        // frame, so a lost wake would leave frames staged forever. The page ticks
+        // a drain while the enhanced channel is on.
+        assert!(page.contains("post({ op: 'capture-poll' })"));
+        assert!(page.contains("}, 500);"));
+        assert!(page.contains("syncCapturePoll(state)"));
         // Settings and help have real feedback paths, not dead buttons.
         assert!(page.contains("post({ op: 'settings' })"));
         assert!(page.contains("post({ op: 'help' })"));

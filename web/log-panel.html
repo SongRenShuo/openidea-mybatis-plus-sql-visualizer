@@ -872,6 +872,8 @@
       // Capture retry (lane A): the interval that re-dials a capture start the
       // agent refused, or null when nothing is waiting.
       var captureRetryTimer = null;
+      // Drain tick while the enhanced channel is on (see syncCapturePoll).
+      var capturePollTimer = null;
 
       function $(id) { return document.getElementById(id); }
       function post(message) {
@@ -1027,6 +1029,7 @@
         // (set in updateLabels) stays the action name.
         $('scrollEndBtn').title = follow ? (L.followOn || '') : (L.scrollEnd || '');
         syncCaptureRetry(state);
+        syncCapturePoll(state);
       }
 
       // Capture retry (lane A): the platform gives the plugin a WebSocket
@@ -1044,6 +1047,24 @@
         } else if (!waiting && captureRetryTimer) {
           clearInterval(captureRetryTimer);
           captureRetryTimer = null;
+        }
+      }
+
+      // Drain while the enhanced channel is on. The host wakes the plugin with
+      // `websocket-ready` per arriving frame, but that wake is one-shot: one lost
+      // while the plugin was idle leaves the frames staged with nothing to wake
+      // us again, and the panel then sits at zero rows with a healthy socket.
+      // A tick is cheap (a drain over an empty queue), so it runs on a plain
+      // interval instead of relying on the wake alone.
+      function syncCapturePoll(state) {
+        var connected = !!(state.status && state.status.agent_connected);
+        if (connected && !capturePollTimer) {
+          capturePollTimer = setInterval(function () {
+            post({ op: 'capture-poll' });
+          }, 500);
+        } else if (!connected && capturePollTimer) {
+          clearInterval(capturePollTimer);
+          capturePollTimer = null;
         }
       }
 
@@ -1635,6 +1656,19 @@
           right = L.followOff || '';
         } else if (s.agent_connected) {
           right = (L.statusAgentEventsPrefix || '') + ' ' + (s.agent_events || 0);
+          // Nothing captured while the socket is up: the agent's own heartbeat
+          // counters say which of the three causes it is, so the empty list
+          // stops being a mystery.
+          var h = s.agent_health;
+          if (!(s.agent_events > 0) && h) {
+            if (h.gate) {
+              right += ' · ' + (L.statusAgentGate || 'agent stopped itself (no CONFIG)');
+            } else if (!h.woven) {
+              right += ' · ' + (L.statusAgentNoHooks || 'no hooks woven');
+            } else if (!h.matched) {
+              right += ' · ' + (L.statusAgentIdle || 'hooks woven, nothing fired');
+            }
+          }
         } else {
           right = L.statusAgentOff || '';
         }

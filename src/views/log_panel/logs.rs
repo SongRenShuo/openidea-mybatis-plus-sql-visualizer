@@ -467,6 +467,31 @@ pub(super) fn capture_retry(ctx: &Invocation) -> Result<(), Error> {
     Ok(())
 }
 
+/// `capture-poll`: drain what the agent has already sent.
+///
+/// The host emits `websocket-ready` per arriving frame, but that wake only fires
+/// on the transition into a non-empty queue; a wake lost while the plugin was
+/// idle leaves frames staged with nothing to wake us again. The page ticks this
+/// while capture is on, so the queue always drains.
+pub(super) fn capture_poll() -> Result<(), Error> {
+    match crate::capture::bridge::poll(super::now_ms()) {
+        Ok(report) => {
+            if report.fetched > 0 {
+                let _ = push_state();
+            }
+        }
+        // A tick every 500 ms must not turn "nothing open" into an error.
+        Err(crate::capture::bridge::BridgeError::NotConnected) => {}
+        Err(error) => {
+            host::log(
+                openidea_plugin::LogLevel::Warn,
+                &format!("capture: {} {}", error.message_key(), error.detail()),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// `follow`: the page reports a flip when the user scrolls away from the bottom.
 pub(super) fn follow(message: &Value) -> Result<(), Error> {
     let follow = message
@@ -946,6 +971,19 @@ mod tests {
             Value::Null,
             "capture-stop ends the wait so the page stops ticking"
         );
+    }
+
+    /// The page ticks a drain every 500 ms while capture is on. With nothing
+    /// open that tick must be silent: it is a heartbeat, not a user action.
+    #[test]
+    fn a_drain_tick_with_nothing_open_is_a_silent_no_op() {
+        let (host, _guard) = test_host();
+        host.set_project_root(Some("/project"));
+        handle_panel_message(&host, "{\"op\":\"ready\"}").unwrap();
+        let pushed = host.view_messages().len();
+        handle_panel_message(&host, "{\"op\":\"capture-poll\"}").unwrap();
+        assert_eq!(host.view_messages().len(), pushed, "nothing to push");
+        assert_eq!(host.output().get(common::CHANNEL), None, "no Output noise");
     }
 
     #[test]
