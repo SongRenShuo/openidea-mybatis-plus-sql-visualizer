@@ -86,11 +86,15 @@
    项目树里、不能被外部编辑器打开，也不跨机器同步。交互（文件列表 / 语句列表 / 返回 / 刷新 /
    滚动到底 / 快速预览 / 复制 / 跳转）按原版对齐。
 10. **预览「更多」里的「含表列名」只占位、不可用**：把每列渲染成 `表名.列名` 需要渲染器知道
-   每个列来自哪张表，这属于引擎职责，本仓不做 SQL 改写。core 渲染器与引擎 jar 目前都没有
-   这个开关（`grep -i "qualif\|tablePrefix\|withTable\|includeColumns"` 在 `src/core/`、`src/sidecar/proto.rs`
-   只命中「限定 id」「全限定类名」等无关处；`RenderRequest` 只有 `kind`/`source`/`dialect`/`params`/
-   `entity_tables` 五个字段）。因此菜单项存在但禁用，tooltip 说明需要引擎支持；等引擎侧加上
-   该开关后，本仓只加一个 `preview-qualify` 的转发即可，不在平台侧拼 SQL。
+   每个列来自哪张表，这属于引擎职责，本仓不做 SQL 改写。查过两处，都没有这个开关：
+   `grep -rn -i "qualif|tablePrefix|table_prefix|withTable|includeColumns|include_columns"`
+   在 `src/core/` 只命中 6 处无关位置（`format.rs` 的 `JOIN_QUALIFIERS` 是格式化时识别
+   `ON`/`AND` 一类的连接词；`gen/rollback.rs` 的 `qualified` 是 `表.列` 的主键拼接；
+   `dialect/keywords.rs` 的 `"qualify"` 是关键字表里的一条；`perf/rules.rs` 判断列是否已带前缀；
+   `log/params.rs` 的测试名），`src/sidecar/proto.rs` 零命中，`RenderRequest` 也只有
+   `kind`/`source`/`dialect`/`params`/`entity_tables` 五个字段。因此菜单项存在但禁用，
+   tooltip 说明需要引擎支持；等引擎侧加上该开关后，本仓只加一个 `preview-qualify` 的转发
+   即可，不在平台侧拼 SQL。
 11. **预览「更多」不提供「切换数据源」**：预览工作在纯文本模型上（原文 / SQL / 列信息），
    本仓没有数据源 API，也不连接数据库（`sqlv_schema_context` 只格式化调用方给的结构）；
    切换数据源只在原版的「执行 + EXPLAIN」链里有意义，本版执行面走 sidecar 的只读 EXPLAIN，
