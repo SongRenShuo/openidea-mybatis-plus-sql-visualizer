@@ -205,8 +205,20 @@ pub fn decode_frame(frame: &str) -> FrameDecode {
 /// Builds the agent envelope `{"cmd":…,"body":…}` used for control frames the
 /// plugin sends (CONFIG). The body is embedded as a JSON string, so it stays
 /// byte-identical to what the TCP transport would have carried.
+///
+/// **The key order is part of the protocol.** The agent parses this by hand
+/// (`WsFrameCodec.decodeEnvelope`): it finds `"cmd":`, reads the number, then
+/// looks for `"body":` *after* those digits. `serde_json::json!` builds a
+/// `BTreeMap` here (the `preserve_order` feature is off), so the generic form
+/// emitted `{"body":…,"cmd":…}` — alphabetically sorted — and the agent dropped
+/// every CONFIG frame with `无法解析入站 WS 信封`. That looked like "connected
+/// but capturing nothing", with only the 15s watchdog to show for it. Build the
+/// string in the documented order instead of trusting a map's ordering.
 pub fn encode_envelope(cmd: i64, body: &str) -> String {
-    serde_json::json!({ "cmd": cmd, "body": body }).to_string()
+    // `to_string` on a &str only fails on an allocation error; an empty string
+    // is still a valid envelope, so a fallback cannot corrupt the framing.
+    let quoted = serde_json::to_string(body).unwrap_or_else(|_| "\"\"".to_owned());
+    format!("{{\"cmd\":{cmd},\"body\":{quoted}}}")
 }
 
 /// Extracts `(cmd, body)` from an envelope, for callers that need the body.
@@ -1099,9 +1111,30 @@ mod tests {
             decode_frame(&frame),
             FrameDecode::Control { cmd: CMD_CONFIG }
         );
+    }
+
+    /// The agent's `WsFrameCodec.decodeEnvelope` is a hand-written parser that
+    /// requires `"cmd":` first, then looks for `"body":` *after* the cmd digits.
+    /// A body-first envelope makes it return null and drop the frame, which the
+    /// panel sees as "connected but capturing nothing".
+    ///
+    /// This asserts the exact bytes, not just "it round-trips": the previous
+    /// version accepted either key order (`starts_with body || starts_with cmd`)
+    /// and so blessed the very bug that shipped — `serde_json`'s map is a
+    /// `BTreeMap` and sorted the keys to body-first.
+    #[test]
+    fn the_envelope_writes_cmd_before_body_as_the_agent_expects() {
+        let frame = encode_envelope(CMD_CONFIG, "{\"disabled\":false}");
+        assert_eq!(frame, "{\"cmd\":3,\"body\":\"{\\\"disabled\\\":false}\"}");
+        let cmd_at = frame.find("\"cmd\":").expect("cmd key");
+        let body_at = frame.find("\"body\":").expect("body key");
         assert!(
-            frame.starts_with("{\"body\":") || frame.starts_with("{\"cmd\":"),
-            "{frame}"
+            cmd_at < body_at,
+            "the agent searches `\"body\":` only after the cmd digits: {frame}"
         );
+        // And the digits must sit between the two keys, which is what that
+        // search relies on.
+        let digits_at = frame.find('3').expect("cmd value");
+        assert!(cmd_at < digits_at && digits_at < body_at, "{frame}");
     }
 }
