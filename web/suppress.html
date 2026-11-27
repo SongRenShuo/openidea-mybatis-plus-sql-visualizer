@@ -409,7 +409,12 @@
         addPending = true;
         post({ op: 'add', sql: $('addInput').value });
       });
-      $('cancelAddBtn').addEventListener('click', function () { addMode(false); });
+      $('cancelAddBtn').addEventListener('click', function () {
+        addMode(false);
+        // The blank-input error belongs to the add attempt; closing the form
+        // should not leave it on the status line.
+        post({ op: 'cancel-add' });
+      });
       $('deleteBtn').addEventListener('click', function () {
         var rule = selectedRule();
         if (rule) { post({ op: 'delete', id: rule.id }); }

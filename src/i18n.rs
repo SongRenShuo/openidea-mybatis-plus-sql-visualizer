@@ -1481,6 +1481,164 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "SQL Server OFFSET/FETCH needs an ORDER BY",
         "SQL Server 的 OFFSET/FETCH 需要 ORDER BY",
     ),
+    // SQL → Java: the generator's own message keys. Without these the panel
+    // printed the raw key (`gen.java.entity_required`) — seen in the live IDE
+    // when the entity field was left empty.
+    (
+        "gen.java.entity_required",
+        "Enter the entity class name (for example User).",
+        "请填写实体类名（例如 User）。",
+    ),
+    (
+        "gen.java.table_required",
+        "The statement names no table, so the entity class cannot be inferred.",
+        "语句里没有表名，无法推断实体类。",
+    ),
+    (
+        "gen.java.not_select",
+        "Only SELECT statements can be turned into a Java wrapper.",
+        "只有 SELECT 语句能转成 Java 包装器。",
+    ),
+    (
+        "gen.java.union_unsupported",
+        "UNION has no wrapper equivalent.",
+        "UNION 没有包装器等价写法。",
+    ),
+    (
+        "gen.java.join_unsupported",
+        "JOIN is not supported by this generator.",
+        "本生成器不支持 JOIN。",
+    ),
+    (
+        "gen.java.group_unsupported",
+        "GROUP BY is not supported.",
+        "不支持 GROUP BY。",
+    ),
+    (
+        "gen.java.having_unsupported",
+        "HAVING is not supported.",
+        "不支持 HAVING。",
+    ),
+    (
+        "gen.java.subquery_unsupported",
+        "Subqueries are not supported.",
+        "不支持子查询。",
+    ),
+    (
+        "gen.java.in_subquery_unsupported",
+        "IN (subquery) is not supported.",
+        "不支持 IN（子查询）。",
+    ),
+    (
+        "gen.java.distinct_unsupported",
+        "DISTINCT is not supported.",
+        "不支持 DISTINCT。",
+    ),
+    (
+        "gen.java.limit_unsupported",
+        "LIMIT/OFFSET belongs to the caller's page object, not the wrapper.",
+        "LIMIT/OFFSET 由调用方的分页对象表达，包装器里不生成。",
+    ),
+    (
+        "gen.java.offset_param_unsupported",
+        "OFFSET with a bound parameter is not supported.",
+        "不支持带绑定参数的 OFFSET。",
+    ),
+    (
+        "gen.java.unsupported_order_by",
+        "This ORDER BY form is not supported.",
+        "不支持这种 ORDER BY 写法。",
+    ),
+    (
+        "gen.java.unsupported_projection",
+        "This SELECT list cannot be mapped to columns.",
+        "这组查询列无法映射到列。",
+    ),
+    (
+        "gen.java.unsupported_condition",
+        "This WHERE condition is not supported.",
+        "不支持这个 WHERE 条件。",
+    ),
+    (
+        "gen.java.unsupported_in",
+        "This IN form is not supported.",
+        "不支持这种 IN 写法。",
+    ),
+    (
+        "gen.java.unsupported_like",
+        "This LIKE form is not supported.",
+        "不支持这种 LIKE 写法。",
+    ),
+    (
+        "gen.java.unsupported_between",
+        "BETWEEN is not supported.",
+        "不支持 BETWEEN。",
+    ),
+    (
+        "gen.java.unsupported_value",
+        "This value cannot become a wrapper argument.",
+        "这个值无法转换成包装器参数。",
+    ),
+    (
+        "gen.java.missing_value",
+        "A comparison is missing its value.",
+        "比较条件缺少值。",
+    ),
+    (
+        "gen.java.empty_in_list",
+        "The IN list is empty.",
+        "IN 列表为空。",
+    ),
+    (
+        "gen.java.unbalanced_parentheses",
+        "The parentheses do not balance.",
+        "括号不配对。",
+    ),
+    (
+        "gen.java.unknown_table_alias",
+        "The statement uses a table alias it never defines.",
+        "语句用了未定义的表别名。",
+    ),
+    (
+        "gen.java.null_comparison",
+        "Comparing with NULL; use IS NULL instead.",
+        "与 NULL 做比较，应改用 IS NULL。",
+    ),
+    (
+        "gen.java.column_to_column",
+        "Column-to-column comparison is not supported.",
+        "不支持列与列比较。",
+    ),
+    (
+        "gen.java.like_wildcard_unsupported",
+        "This wildcard form is not supported.",
+        "不支持这种通配符写法。",
+    ),
+    (
+        "gen.java.like_without_wildcard",
+        "The LIKE value carries no `%`; a plain equality is usually meant.",
+        "LIKE 的值不含 `%`，通常应改用等值比较。",
+    ),
+    (
+        "gen.java.like_middle_wildcard",
+        "A leading or middle `%` cannot use the index.",
+        "前导或中间的 `%` 用不上索引。",
+    ),
+    (
+        "gen.java.like_param_unsupported",
+        "LIKE with a bound parameter is not supported.",
+        "不支持带绑定参数的 LIKE。",
+    ),
+    (
+        "gen.java.ambiguous_quoted_value",
+        "The quoted value is ambiguous.",
+        "带引号的值有歧义。",
+    ),
+    (
+        "gen.crud.batch_rows_zero",
+        "A batch INSERT needs at least one row.",
+        "批量 INSERT 至少要一行。",
+    ),
 ];
 
 /// Localised text for `key` in the IDE's current UI language.
@@ -1524,6 +1682,27 @@ mod tests {
             assert!(!en.is_empty(), "empty English text for {key}");
             assert!(!zh.is_empty(), "empty Chinese text for {key}");
         }
+    }
+
+    #[test]
+    fn every_generator_key_has_both_translations() {
+        // The SQL → Java page prints the generator's message key verbatim, so a
+        // key with no table entry reads as `gen.java.entity_required` in the UI
+        // (seen in the live IDE before these entries existed).
+        let source = include_str!("core/gen/java.rs");
+        let mut checked = 0;
+        for (index, _) in source.match_indices("\"gen.") {
+            let rest = &source[index + 1..];
+            let Some(end) = rest.find('"') else { continue };
+            let key = &rest[..end];
+            assert_ne!(t_in("en", key), key, "missing English text for {key}");
+            assert_ne!(t_in("zh-CN", key), key, "missing Chinese text for {key}");
+            checked += 1;
+        }
+        assert!(
+            checked > 20,
+            "the scan found only {checked} keys — did `core/gen/java.rs` move?"
+        );
     }
 
     #[test]

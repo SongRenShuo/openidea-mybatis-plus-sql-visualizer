@@ -807,11 +807,10 @@ Preparing: DELETE FROM users WHERE id = ?
         let tab = state_of(&host)["tabs"]["sqlToJava"].clone();
         assert_eq!(tab["statusKind"], "error");
         assert_eq!(tab["code"], "", "unresolved ships no code");
-        assert!(
-            tab["status"]
-                .as_str()
-                .is_some_and(|status| status.contains("entity_required")),
-            "{tab}"
+        assert_eq!(
+            tab["status"],
+            json!(t("gen.java.entity_required")),
+            "the status is the translated text, not the raw key: {tab}"
         );
     }
 

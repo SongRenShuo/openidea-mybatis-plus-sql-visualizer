@@ -678,6 +678,13 @@ pub fn handle_message(text: &str, ctx: &Invocation) -> Result<(), Error> {
         "clear" => {
             changed = clear_rules();
         }
+        // Cancelling the add form clears the status line a failed add left
+        // behind (the red "paste SQL first" stayed after the form closed).
+        "cancel-add" => {
+            let mut guard = store();
+            guard.status = Status::default();
+            guard.keep_add = false;
+        }
         "structure" => {
             let enabled = message
                 .get("enabled")
@@ -800,7 +807,10 @@ fn format_time(ms: i64) -> String {
     let (year, month, day) = civil_from_days(days);
     let hour = seconds_of_day / 3600;
     let minute = (seconds_of_day % 3600) / 60;
-    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
+    // Labelled `UTC`: the wasm has no timezone API, while the log rows show the
+    // application's own wall clock. An unlabelled UTC time read as "the rule was
+    // created at a wrong hour" next to rows stamped in local time.
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02} UTC")
 }
 
 /// Howard Hinnant's civil-from-days (UTC).
@@ -1134,6 +1144,12 @@ mod tests {
         handle_message("{\"op\":\"add\",\"sql\":\"SELECT 1\"}", &ctx).unwrap();
         let state = state_of(&host);
         assert_eq!(state["rules"].as_array().unwrap().len(), 1);
+        assert!(
+            state["rules"][0]["createdText"]
+                .as_str()
+                .is_some_and(|text| text.ends_with(" UTC")),
+            "the created time states its zone: {state}"
+        );
         let id = state["rules"][0]["id"].as_str().unwrap().to_string();
         assert_eq!(state["select"], json!(id));
 
