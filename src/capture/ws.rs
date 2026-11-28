@@ -72,6 +72,10 @@ pub const KEY_BAD_URL: &str = "capture.ws.bad_url";
 pub const KEY_TOO_MANY: &str = "capture.ws.too_many";
 pub const KEY_HOST: &str = "capture.ws.host_error";
 pub const KEY_GIVE_UP: &str = "capture.ws.give_up";
+/// The host refused the dial because a capability was not granted. Unlike a
+/// plain connection failure this never becomes "the application is not up
+/// yet": no retry can succeed, so the panel must say so instead of waiting.
+pub const KEY_DENIED: &str = "capture.start.denied";
 
 /// What the agent says about itself in every `HEARTBEAT` body.
 ///
@@ -689,9 +693,19 @@ impl WsSupervisor {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WsError {
     InvalidUrl(UrlError),
-    TooManyConnections { limit: usize },
-    Degraded { message_key: &'static str },
+    TooManyConnections {
+        limit: usize,
+    },
+    Degraded {
+        message_key: &'static str,
+    },
     Host(String),
+    /// The host named a capability the grant ledger has not recorded. Kept
+    /// structured (not folded into `Host`) so the capture start can tell
+    /// "denied, stop waiting" from "not up yet, keep retrying".
+    Denied {
+        capability: String,
+    },
 }
 
 impl WsError {
@@ -701,13 +715,17 @@ impl WsError {
             Self::TooManyConnections { .. } => KEY_TOO_MANY,
             Self::Degraded { message_key } => message_key,
             Self::Host(_) => KEY_HOST,
+            Self::Denied { .. } => KEY_DENIED,
         }
     }
 }
 
 impl From<Error> for WsError {
     fn from(error: Error) -> Self {
-        Self::Host(error.to_string())
+        match error {
+            Error::Denied(capability) => Self::Denied { capability },
+            other => Self::Host(other.to_string()),
+        }
     }
 }
 
@@ -720,6 +738,9 @@ impl std::fmt::Display for WsError {
             }
             Self::Degraded { message_key } => write!(f, "capture degraded ({message_key})"),
             Self::Host(message) => write!(f, "WebSocket host call failed: {message}"),
+            Self::Denied { capability } => {
+                write!(f, "permission denied: {capability} is not granted")
+            }
         }
     }
 }
@@ -1386,5 +1407,31 @@ mod tests {
         // search relies on.
         let digits_at = frame.find('3').expect("cmd value");
         assert!(cmd_at < digits_at && digits_at < body_at, "{frame}");
+    }
+
+    /// A host capability denial must survive the `Error → WsError` conversion
+    /// structured: folding it into `Host` is exactly what made the panel wait
+    /// forever (the denial dressed up as "the application is not up yet").
+    #[test]
+    fn a_capability_denial_stays_structured_through_the_conversion() {
+        let error = WsError::from(Error::Denied("net:127.0.0.1".to_owned()));
+        assert_eq!(
+            error,
+            WsError::Denied {
+                capability: "net:127.0.0.1".to_owned()
+            },
+            "the capability is kept, not folded into the host text"
+        );
+        assert_eq!(error.message_key(), KEY_DENIED);
+        assert_eq!(
+            error.to_string(),
+            "permission denied: net:127.0.0.1 is not granted",
+            "the display matches the host's own wording"
+        );
+        // Other host errors keep their old shape.
+        assert_eq!(
+            WsError::from(Error::Failed("boom".to_owned())),
+            WsError::Host("boom".to_owned())
+        );
     }
 }

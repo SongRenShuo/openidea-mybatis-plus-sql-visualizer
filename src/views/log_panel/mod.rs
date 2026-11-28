@@ -270,6 +270,9 @@ fn build_state() -> Value {
                 "port": waiting.port,
                 "attempts": waiting.attempts,
                 "lastError": waiting.last_error,
+                // The refusal's message key: the page can tell a wrong port
+                // from a host refusal without parsing the error text.
+                "lastKey": waiting.last_key,
             })
         })
         .unwrap_or(Value::Null);

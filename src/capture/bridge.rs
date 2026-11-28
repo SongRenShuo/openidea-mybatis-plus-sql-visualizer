@@ -44,6 +44,9 @@ pub const MAX_PAGE_SIZE: usize = 5000;
 pub const KEY_BAD_PORT: &str = "capture.port.invalid";
 pub const KEY_GUIDANCE: &str = "capture.port.guidance";
 pub const KEY_ALREADY_CONNECTED: &str = "capture.start.already_connected";
+/// A capture start the host refused for a missing capability: reported and
+/// stopped, never turned into a waiting tick (the same key `capture::ws` uses).
+pub const KEY_DENIED: &str = crate::capture::ws::KEY_DENIED;
 /// A capture start that could not dial yet: the panel waits and retries.
 pub const KEY_WAITING: &str = "capture.start.waiting";
 /// A waiting capture start that finally connected.
@@ -362,6 +365,16 @@ pub fn clear_waiting() {
     *waiting_slot() = None;
 }
 
+/// The capability the host named when refusing the dial, if the refusal was a
+/// permission denial. Retrying cannot fix it: no amount of waiting makes the
+/// grant ledger change, so a denied start reports and stops instead of ticking.
+pub fn denied_capability(error: &BridgeError) -> Option<String> {
+    match error {
+        BridgeError::Ws(WsError::Denied { capability }) => Some(capability.clone()),
+        _ => None,
+    }
+}
+
 /// One reconnect for the panel's 2 s tick.
 ///
 /// `Ok(None)` means the connection is up (or there was nothing to retry);
@@ -382,6 +395,13 @@ pub fn retry(project: &Project) -> Result<Option<Waiting>, BridgeError> {
             // caller surface the reason.
             clear_waiting();
             Err(BridgeError::Port(error))
+        }
+        Err(error @ BridgeError::Ws(WsError::Denied { .. })) => {
+            // Same for a permission denial: the grant ledger does not change
+            // while the panel ticks, so waiting would dress the refusal up as
+            // "the application is not up yet" forever.
+            clear_waiting();
+            Err(error)
         }
         Err(error) => Ok(Some(mark_waiting(current.port, &current.url, &error))),
     }
@@ -830,6 +850,35 @@ mod tests {
     #[test]
     fn the_url_is_loopback_ws_on_the_mpsv_path() {
         assert_eq!(capture_url(17890), "ws://127.0.0.1:17890/mpsv");
+    }
+
+    // -- denied dials ------------------------------------------------------
+
+    #[test]
+    fn a_denied_dial_names_the_capability() {
+        // The mock enforces capabilities like the real host: without the
+        // `net:` grant the wss dial comes back as `Error::Denied`, and the
+        // conversion must keep it structured so `capture-start` can tell
+        // "stop waiting" from "the application is not up yet".
+        let host = MockHost::install().with_capabilities(&["project.read", "events"]);
+        let project = project(&host);
+        let error = connect(&project, &test_url(17890)).expect_err("denied without the net grant");
+        assert_eq!(error.message_key(), KEY_DENIED, "{error:?}");
+        assert_eq!(
+            denied_capability(&error).as_deref(),
+            Some("net:127.0.0.1"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn other_refusals_are_not_mistaken_for_denials() {
+        assert_eq!(denied_capability(&BridgeError::AlreadyConnected), None);
+        assert_eq!(denied_capability(&BridgeError::NotConnected), None);
+        assert_eq!(
+            denied_capability(&BridgeError::Ws(WsError::Host("boom".to_owned()))),
+            None
+        );
     }
 
     // -- frame → LogEntry --------------------------------------------------

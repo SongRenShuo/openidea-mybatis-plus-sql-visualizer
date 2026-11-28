@@ -95,6 +95,21 @@ fn start(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
             Ok(out)
         }
         Err(error) => {
+            // A permission denial never heals by waiting: the grant ledger does
+            // not change while the panel ticks. Report it plainly, with the
+            // fallback the user still has, instead of dressing it up as "the
+            // application is not up yet".
+            if let Some(capability) = bridge::denied_capability(&error) {
+                bridge::clear_waiting();
+                let _ = writeln!(
+                    out,
+                    "-- capture-start: {} [{}] ({capability})",
+                    denied_text(&capability),
+                    bridge::KEY_DENIED,
+                );
+                let _ = crate::views::log_panel::push_state();
+                return Ok(out);
+            }
             // The target application is (probably) not running yet. Keep the
             // refusal as the waiting state's reason and let the panel retry.
             let waiting = bridge::mark_waiting(port, &url, &error);
@@ -118,6 +133,11 @@ fn start(ctx: &Invocation, arg: Option<&str>) -> Result<String, CliError> {
 /// The localized "waiting for the target application" sentence.
 fn waiting_text(port: u16) -> String {
     t(bridge::KEY_WAITING).replace("{port}", &port.to_string())
+}
+
+/// The localized "denied, here is what still works" sentence.
+fn denied_text(capability: &str) -> String {
+    t(bridge::KEY_DENIED).replace("{capability}", capability)
 }
 
 /// The localized "connected" sentence.
@@ -152,11 +172,22 @@ pub fn retry(ctx: &Invocation) -> Result<(), Error> {
         // Still refused: the state carries the new attempt count and reason.
         Ok(Some(_)) => {}
         Err(error) => {
-            common::emit(&format!(
-                "-- capture-start: {} [{}]\n",
-                error.detail(),
-                error.message_key()
-            ))?;
+            // A denial ends the tick loop (`bridge::retry` cleared the wait):
+            // say so in the user's language with the fallback that still
+            // works, not as a bare host error string.
+            if let Some(capability) = bridge::denied_capability(&error) {
+                common::emit(&format!(
+                    "-- capture-start: {} [{}] ({capability})\n",
+                    denied_text(&capability),
+                    bridge::KEY_DENIED,
+                ))?;
+            } else {
+                common::emit(&format!(
+                    "-- capture-start: {} [{}]\n",
+                    error.detail(),
+                    error.message_key()
+                ))?;
+            }
         }
     }
     Ok(())
@@ -267,6 +298,20 @@ mod tests {
         assert!(
             bridge::waiting().is_none(),
             "capture-stop stops the retry loop"
+        );
+    }
+
+    #[test]
+    fn the_denial_sentence_names_the_capability_and_the_fallback() {
+        // The mock's dials fail as plain host errors (it only accepts wss://),
+        // so the denied branch of `start` is covered from `bridge`'s side; this
+        // pins the sentence the user reads instead.
+        let _host = MockHost::install();
+        let text = denied_text("net:127.0.0.1");
+        assert!(text.contains("net:127.0.0.1"), "{text}");
+        assert!(
+            text.contains("Log to SQL"),
+            "the permission-free fallback is named: {text}"
         );
     }
 }

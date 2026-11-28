@@ -22,10 +22,13 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     // The reference's empty state is a second guidance line under
     // `log.panel.empty` (lane A); the panel shows both in the muted status ink.
+    // This build cannot read a run console (a platform limit), so the wording
+    // names the two channels that really exist: the agent's enhanced capture
+    // (permission-gated) and manual pasting (permission-free).
     (
         "view.logs.empty.hint",
-        "SQL is captured automatically once a console with SQL logging runs (Capture). You can also paste logs manually in the \"Log to SQL\" tab; for real parameters and exact timings, enable Enhanced Capture in Settings.",
-        "点「捕捉」并运行带 SQL 日志的控制台后自动捕获；也可从「日志转 SQL」页签手动粘贴还原；想要参数实参与精确耗时，可在设置页开启增强捕获。",
+        "Click Capture and start your application: enhanced capture connects automatically while the permission is granted. Without it, paste console logs into the \"Log to SQL\" tab — that restores SQL without any permission. For real parameters and exact timings, enable Enhanced Capture in Settings.",
+        "点「捕捉」并启动应用，已授权限时增强捕获会自动接入；未授予权限或不使用 agent 时，直接把控制台日志粘进「日志转 SQL」页签即可还原（无需任何权限）。想要参数实参与精确耗时，可在设置页开启增强捕获。",
     ),
     ("view.logs.paused", "Live refresh paused", "实时刷新已暂停"),
     ("view.logs.category.normal", "Normal", "普通"),
@@ -1178,6 +1181,13 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "capture.start.connected",
         "Connected to the target application (port {port})",
         "已接入目标应用（端口 {port}）",
+    ),
+    // A dial the host refused for a missing capability: waiting cannot fix it,
+    // so the message names the capability and the fallback that still works.
+    (
+        "capture.start.denied",
+        "Enhanced capture is unavailable: the {capability} permission was not granted. Grant it when installing the plugin, or paste console logs into the \"Log to SQL\" tab to restore them without any permission.",
+        "增强捕获不可用：未授予 {capability} 权限。可在安装插件时补授，或直接把控制台日志粘进「日志转 SQL」页签还原（无需任何权限）。",
     ),
     // Stopping while nothing is attached but the plugin is still waiting: the
     // generic "no WebSocket is open" reads like a mistake, because the user did
