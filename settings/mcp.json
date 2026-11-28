@@ -2,24 +2,24 @@
   "properties": {
     "mcp.enabled": {
       "type": "boolean",
-      "title": "启用 MCP 工具",
+      "title": "启用 SQL Visualizer MCP 工具",
       "group": "MCP",
       "default": true,
       "description": "关闭后插件的 sqlv_* 工具对 AI agent 全部不可见。本仓尚未读取该值。"
+    },
+    "mcp.mask": {
+      "type": "boolean",
+      "title": "MCP 输出脱敏（敏感字面量打码）",
+      "group": "MCP",
+      "default": false,
+      "description": "sqlv_render_logs 还原语句中的敏感字面量打码为 *** 后再交给 AI 上下文。默认关闭：脱敏会降低 AI 诊断价值。本仓尚未读取该值。"
     },
     "mcp.disabledTools": {
       "type": "string",
       "title": "禁用的 MCP 工具",
       "group": "MCP",
       "default": "",
-      "description": "逗号分隔的工具名清单，列出的工具不暴露。可用工具：sqlv_render_sql、sqlv_render_logs、sqlv_check_sql、sqlv_perf_advice、sqlv_crud_sql、sqlv_rollback_plan、sqlv_reverse_sql、sqlv_mapper_check、sqlv_history_search、sqlv_schema_context、sqlv_explain、sqlv_index_stats（本仓共 12 个）。本仓尚未读取该值。"
-    },
-    "mcp.mask": {
-      "type": "boolean",
-      "title": "MCP 输出脱敏",
-      "group": "MCP",
-      "default": false,
-      "description": "对 sqlv_render_logs 还原的语句打码。本仓尚未读取该值。"
+      "description": "逗号分隔的工具名清单，列出的工具不暴露（原版为逐工具复选框＋全部启用/全部禁用按钮，平台 schema 没有复选清单控件，改为一个清单串）。可用工具：sqlv_render_sql、sqlv_render_logs、sqlv_check_sql、sqlv_perf_advice、sqlv_crud_sql、sqlv_rollback_plan、sqlv_reverse_sql、sqlv_mapper_check、sqlv_history_search、sqlv_schema_context、sqlv_explain、sqlv_index_stats（本仓共 12 个）。本仓尚未读取该值。"
     }
   }
 }

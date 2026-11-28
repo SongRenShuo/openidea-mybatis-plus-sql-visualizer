@@ -1278,10 +1278,18 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     // separated string. Nothing in this port reads the three keys yet.
     SettingDef {
         key: "mcp.enabled",
-        title: "启用 MCP 工具",
+        title: "启用 SQL Visualizer MCP 工具",
         group: "MCP",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "mcp.mask",
+        title: "MCP 输出脱敏（敏感字面量打码）",
+        group: "MCP",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
         needs_restart: false,
     },
     SettingDef {
@@ -1290,14 +1298,6 @@ pub static DEFINITIONS: [SettingDef; 145] = [
         group: "MCP",
         kind: Kind::String,
         default: DefaultValue::Str(""),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "mcp.mask",
-        title: "MCP 输出脱敏",
-        group: "MCP",
-        kind: Kind::Bool,
-        default: DefaultValue::Bool(false),
         needs_restart: false,
     },
     // About page, L-SettingsParity ----------------------------------------
