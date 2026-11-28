@@ -1032,21 +1032,13 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ("view.logs.community.title", "Community", "微信交流"),
     // The community dialog's two QR cards, the reference CommunityDialog's
     // own wording (its `log.community.*` bundle keys).
-    (
-        "view.logs.community.author",
-        "Author's WeChat",
-        "作者微信",
-    ),
+    ("view.logs.community.author", "Author's WeChat", "作者微信"),
     (
         "view.logs.community.author_desc",
         "Scan to add the author and discuss using or developing the plugin. Mention \"SQL Visualizer\" in your friend request.",
         "扫码添加作者为朋友，欢迎交流插件使用与开发话题；加好友时请备注「SQL Visualizer」。",
     ),
-    (
-        "view.logs.community.group",
-        "Community Group",
-        "交流群",
-    ),
+    ("view.logs.community.group", "Community Group", "交流群"),
     (
         "view.logs.community.group_desc",
         "Scan to join the SQL Visualizer group. If the group QR code has expired, add the author's WeChat instead.",
