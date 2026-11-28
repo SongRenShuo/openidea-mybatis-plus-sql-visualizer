@@ -156,10 +156,59 @@ pub struct SettingDef {
 /// and `log.jdbcEnabled`.
 pub static DEFINITIONS: [SettingDef; 145] = [
     // Preview -------------------------------------------------------------
-    // Lane L48: where the preview opens. The dialog is the IntelliJ edition's
-    // `SqlPreviewDialog`; the tab is the fifth tab of the log panel, which the
-    // build shipped before API 1.18 existed. Read on every open, so a change
-    // applies to the next preview without a restart.
+    // The reference's preview rows in its page order; `preview.presentation`
+    // (lane L48) closes the group as this port's extra. The dialog is the
+    // IntelliJ edition's `SqlPreviewDialog`; the tab is the fifth tab of the
+    // log panel, which the build shipped before API 1.18 existed. Read on
+    // every open, so a change applies to the next preview without a restart.
+    SettingDef {
+        key: "preview.replaceParams",
+        title: "将 ? 占位符替换为实际参数值（可静态求值的变量）",
+        group: "Preview",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.emptyParamFill",
+        title: "空参数填充策略",
+        group: "Preview",
+        kind: Kind::Enum(&["placeholder", "null", "empty_string"]),
+        default: DefaultValue::Str("placeholder"),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.verticalPairAnnotation",
+        title: "竖向排列时值行尾显示列名标注（-- 列名 配对注释）",
+        group: "Preview",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.autoFoldEnabled",
+        title: "SQL 预览字段较多时自动折叠",
+        group: "Preview",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.autoFoldThreshold",
+        title: "自动折叠字段数阈值",
+        group: "Preview",
+        kind: Kind::Integer,
+        default: DefaultValue::Int(10),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.literalParamRecovery",
+        title: "日志 SQL 无 ? 占位符时，把字符串字面量识别为可编辑参数",
+        group: "Preview",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
     SettingDef {
         key: "preview.presentation",
         title: "预览打开位置",
@@ -169,25 +218,20 @@ pub static DEFINITIONS: [SettingDef; 145] = [
         needs_restart: false,
     },
     // MyBatis-Plus interceptors (C14) ---------------------------------------
-    // The reference derives "is there a logic-delete column" from the entity
-    // (`@TableLogic`). This build has no entity at preview time, so the column
-    // is a setting and every switch starts off: a simulation that cannot know
-    // whether the project uses the interceptor must not rewrite SQL by
-    // default. Read on every render, so a change applies to the next preview.
+    // The reference's interceptor rows in its page order; this port's extras
+    // (the logic-delete column, the page values, the preview-time table
+    // prefix) follow. The reference derives "is there a logic-delete column"
+    // from the entity (`@TableLogic`). This build has no entity at preview
+    // time, so the column is a setting and every switch starts off: a
+    // simulation that cannot know whether the project uses the interceptor
+    // must not rewrite SQL by default. Read on every render, so a change
+    // applies to the next preview.
     SettingDef {
         key: "preview.injectLogicDelete",
-        title: "模拟逻辑删除拦截器",
+        title: "逻辑删除实体查询/删除自动追加 `AND deleted = 0`",
         group: "MyBatis Plus",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.logicDeleteColumn",
-        title: "逻辑删除列名",
-        group: "MyBatis Plus",
-        kind: Kind::String,
-        default: DefaultValue::Str("deleted"),
         needs_restart: false,
     },
     SettingDef {
@@ -200,7 +244,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "preview.injectTenantLine",
-        title: "模拟多租户拦截器",
+        title: "多租户实体查询/更新/删除自动追加 `AND tenant_id = ?`",
         group: "MyBatis Plus",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
@@ -223,11 +267,51 @@ pub static DEFINITIONS: [SettingDef; 145] = [
         needs_restart: false,
     },
     SettingDef {
-        key: "preview.paginationSim",
-        title: "模拟分页拦截器",
+        key: "preview.injectTenantOnInsert",
+        title: "INSERT 时追加租户列（需同时开启租户注入）",
+        group: "MyBatis Plus",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.dataPermissionHint",
+        title: "显示 DataPermissionInterceptor 运行时差异提示",
         group: "MyBatis Plus",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.dataPermissionCondition",
+        title: "数据权限模拟条件",
+        group: "MyBatis Plus",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.paginationSim",
+        title: "模拟分页拦截器（COUNT 查询预览）",
+        group: "MyBatis Plus",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.paginationCount",
+        title: "附分页 COUNT 查询预览",
+        group: "MyBatis Plus",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.logicDeleteColumn",
+        title: "逻辑删除列名",
+        group: "MyBatis Plus",
+        kind: Kind::String,
+        default: DefaultValue::Str("deleted"),
         needs_restart: false,
     },
     SettingDef {
@@ -265,7 +349,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "dialect.default",
-        title: "默认方言",
+        title: "数据库方言",
         group: "Dialect",
         kind: Kind::Enum(DIALECTS),
         default: DefaultValue::Str("MySQL"),
@@ -303,92 +387,12 @@ pub static DEFINITIONS: [SettingDef; 145] = [
         default: DefaultValue::Str("auto"),
         needs_restart: false,
     },
-    // SQL Preview page, L-SettingsParity ----------------------------------
-    // Reference parity for the preview panel. `preview.injectTenantOnInsert`,
-    // `preview.dataPermissionHint/Condition`, `preview.paginationCount`,
-    // `preview.jdbcPreview`, the EXPLAIN switches, the execution timeout and the
-    // embedded-column naming are stored, not wired: this build's Rust preview
-    // has no consumer for them yet, and the panel description says so.
-    SettingDef {
-        key: "preview.replaceParams",
-        title: "替换 ? 占位符",
-        group: "Preview",
-        kind: Kind::Bool,
-        default: DefaultValue::Bool(true),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.verticalPairAnnotation",
-        title: "竖向排列值行列名标注",
-        group: "Preview",
-        kind: Kind::Bool,
-        default: DefaultValue::Bool(true),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.autoFoldEnabled",
-        title: "SQL 预览字段较多时自动折叠",
-        group: "Preview",
-        kind: Kind::Bool,
-        default: DefaultValue::Bool(false),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.autoFoldThreshold",
-        title: "自动折叠字段数阈值",
-        group: "Preview",
-        kind: Kind::Integer,
-        default: DefaultValue::Int(10),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.emptyParamFill",
-        title: "空参数填充策略",
-        group: "Preview",
-        kind: Kind::Enum(&["placeholder", "null", "empty_string"]),
-        default: DefaultValue::Str("placeholder"),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.literalParamRecovery",
-        title: "零占位符字面量参数恢复",
-        group: "Preview",
-        kind: Kind::Bool,
-        default: DefaultValue::Bool(true),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.injectTenantOnInsert",
-        title: "INSERT 时追加租户列",
-        group: "MyBatis Plus",
-        kind: Kind::Bool,
-        default: DefaultValue::Bool(true),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.dataPermissionHint",
-        title: "显示 DataPermissionInterceptor 运行时差异提示",
-        group: "MyBatis Plus",
-        kind: Kind::Bool,
-        default: DefaultValue::Bool(false),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.dataPermissionCondition",
-        title: "数据权限模拟条件",
-        group: "MyBatis Plus",
-        kind: Kind::String,
-        default: DefaultValue::Str(""),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.paginationCount",
-        title: "附分页 COUNT 查询预览",
-        group: "MyBatis Plus",
-        kind: Kind::Bool,
-        default: DefaultValue::Bool(true),
-        needs_restart: false,
-    },
+    // Advanced group of the SQL Preview page: the reference's last four rows
+    // (JdbcTemplate preview, the EXPLAIN switches, the execution timeout).
+    // The EXPLAIN switches and the timeout are stored, not wired: this build's
+    // Rust preview has no consumer for them yet, and the panel description
+    // says so. `preview.embeddedColumnNaming` moved to the Table Name Mapping
+    // page, where the reference puts it.
     SettingDef {
         key: "preview.jdbcPreview",
         title: "启用 JdbcTemplate SQL 字符串预览",
@@ -399,7 +403,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "preview.explainStructured",
-        title: "预览面板内结构化渲染 EXPLAIN",
+        title: "预览面板内结构化渲染 EXPLAIN（默认关闭：走原生控制台）",
         group: "Advanced",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
@@ -407,7 +411,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "preview.explainRetention",
-        title: "跨会话保留原始 EXPLAIN 计划",
+        title: "跨会话保留原始 EXPLAIN 计划（默认关闭）",
         group: "Advanced",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
@@ -415,25 +419,17 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "preview.executionTimeoutSeconds",
-        title: "执行超时（秒，0 = 不限）",
+        title: "执行超时（秒，0=不限）",
         group: "Advanced",
         kind: Kind::Integer,
         default: DefaultValue::Int(30),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "preview.embeddedColumnNaming",
-        title: "嵌入列命名",
-        group: "Advanced",
-        kind: Kind::Enum(&["auto", "none", "component_path"]),
-        default: DefaultValue::Str("auto"),
         needs_restart: false,
     },
     // Code generation group of the SQL Preview page. The port has no SQL → Java
     // command, so these three are stored, not wired.
     SettingDef {
         key: "codegen.reverseWrapperFormat",
-        title: "SQL → Java 默认 Wrapper 形态",
+        title: "SQL 转代码默认 Wrapper 形态",
         group: "Code generation",
         kind: Kind::Enum(&["auto", "query", "lambda", "wrappers", "mpj_lambda"]),
         default: DefaultValue::Str("auto"),
@@ -456,12 +452,22 @@ pub static DEFINITIONS: [SettingDef; 145] = [
         needs_restart: false,
     },
     // Table Name Mapping page, L-SettingsParity ---------------------------
-    // Entity table-name inference in this port is fixed to camel → snake and the
-    // preview only reads `preview.tablePrefix`; every key below is stored, not
-    // wired (the panel description says so).
+    // The reference's eight rows in its page order. Entity table-name inference
+    // in this port is fixed to camel → snake and the preview only reads
+    // `preview.tablePrefix`; every key below is stored, not wired (the panel
+    // description says so). `preview.embeddedColumnNaming` lives here, where
+    // the reference puts it (it used to sit in this page's Advanced group).
+    SettingDef {
+        key: "table.prefix",
+        title: "添加表前缀",
+        group: "Table Mapping",
+        kind: Kind::String,
+        default: DefaultValue::Str(""),
+        needs_restart: false,
+    },
     SettingDef {
         key: "table.suffix",
-        title: "表名后缀",
+        title: "添加表后缀",
         group: "Table Mapping",
         kind: Kind::String,
         default: DefaultValue::Str(""),
@@ -505,6 +511,14 @@ pub static DEFINITIONS: [SettingDef; 145] = [
         group: "Table Mapping",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "preview.embeddedColumnNaming",
+        title: "嵌入列命名",
+        group: "Table Mapping",
+        kind: Kind::Enum(&["auto", "none", "component_path"]),
+        default: DefaultValue::Str("auto"),
         needs_restart: false,
     },
     // SQL Log page, L-SettingsParity ---------------------------------------
@@ -946,7 +960,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "render.formatSql",
-        title: "格式化输出",
+        title: "SQL 格式化输出（多行缩进；关闭则压缩）",
         group: "Preview",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -1254,14 +1268,6 @@ pub static DEFINITIONS: [SettingDef; 145] = [
         key: "shortcuts.sample",
         title: "抽样选中表",
         group: "Shortcuts",
-        kind: Kind::String,
-        default: DefaultValue::Str(""),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "table.prefix",
-        title: "表名前缀",
-        group: "Table Mapping",
         kind: Kind::String,
         default: DefaultValue::Str(""),
         needs_restart: false,

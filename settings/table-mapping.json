@@ -2,38 +2,38 @@
   "properties": {
     "table.prefix": {
       "type": "string",
-      "title": "表名前缀",
+      "title": "添加表前缀",
       "group": "Table Mapping",
       "default": "",
-      "description": "统一加在推断表名前，如 sys_ + device_info。仅存储，尚未接线：本仓预览只读取 MyBatis Plus 组的预览表前缀。"
+      "description": "加在所有表名前（@TableName 显式表名同样生效）；单值。仅存储，尚未接线：本仓预览只读取 MyBatis Plus 组的预览表前缀。"
     },
     "table.suffix": {
       "type": "string",
-      "title": "表名后缀",
+      "title": "添加表后缀",
       "group": "Table Mapping",
       "default": "",
-      "description": "统一加在推断表名后，如 device_info + _log；分号分隔时按序拼接。仅存储，尚未接线。"
+      "description": "加在所有表名后（@TableName 显式表名同样生效）；单值。仅存储，尚未接线。"
     },
     "table.removePrefix": {
       "type": "string",
       "title": "移除表名前缀",
       "group": "Table Mapping",
       "default": "",
-      "description": "分号分隔，最终表名以哪个开头就移除哪个（首个匹配、区分大小写）。仅存储，尚未接线。"
+      "description": "最终表名以哪个开头就移除哪个（首个匹配，@TableName 显式表名同样生效）；多个用 ; 分隔。仅存储，尚未接线。"
     },
     "table.removeSuffix": {
       "type": "string",
       "title": "移除表名后缀",
       "group": "Table Mapping",
       "default": "",
-      "description": "分号分隔，最终表名以哪个结尾就移除哪个（首个匹配、区分大小写）。仅存储，尚未接线。"
+      "description": "最终表名以哪个结尾就移除哪个（首个匹配，@TableName 显式表名同样生效）；多个用 ; 分隔。仅存储，尚未接线。"
     },
     "table.ignoredFields": {
       "type": "string",
       "title": "忽略字段名",
       "group": "Table Mapping",
       "default": "",
-      "description": "分号分隔的 Java 字段名，不进 SELECT 展开与参数对照。仅存储，尚未接线。"
+      "description": "从 SQL 中排除的实体字段名（SELECT 展开/补全/参数对照均不含）；多个用 ; 分隔。仅存储，尚未接线。"
     },
     "table.inferenceStrategy": {
       "type": "string",
@@ -41,14 +41,22 @@
       "group": "Table Mapping",
       "enum": ["snake", "camel"],
       "default": "snake",
-      "description": "snake = 驼峰转下划线（对齐 MyBatis-Plus）；camel = 保留驼峰，仅首字母小写。仅存储，尚未接线：本仓实体表名推断固定为驼峰转下划线。"
+      "description": "无 @TableName 时实体类名→表名的推断方式（显式 @TableName 不受影响）。仅存储，尚未接线：本仓实体表名推断固定为驼峰转下划线。"
     },
     "table.columnCalibration": {
       "type": "boolean",
       "title": "按数据源校正列名",
       "group": "Table Mapping",
       "default": true,
-      "description": "实体字段名与库真实列名不一致时用真实列集合纠正。仅存储，尚未接线：本仓尚未实现该校正。"
+      "description": "实体字段名与库真实列名不一致时（如字段 orderID 而列为 order_id），用数据源的真实列集合纠正预览 SQL 的列名；只在能唯一确定是哪一列时改写。仅存储，尚未接线：本仓尚未实现该校正。"
+    },
+    "preview.embeddedColumnNaming": {
+      "type": "string",
+      "title": "嵌入列命名",
+      "group": "Table Mapping",
+      "enum": ["auto", "none", "component_path"],
+      "default": "auto",
+      "description": "@Embedded/@Embeddable 字段展平成列名的方式。auto = 跟随工程里的 Hibernate 命名配置（判不出按无前缀）；none = 无前缀（JPA 默认，qty.baseQty 对应 base_qty）；component_path = 组件路径前缀（qty.baseQty 对应 qty_base_qty）。仅存储，尚未接线：本仓尚未实现嵌入列展平。"
     }
   }
 }
