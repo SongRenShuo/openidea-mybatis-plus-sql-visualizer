@@ -140,7 +140,11 @@ pub struct SettingDef {
 ///   `log.shardingSphereEnabled`, `log.autoSaveEnabled/Path/FileNamePattern/
 ///   MaxFiles`, `log.stackMaxFrames` (no call-stack collection),
 ///   `log.sourceFrameSkipPrefixes`, `log.sourceFrameBizJarPrefixes`,
-///   `log.desensitize`.
+///   `log.desensitize`, plus the reference's capture-channel switches this
+///   port declares for parity — `log.autoInjectInterceptor` (no interceptor
+///   injection into project sources), `log.enhancedCapture` (the capture
+///   channel is driven by `capture-start` instead) and `log.displayMask`
+///   (no display/export masking yet).
 /// - MCP Tools: `mcp.enabled`, `mcp.disabledTools`, `mcp.mask`.
 /// - About: `about.updateChannel`, `about.buildNumber` (read-only) and
 ///   `about.cacheAction` (explanatory text only).
@@ -150,7 +154,7 @@ pub struct SettingDef {
 /// `log.mixedPrefix`, `log.filterKeywords`, `log.timePrefix`,
 /// `log.hibernateEnabled`, `log.hibernateSqlPrefix`, `log.hibernateParamPrefix`
 /// and `log.jdbcEnabled`.
-pub static DEFINITIONS: [SettingDef; 142] = [
+pub static DEFINITIONS: [SettingDef; 145] = [
     // Preview -------------------------------------------------------------
     // Lane L48: where the preview opens. The dialog is the IntelliJ edition's
     // `SqlPreviewDialog`; the tab is the fifth tab of the log panel, which the
@@ -510,10 +514,14 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     // `log.timePrefix`, the Hibernate prefixes and the Hibernate / JDBC
     // switches are read by `core::log` through `ParseOptions`; everything the
     // log panel or the auto-save chain owns is stored, not wired here and says
-    // so on the page.
+    // so on the page. Inside "MyBatis core" the reference's twenty rows come
+    // first and this port's extra parser keys follow; inside "Source capture"
+    // the three capture-channel switches the reference owns (interceptor
+    // injection, the enhanced-capture toggle, display masking) are declared
+    // with the same stored-not-wired boundary.
     SettingDef {
         key: "log.prefix",
-        title: "日志 SQL 前缀",
+        title: "SQL 前缀",
         group: "MyBatis core",
         kind: Kind::String,
         default: DefaultValue::Str("Preparing:"),
@@ -521,7 +529,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.paramPrefix",
-        title: "日志参数前缀",
+        title: "参数前缀",
         group: "MyBatis core",
         kind: Kind::String,
         default: DefaultValue::Str("Parameters:"),
@@ -529,7 +537,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.mixedPrefix",
-        title: "混合前缀匹配",
+        title: "启用混合前缀",
         group: "MyBatis core",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -545,7 +553,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.autoOpenOnCapture",
-        title: "发现 SQL 自动打开窗口",
+        title: "发现 SQL 时自动打开日志窗口",
         group: "MyBatis core",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -569,7 +577,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.timestampEnabled",
-        title: "时间戳显示",
+        title: "列表显示捕获时间戳",
         group: "MyBatis core",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -593,7 +601,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.formatRestored",
-        title: "日志还原 SQL 时格式化",
+        title: "预览时格式化还原 SQL",
         group: "MyBatis core",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -657,7 +665,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.showMethodName",
-        title: "来源位置显示类名#方法名",
+        title: "在来源位置后显示类名与方法名（类名#方法名）",
         group: "MyBatis core",
         kind: Kind::Bool,
         default: DefaultValue::Bool(false),
@@ -737,7 +745,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "logs.crud.style",
-        title: "CRUD 颜色标记形态",
+        title: "标记样式",
         group: "CRUD colors",
         kind: Kind::Enum(&["bar", "background", "off"]),
         default: DefaultValue::Str("bar"),
@@ -745,7 +753,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "logs.crud.select",
-        title: "SELECT 颜色（#RRGGBB）",
+        title: "SELECT 颜色",
         group: "CRUD colors",
         kind: Kind::String,
         default: DefaultValue::Str("#4A86E8"),
@@ -753,7 +761,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "logs.crud.insert",
-        title: "INSERT 颜色（#RRGGBB）",
+        title: "INSERT 颜色",
         group: "CRUD colors",
         kind: Kind::String,
         default: DefaultValue::Str("#4CAF50"),
@@ -761,7 +769,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "logs.crud.update",
-        title: "UPDATE 颜色（#RRGGBB）",
+        title: "UPDATE 颜色",
         group: "CRUD colors",
         kind: Kind::String,
         default: DefaultValue::Str("#E67E22"),
@@ -769,7 +777,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "logs.crud.delete",
-        title: "DELETE 颜色（#RRGGBB）",
+        title: "DELETE 颜色",
         group: "CRUD colors",
         kind: Kind::String,
         default: DefaultValue::Str("#D32F2F"),
@@ -777,7 +785,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.hibernateEnabled",
-        title: "捕获 Hibernate / JPA 日志",
+        title: "启用 Hibernate/JPA 日志捕获",
         group: "ORM capture",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -785,7 +793,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.hibernateSqlPrefix",
-        title: "Hibernate SQL 行前缀",
+        title: "Hibernate SQL 前缀",
         group: "ORM capture",
         kind: Kind::String,
         default: DefaultValue::Str("Hibernate:"),
@@ -793,7 +801,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.hibernateParamPrefix",
-        title: "Hibernate 参数行前缀",
+        title: "Hibernate 参数前缀",
         group: "ORM capture",
         kind: Kind::String,
         default: DefaultValue::Str("binding parameter"),
@@ -801,7 +809,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.jdbcEnabled",
-        title: "捕获 Spring JdbcTemplate 日志",
+        title: "启用 Spring JdbcTemplate 日志捕获",
         group: "ORM capture",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -809,7 +817,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.shardingSphereEnabled",
-        title: "捕获 ShardingSphere 双段日志",
+        title: "启用 ShardingSphere 日志捕获",
         group: "ORM capture",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -848,8 +856,40 @@ pub static DEFINITIONS: [SettingDef; 142] = [
         needs_restart: false,
     },
     SettingDef {
+        key: "log.autoInjectInterceptor",
+        title: "自动注入源码捕获拦截器（推荐使用增强捕获）",
+        group: "Source capture",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "log.enhancedCapture",
+        title: "增强捕获（agent 字节码通道，失败自动回落）",
+        group: "Source capture",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "log.desensitize",
+        title: "采集时脱敏（对疑似敏感形态打码）",
+        group: "Source capture",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
+        key: "log.displayMask",
+        title: "展示与导出脱敏（敏感字面量打码）",
+        group: "Source capture",
+        kind: Kind::Bool,
+        default: DefaultValue::Bool(false),
+        needs_restart: false,
+    },
+    SettingDef {
         key: "log.stackMaxFrames",
-        title: "调用栈快照帧数",
+        title: "调用栈快照帧数（12~64）",
         group: "Source capture",
         kind: Kind::Integer,
         default: DefaultValue::Int(24),
@@ -857,7 +897,7 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.sourceFrameSkipPrefixes",
-        title: "源码捕获帧过滤前缀",
+        title: "源码捕获帧过滤前缀（一行一个）",
         group: "Source capture",
         kind: Kind::String,
         default: DefaultValue::Str(""),
@@ -865,18 +905,10 @@ pub static DEFINITIONS: [SettingDef; 142] = [
     },
     SettingDef {
         key: "log.sourceFrameBizJarPrefixes",
-        title: "JAR 业务帧包名前缀",
+        title: "JAR 业务帧包名前缀（一行一个）",
         group: "Source capture",
         kind: Kind::String,
         default: DefaultValue::Str(""),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "log.desensitize",
-        title: "采集时脱敏",
-        group: "Source capture",
-        kind: Kind::Bool,
-        default: DefaultValue::Bool(false),
         needs_restart: false,
     },
     // Rendering -----------------------------------------------------------

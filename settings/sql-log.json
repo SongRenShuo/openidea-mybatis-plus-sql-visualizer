@@ -2,21 +2,21 @@
   "properties": {
     "log.prefix": {
       "type": "string",
-      "title": "日志 SQL 前缀",
+      "title": "SQL 前缀",
       "group": "MyBatis core",
       "default": "Preparing:",
       "description": "控制台里定位 SQL 行的前缀关键字。"
     },
     "log.paramPrefix": {
       "type": "string",
-      "title": "日志参数前缀",
+      "title": "参数前缀",
       "group": "MyBatis core",
       "default": "Parameters:",
       "description": "控制台里定位参数行的前缀关键字。"
     },
     "log.mixedPrefix": {
       "type": "boolean",
-      "title": "混合前缀匹配",
+      "title": "启用混合前缀",
       "group": "MyBatis core",
       "default": true,
       "description": "开 = 容忍前缀前还有日志头（如 ==> Preparing:）；关 = 只认行首精确前缀。"
@@ -30,7 +30,7 @@
     },
     "log.autoOpenOnCapture": {
       "type": "boolean",
-      "title": "发现 SQL 自动打开窗口",
+      "title": "发现 SQL 时自动打开日志窗口",
       "group": "MyBatis core",
       "default": true,
       "description": "本仓日志面板尚未读取该值。"
@@ -40,7 +40,7 @@
       "title": "自动展开时让位给正在使用的面板",
       "group": "MyBatis core",
       "default": true,
-      "description": "同侧栏已有工具窗口时不展开，避免顶掉用户正在用的面板。本仓日志面板尚未读取该值。"
+      "description": "同一侧栏已有其他工具窗口在显示时不展开，避免顶掉用户正在用的面板。本仓日志面板尚未读取该值。"
     },
     "log.stopOnWindowClose": {
       "type": "boolean",
@@ -51,7 +51,7 @@
     },
     "log.timestampEnabled": {
       "type": "boolean",
-      "title": "时间戳显示",
+      "title": "列表显示捕获时间戳",
       "group": "MyBatis core",
       "default": true,
       "description": "本仓日志面板尚未读取该值。"
@@ -69,11 +69,11 @@
       "group": "MyBatis core",
       "enum": ["log", "capture"],
       "default": "log",
-      "description": "log = 日志行解析出的时间，capture = 插件捕获时刻。本仓日志面板尚未读取该值。"
+      "description": "log = 日志行解析出的原始时间（未解析到时回退捕获时间）；capture = 插件捕获到该语句的时刻。本仓日志面板尚未读取该值。"
     },
     "log.formatRestored": {
       "type": "boolean",
-      "title": "日志还原 SQL 时格式化",
+      "title": "预览时格式化还原 SQL",
       "group": "MyBatis core",
       "default": true,
       "description": "本仓日志面板尚未读取该值。"
@@ -129,7 +129,7 @@
     },
     "log.showMethodName": {
       "type": "boolean",
-      "title": "来源位置显示类名#方法名",
+      "title": "在来源位置后显示类名与方法名（类名#方法名）",
       "group": "MyBatis core",
       "default": false,
       "description": "本仓日志面板尚未读取该值。"
@@ -195,71 +195,71 @@
       "group": "List display",
       "enum": ["single", "keyword_wrap", "formatted"],
       "default": "keyword_wrap",
-      "description": "宿主会把旧值 multi 归一为 formatted，未知值回落 keyword_wrap。"
+      "description": "同时对「SQL 日志」与「SQL 历史」两列表生效。宿主会把旧值 multi 归一为 formatted，未知值回落 keyword_wrap。"
     },
     "logs.crud.style": {
       "type": "string",
-      "title": "CRUD 颜色标记形态",
+      "title": "标记样式",
       "group": "CRUD colors",
       "enum": ["bar", "background", "off"],
       "default": "bar",
-      "description": "bar = 左侧色条；background = 整行淡背景；off = 关闭。本仓日志面板尚未读取该值。"
+      "description": "bar = 左侧色条；background = 整行淡背景；off = 关闭。本仓日志面板尚未读取该值；原版页内的「恢复默认颜色」按钮没有对应控件类型，默认色值见各颜色项。"
     },
     "logs.crud.select": {
       "type": "string",
-      "title": "SELECT 颜色（#RRGGBB）",
+      "title": "SELECT 颜色",
       "group": "CRUD colors",
       "default": "#4A86E8",
       "description": "颜色值使用 #RRGGBB。本仓日志面板尚未读取该值。"
     },
     "logs.crud.insert": {
       "type": "string",
-      "title": "INSERT 颜色（#RRGGBB）",
+      "title": "INSERT 颜色",
       "group": "CRUD colors",
       "default": "#4CAF50",
       "description": "颜色值使用 #RRGGBB。本仓日志面板尚未读取该值。"
     },
     "logs.crud.update": {
       "type": "string",
-      "title": "UPDATE 颜色（#RRGGBB）",
+      "title": "UPDATE 颜色",
       "group": "CRUD colors",
       "default": "#E67E22",
       "description": "颜色值使用 #RRGGBB。本仓日志面板尚未读取该值。"
     },
     "logs.crud.delete": {
       "type": "string",
-      "title": "DELETE 颜色（#RRGGBB）",
+      "title": "DELETE 颜色",
       "group": "CRUD colors",
       "default": "#D32F2F",
       "description": "颜色值使用 #RRGGBB。本仓日志面板尚未读取该值。"
     },
     "log.hibernateEnabled": {
       "type": "boolean",
-      "title": "捕获 Hibernate / JPA 日志",
+      "title": "启用 Hibernate/JPA 日志捕获",
       "group": "ORM capture",
       "default": true
     },
     "log.hibernateSqlPrefix": {
       "type": "string",
-      "title": "Hibernate SQL 行前缀",
+      "title": "Hibernate SQL 前缀",
       "group": "ORM capture",
       "default": "Hibernate:"
     },
     "log.hibernateParamPrefix": {
       "type": "string",
-      "title": "Hibernate 参数行前缀",
+      "title": "Hibernate 参数前缀",
       "group": "ORM capture",
       "default": "binding parameter"
     },
     "log.jdbcEnabled": {
       "type": "boolean",
-      "title": "捕获 Spring JdbcTemplate 日志",
+      "title": "启用 Spring JdbcTemplate 日志捕获",
       "group": "ORM capture",
       "default": true
     },
     "log.shardingSphereEnabled": {
       "type": "boolean",
-      "title": "捕获 ShardingSphere 双段日志",
+      "title": "启用 ShardingSphere 日志捕获",
       "group": "ORM capture",
       "default": true,
       "description": "仅存储，尚未接线：本仓尚未实现 ShardingSphere 双段日志解析。"
@@ -293,9 +293,37 @@
       "minimum": 0,
       "description": "超过该数量自动清理最旧文件，0 = 全量保留。仅存储，尚未接线。"
     },
+    "log.autoInjectInterceptor": {
+      "type": "boolean",
+      "title": "自动注入源码捕获拦截器（推荐使用增强捕获）",
+      "group": "Source capture",
+      "default": false,
+      "description": "仅存储，尚未接线：本仓不改写工程源码，没有拦截器注入链；来源位置由导航索引与日志解析提供。"
+    },
+    "log.enhancedCapture": {
+      "type": "boolean",
+      "title": "增强捕获（agent 字节码通道，失败自动回落）",
+      "group": "Source capture",
+      "default": false,
+      "description": "仅存储，尚未接线：本仓捕获通道由 capture-start 命令直接控制（Java agent WebSocket 与控制台日志文件双通道），未读取该开关。"
+    },
+    "log.desensitize": {
+      "type": "boolean",
+      "title": "采集时脱敏（对疑似敏感形态打码）",
+      "group": "Source capture",
+      "default": false,
+      "description": "仅存储，尚未接线：本仓尚未实现参数脱敏。"
+    },
+    "log.displayMask": {
+      "type": "boolean",
+      "title": "展示与导出脱敏（敏感字面量打码）",
+      "group": "Source capture",
+      "default": false,
+      "description": "仅存储，尚未接线：本仓日志面板尚未实现展示/导出链脱敏。"
+    },
     "log.stackMaxFrames": {
       "type": "integer",
-      "title": "调用栈快照帧数",
+      "title": "调用栈快照帧数（12~64）",
       "group": "Source capture",
       "default": 24,
       "minimum": 12,
@@ -304,24 +332,17 @@
     },
     "log.sourceFrameSkipPrefixes": {
       "type": "string",
-      "title": "源码捕获帧过滤前缀",
+      "title": "源码捕获帧过滤前缀（一行一个）",
       "group": "Source capture",
       "default": "",
       "description": "一行一个包名前缀，如 com.corp.engine.。仅存储，尚未接线。"
     },
     "log.sourceFrameBizJarPrefixes": {
       "type": "string",
-      "title": "JAR 业务帧包名前缀",
+      "title": "JAR 业务帧包名前缀（一行一个）",
       "group": "Source capture",
       "default": "",
       "description": "一行一个包名前缀；登记后依赖 JAR 里的业务帧按业务帧对待。仅存储，尚未接线。"
-    },
-    "log.desensitize": {
-      "type": "boolean",
-      "title": "采集时脱敏",
-      "group": "Source capture",
-      "default": false,
-      "description": "仅存储，尚未接线：本仓尚未实现参数脱敏。"
     }
   }
 }
