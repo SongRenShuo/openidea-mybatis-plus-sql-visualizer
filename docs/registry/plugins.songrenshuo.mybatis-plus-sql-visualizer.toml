@@ -6,4 +6,4 @@ suggest = ["pom.xml"]
 [[versions]]
 version = "0.1.0"
 package = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/releases/download/v0.1.0/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin"
-sha256 = "6c60ba903aba804753989b1a3ef7db9266dce36271b04e04a8e8f59569b6dd88"
+sha256 = "158e8d4737c48b95aa90761dc82fa2c05a41158ac3453737f836835a6ab94ab2"
