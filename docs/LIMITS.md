@@ -70,11 +70,16 @@
    一律主表别名 `t`（`columnPrefix`），SELECT 列按列自己的实体类查不到回落主表，
    `selectAll(Class)` 永远展开主表列（原版 `parseSelectAll` 语义）。子表 MConsumer 形态（`leftJoin(C, t -> t.setAlias("tt").selectAll().ge(…), left, right)`）
    渲染为 `LEFT JOIN (SELECT tt.c1, … FROM sub tt WHERE …) tt ON tt.left = 主.right`，
-   子别名取 lambda 内 `setAlias`、无则类名首字母小写。仍未做（`unresolved`，不出 SQL）：
-   `selectFunc`/`selectSub`/`selectCollection`/`selectAssociation`/`from(子查询)`/
-   `around`/`join("关键字")`/联表 UPDATE 与 DELETE；`exists` 的 lambda 子查询内含运行期
-   参数时整链 `unresolved`（参数顺序文本层排不准）。逐形态清单见
-   `docs/registration/L35a.md` §15。
+   子别名取 lambda 内 `setAlias`、无则类名首字母小写。联表更新与删除（`JoinWrappers.update(C)`
+   / `JoinWrappers.delete(C)`，原版 UpdateJoinConverter / DeleteJoinConverter 语义）渲染整条
+   `UPDATE 表 别名 [JOIN…] SET … WHERE …` / `DELETE t, t1 FROM 表 t …`：SET 全族
+   （set/setIfExists/setSql/setApply/setIncrBy/setDecrBy/setUpdateEntity*）、删除目标四形态
+   （delete(Class/String)/deleteAll()/缺省主别名）；方法引用 SET 列一律主表别名近似，
+   setUpdateEntity 的实体值运行期不可知 → 非主键全列 `?` 占位（`@TableId` 列排除）；
+   SET 条目解析失败剔除并 `partial`，全部失败 → `unresolved`（没有 SET 的 UPDATE 不是语句）。
+   `in`/`exists` lambda 子查询含运行期参数时参数按位置就地嵌入（树序即 SQL 序）；
+   子查询有丢条件等其它缺口仍 `unresolved`。仍未做（`unresolved`，不出 SQL）：
+   `join("关键字")` 自定义关键字；逐形态清单见 `docs/registration/L35a.md` §15。
 3. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
    `LambdaQueryWrapper` 文本→链由 `src/analyze` 解析（无 PSI 的类型推断），
    `unresolved` 时只给原因，不出 Java 代码。
