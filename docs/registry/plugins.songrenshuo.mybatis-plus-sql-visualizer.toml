@@ -1,0 +1,9 @@
+repository = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer"
+suggest = ["pom.xml"]
+
+# 版本发版后回填：sha256 由 scripts/release-smoke.sh 第 6 步输出，包附件挂
+# GitHub Release v<version>（songrenshuo.mybatis-plus-sql-visualizer-<version>.oiplugin）。
+[[versions]]
+version = "0.1.0"
+package = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/releases/download/v0.1.0/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin"
+sha256 = "（发版后回填）"
