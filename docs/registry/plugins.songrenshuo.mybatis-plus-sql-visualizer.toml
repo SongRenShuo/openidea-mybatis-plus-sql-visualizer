@@ -1,8 +1,10 @@
 repository = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer"
 suggest = ["pom.xml"]
 
-# 版本发版后回填：sha256 由 scripts/release-smoke.sh 第 6 步输出，包附件挂
-# GitHub Release <version>（songrenshuo.mybatis-plus-sql-visualizer-<version>.oiplugin）。
+# 版本发版后回填：sha256 取 CI 那一轮 release.yml 打印的值（本地不打包，
+# 见 .agents/skills/openidea-release-workflow 的单一构建者铁律）。包附件挂
+# GitHub Release <version>（songrenshuo.mybatis-plus-sql-visualizer-<version>.oiplugin），
+# Gitee 发行版挂同样的字节。
 # tag 即版本号原文，不带 `v` 前缀（2026-11-29 起，见 docs/规范/版本号规范-说明文档.md）。
 #
 # 2026-11-29：0.1.0 那条已按要求删除（连同其 tag 与 Release）。它是切换前
