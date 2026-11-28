@@ -44,6 +44,12 @@ jobs:
       # while the host rejects the whole package once it knows the key.
       - run: bash scripts/check-manifest-api.test.sh
       - run: bash scripts/check-manifest-api.sh
+      # The two version numbers (plugin.toml, Cargo.toml) must agree and stay on
+      # the YYYY.M.D date scheme. Nothing else checks this: the host only reads
+      # plugin.toml, so `openidea-plugin check` stays green with a stale version
+      # in the wasm, and the mismatch only surfaces in a bug report.
+      - run: bash scripts/check-version-format.test.sh
+      - run: bash scripts/check-version-format.sh
       # The panel's logic lives in web/*.js and in log-panel.html's inline
       # module script. A parse error there takes the whole tool window down —
       # no tab labels, no button handlers — while every cargo gate stays green,
