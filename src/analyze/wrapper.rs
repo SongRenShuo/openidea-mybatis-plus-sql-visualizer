@@ -227,6 +227,27 @@ pub struct WrapperChain {
     pub select: Vec<SelectColumn>,
     /// `select("…")` fragments, passed through verbatim.
     pub select_raw: Vec<String>,
+    /// `selectCollection` calls kept for the post-pass that builds their
+    /// sub-select joins: `(arguments, joins parsed so far)` — the position the
+    /// collection join takes in the FROM clause, in call order. The reference
+    /// processes collections after the whole chain is read (they reuse the ON
+    /// conditions of the same-child-class `leftJoin`, which may come later).
+    pub collection_calls: Vec<(Vec<String>, usize)>,
+    /// `from(sub-lambda)`'s rendered sub-select (T-M21-07): the FROM clause
+    /// declares `(SELECT … FROM table subAlias WHERE …) mainAlias` instead of
+    /// the bare table, the outer alias being the main table's alias. `None`
+    /// when the chain has no `from` call (or it refused to render).
+    pub from_sub: Option<String>,
+    /// `around(first, last)`'s first fragment (T-M21-09, the MPJ official
+    /// `Join.around`): rendered before `SELECT`, the way the reference's
+    /// `rawFirst` leads the statement.
+    pub around_first: Option<String>,
+    /// `around(first, last)`'s last fragment — or the template form's rendered
+    /// text: rendered after `ORDER BY`, before `LIMIT` (MP's LAST segment
+    /// position, which the reference's `rawAround` matches).
+    pub around_last: Option<String>,
+    /// Parameter sources the `around` last fragment contributed, in SQL order.
+    pub around_params: Vec<Value>,
     /// `GROUP BY` columns / fragments.
     pub group_by: Vec<String>,
     /// `having("…", args)` with `{i}` already replaced by the rendered values.
@@ -291,6 +312,10 @@ pub struct SelectColumn {
     pub as_name: Option<String>,
     /// `COUNT` / `SUM` / `MAX` / `MIN` / `AVG` — wrapped around the column.
     pub function: Option<&'static str>,
+    /// The column is a complete expression the renderer passes through verbatim
+    /// (`selectFunc`'s template result, `selectSub`'s sub-select) — no alias
+    /// prefix, no quoting, the reference's `rawExpr` channel.
+    pub raw_expr: bool,
 }
 
 /// The render result.
@@ -426,6 +451,26 @@ pub fn render_with_alias(
     disabled: &std::collections::BTreeSet<String>,
     alias: Option<&str>,
 ) -> WrapperOutput {
+    render_inner(text, columns, dialect, disabled, alias, false)
+}
+
+/// A `selectSub` lambda rendered as its own statement: method-reference values
+/// resolve as bare columns (`eq(RefundEntity::getOrderId, OrderEntity::getId)`
+/// → `order_id = id`), the way the reference's `QueryWrapperParser` treats a
+/// `ColumnArg` right side — there is no alias context inside a sub-select, so
+/// the column renders without one.
+fn render_sub_statement(text: &str, columns: &EntityColumns, dialect: &Dialect) -> WrapperOutput {
+    render_inner(text, columns, dialect, &Default::default(), None, true)
+}
+
+fn render_inner(
+    text: &str,
+    columns: &EntityColumns,
+    dialect: &Dialect,
+    disabled: &std::collections::BTreeSet<String>,
+    alias: Option<&str>,
+    sub_column_values: bool,
+) -> WrapperOutput {
     // MPJ recognition must come from the whole text, not from the call list: a
     // chain written `JoinWrappers.lambda(User.class)` names its factory in the
     // *call* (`lambda`), while `new MPJLambdaWrapper<User>()` names it in the
@@ -455,7 +500,9 @@ pub fn render_with_alias(
         mpj,
         main_alias: alias.unwrap_or("t").to_string(),
         join_aliases: Vec::new(),
+        join_classes: Vec::new(),
         on_mode: false,
+        sub_column_values,
         dialect,
     };
 
@@ -512,6 +559,13 @@ pub fn render_with_alias(
 
     chain.conditions = nodes;
 
+    // `selectCollection` sub-select joins: built after the whole chain is read,
+    // because each collection reuses the ON conditions of the same-child-class
+    // `leftJoin` — which the source may declare after the collection call.
+    if mpj && !chain.collection_calls.is_empty() {
+        apply_collections(&mut chain, &mut ctx);
+    }
+
     // Missing table is a hard stop: the statement can't be built.
     if chain.table.is_none() {
         ctx.unresolved = true;
@@ -552,6 +606,12 @@ pub fn render_with_alias(
         Value::Param(source) => Some(source.clone()),
         _ => None,
     }));
+    // The around fragment renders after HAVING and before LIMIT, so its
+    // parameters join the order there.
+    params.extend(chain.around_params.iter().filter_map(|value| match value {
+        Value::Param(source) => Some(source.clone()),
+        _ => None,
+    }));
     WrapperOutput {
         confidence,
         sql,
@@ -582,9 +642,18 @@ struct Ctx<'a> {
     /// Explicit join aliases the chain declared, `(class, alias)`, collected by
     /// the pre-scan so a condition before the join call still resolves.
     join_aliases: Vec<(String, String)>,
+    /// The entity class each parsed join belongs to, parallel to
+    /// `chain.joins` — `None` for raw fragments and collection joins. The
+    /// `selectCollection` post-pass matches a collection to the same-child-class
+    /// join it replaces through this list.
+    join_classes: Vec<Option<String>>,
     /// True while parsing an ON lambda: the second argument of a comparison is
     /// a column reference, not a value.
     on_mode: bool,
+    /// True inside a `selectSub` sub-statement: a method-reference value
+    /// resolves as a bare column (no alias — a sub-select has no alias
+    /// context), the reference's `ColumnArg` column-comparison semantics.
+    sub_column_values: bool,
     /// The dialect, for rendering `HAVING` fragments and their values at parse
     /// time (the fragment is baked once, in call order).
     dialect: &'a Dialect,
@@ -921,6 +990,23 @@ fn parse_calls(
             | "selectSum" | "selectMax" | "selectMin" | "selectAvg") => {
                 parse_select(name, &call.args, ctx, chain)
             }
+            "selectFunc" => parse_select_func(&call.args, ctx, chain),
+            "selectSub" if ctx.mpj => parse_select_sub(&call.args, ctx, chain),
+            // `selectCollection` builds its sub-select join after the whole chain
+            // is read (it reuses the same-child-class `leftJoin`'s ON conditions,
+            // which may be declared later), so the call is recorded and applied
+            // by `apply_collections`.
+            "selectCollection" if ctx.mpj => {
+                chain
+                    .collection_calls
+                    .push((call.args.clone(), chain.joins.len()));
+            }
+            // `selectAssociation` is a result-mapping marker only: the leftJoin
+            // already expresses the association and the reference emits no SQL
+            // for it (T-M7-04).
+            "selectAssociation" if ctx.mpj => {}
+            "from" if ctx.mpj => parse_from(&call.args, ctx, chain),
+            "around" if ctx.mpj => parse_around(&call.args, ctx, chain),
             "groupBy" => {
                 for arg in &call.args {
                     match resolve_column(arg, ctx) {
@@ -1049,6 +1135,7 @@ fn parse_join(name: &str, args: &[String], chain: &mut WrapperChain, ctx: &mut C
     // is rendered verbatim after the join keyword — the caller wrote the whole
     // clause, and nothing here can improve on it.
     if let Some(raw) = args.first().and_then(|a| string_literal(a)) {
+        ctx.join_classes.push(None);
         chain.joins.push(Join {
             kind,
             table: String::new(),
@@ -1150,6 +1237,7 @@ fn parse_join(name: &str, args: &[String], chain: &mut WrapperChain, ctx: &mut C
             chain.unsupported.push(name.to_string());
             return;
         };
+        ctx.join_classes.push(Some(class.clone()));
         chain.joins.push(Join {
             kind,
             table: String::new(),
@@ -1235,6 +1323,7 @@ fn parse_join(name: &str, args: &[String], chain: &mut WrapperChain, ctx: &mut C
         return;
     }
 
+    ctx.join_classes.push(Some(class.clone()));
     chain.joins.push(Join {
         kind,
         table: entity.table.clone(),
@@ -1345,6 +1434,7 @@ fn parse_select(name: &str, args: &[String], ctx: &mut Ctx, chain: &mut WrapperC
                     column,
                     as_name,
                     function: None,
+                    raw_expr: false,
                 });
             }
         }
@@ -1385,9 +1475,383 @@ fn parse_select(name: &str, args: &[String], ctx: &mut Ctx, chain: &mut WrapperC
                 column,
                 as_name: next_as(args, 1),
                 function: Some(keyword),
+                raw_expr: false,
             });
         }
     }
+}
+
+/// `selectFunc(template, func -> func.accept(col).values(v), alias)` → the
+/// template with every `%s` replaced by the accepted columns and every `{i}` by
+/// the bound values, rendered as one verbatim SELECT item (`CHAR_LENGTH(t.sex)
+/// AS name_len`). Mirrors the reference's `parseSelectFunc` (T-M7-03):
+///
+/// - `%s` columns take the main alias prefix (`columnPrefix`), whatever entity
+///   the receiver names — the same rule MPJ condition columns follow.
+/// - `{i}` values render literals as written, runtime expressions as `?`.
+/// - An enum first argument (`DefaultFuncEnum.SUM`) maps to the built-in
+///   function; an unknown enum drops the column silently, exactly as the
+///   reference does.
+/// - A template left with a `%s` after substitution (fewer accepted columns
+///   than placeholders) cannot render completely and is dropped.
+fn parse_select_func(args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
+    let (func_columns, func_values) = match args.get(1) {
+        Some(lambda) => extract_func_args(lambda, ctx),
+        None => (Vec::new(), Vec::new()),
+    };
+    let as_name = args.get(2).and_then(|arg| next_as_arg(arg));
+
+    // Enum form (`selectFunc(DefaultFuncEnum.SUM, col, alias)`): the first
+    // argument is a bare reference, not a string template.
+    if let Some(source) = args.first().filter(|arg| string_literal(arg).is_none()) {
+        let tail = source.trim().rsplit('.').next().unwrap_or(source.trim());
+        let Some(keyword) = enum_function(tail) else {
+            // The reference drops an unknown built-in silently; the statement
+            // loses the column, which `Partial` says out loud.
+            ctx.partial = true;
+            push_key(ctx, "wrapper.unsupported_method");
+            ctx.notes.push(format!(
+                "`selectFunc` function `{tail}` is not a built-in; the column is dropped"
+            ));
+            chain.unsupported.push("selectFunc".to_string());
+            return;
+        };
+        let Some(column) = func_columns.first() else {
+            ctx.partial = true;
+            push_key(ctx, "wrapper.unsupported_method");
+            ctx.notes
+                .push("`selectFunc` names no column to wrap; the column is dropped".to_string());
+            chain.unsupported.push("selectFunc".to_string());
+            return;
+        };
+        chain.select.push(SelectColumn {
+            alias: String::new(),
+            column: format!("{keyword}({column})"),
+            as_name,
+            function: None,
+            raw_expr: true,
+        });
+        return;
+    }
+
+    // Template form: `%s` for the columns, `{i}` for the bound values.
+    let Some(template) = args.first().and_then(|arg| string_literal(arg)) else {
+        ctx.partial = true;
+        push_key(ctx, "wrapper.unsupported_method");
+        ctx.notes
+            .push("`selectFunc` needs a template string or a built-in function".to_string());
+        chain.unsupported.push("selectFunc".to_string());
+        return;
+    };
+    let mut expr = template;
+    for column in &func_columns {
+        if !expr.contains("%s") {
+            break;
+        }
+        expr = expr.replacen("%s", column, 1);
+    }
+    for (index, value) in func_values.iter().enumerate() {
+        let rendered = match parse_value_in(value, ctx) {
+            Value::Param(source) => {
+                // A runtime value inside the SELECT list would splice a `?` into
+                // the middle of the statement's parameter order — the same
+                // boundary the sub-select renderer honors. Refuse rather than
+                // misalign the preview's parameter rows.
+                ctx.unresolved = true;
+                push_key(ctx, "wrapper.structural_method");
+                ctx.notes.push(format!(
+                    "`selectFunc` value `{source}` is a runtime expression; its `?` cannot be lined up with the statement's parameter order, so no SQL is emitted"
+                ));
+                ctx.partial = false;
+                chain.unsupported.push("selectFunc".to_string());
+                return;
+            }
+            value => render_value(&value, ctx.dialect),
+        };
+        expr = expr.replace(&format!("{{{index}}}"), &rendered);
+    }
+    if expr.contains("%s") {
+        // Fewer accepted columns than `%s` placeholders: the reference drops the
+        // column rather than emit a broken expression.
+        ctx.partial = true;
+        push_key(ctx, "wrapper.unsupported_method");
+        ctx.notes.push(
+            "`selectFunc` accepted fewer columns than the template's `%s` placeholders; the column is dropped"
+                .to_string(),
+        );
+        chain.unsupported.push("selectFunc".to_string());
+        return;
+    }
+    chain.select.push(SelectColumn {
+        alias: String::new(),
+        column: expr,
+        as_name,
+        function: None,
+        raw_expr: true,
+    });
+}
+
+/// A `selectFunc` third argument: a string literal is the alias itself, a
+/// `VO::getProperty` reference contributes the property name.
+fn next_as_arg(arg: &str) -> Option<String> {
+    if let Some(literal) = string_literal(arg) {
+        return Some(literal);
+    }
+    let (_, getter) = parse_field_ref(arg)?;
+    Some(field_from_getter(&getter))
+}
+
+/// MPJ built-in function enum name → SQL function name (the reference's
+/// `enumFunctionOf`); `None` for anything outside the built-ins.
+fn enum_function(name: &str) -> Option<&'static str> {
+    match name.trim().to_uppercase().as_str() {
+        "SUM" => Some("SUM"),
+        "COUNT" => Some("COUNT"),
+        "MAX" => Some("MAX"),
+        "MIN" => Some("MIN"),
+        "AVG" => Some("AVG"),
+        "LEN" => Some("LENGTH"),
+        "CONCAT" => Some("CONCAT"),
+        _ => None,
+    }
+}
+
+/// The columns and bound values a `selectFunc` consumer declares. Two shapes:
+/// the consumer lambda `c -> c.accept(UserDO::getSex).values(0)` — every
+/// `accept` argument resolves to its qualified column, every `values` argument
+/// is kept for the `{i}` substitution — and the enum form's bare column
+/// reference (`selectFunc(DefaultFuncEnum.COUNT, UserDO::getId, "cnt")`).
+fn extract_func_args(lambda: &str, ctx: &mut Ctx) -> (Vec<String>, Vec<String>) {
+    let body = strip_lambda_prefix(lambda);
+    let mut columns = Vec::new();
+    let mut values = Vec::new();
+    let calls = extract_calls(&body);
+    if calls.is_empty() {
+        // No consumer lambda: a bare field reference is the column itself.
+        if let Some(column) = resolve_column(&body, ctx) {
+            columns.push(column);
+        } else {
+            ctx.unresolved = true;
+            push_key(ctx, "wrapper.unknown_field");
+            ctx.notes.push(format!(
+                "cannot map `selectFunc` column `{body}` to a column"
+            ));
+            ctx.partial = false;
+        }
+        return (columns, values);
+    }
+    for call in calls {
+        match call.name.as_str() {
+            "accept" => {
+                let Some(raw) = call.args.first() else {
+                    continue;
+                };
+                match resolve_column(raw, ctx) {
+                    Some(column) => columns.push(column),
+                    None => {
+                        ctx.unresolved = true;
+                        push_key(ctx, "wrapper.unknown_field");
+                        ctx.notes.push(format!(
+                            "cannot map `selectFunc` column `{raw}` to a column"
+                        ));
+                        ctx.partial = false;
+                    }
+                }
+            }
+            "values" => values.extend(call.args.iter().cloned()),
+            _ => {}
+        }
+    }
+    (columns, values)
+}
+
+/// `selectSub(SubClass.class, sub -> sub.select(...).eq(...), alias)` →
+/// `(SELECT ... FROM sub_table WHERE ...) AS alias` — a sub-select column of the
+/// SELECT list (the reference's `parseSelectSub`, M15). The lambda renders as
+/// its own single-table statement against the sub entity's projection, bare
+/// columns: the reference parses it with `QueryWrapperParser(subTable)` and no
+/// alias prefix, and a correlated right side (`eq(RefundEntity::getOrderId,
+/// OrderEntity::getId)`) renders bare (`order_id = id`) — static analysis
+/// cannot tell the outer table apart, the reference's own test says so.
+///
+/// A runtime value inside the sub-select would splice a `?` into the middle of
+/// the statement's parameter order — the text alone cannot line the preview's
+/// parameter rows up — so the render refuses (documented boundary; the
+/// reference registers those params but its own ordering is unreliable).
+fn parse_select_sub(args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
+    let refuse = |ctx: &mut Ctx, chain: &mut WrapperChain, note: String| {
+        ctx.unresolved = true;
+        push_key(ctx, "wrapper.structural_method");
+        ctx.notes.push(note);
+        ctx.partial = false;
+        chain.unsupported.push("selectSub".to_string());
+    };
+    let Some(lambda) = args.get(1) else {
+        refuse(
+            ctx,
+            chain,
+            "`selectSub` needs a sub-query lambda".to_string(),
+        );
+        return;
+    };
+    let Some(alias) = args.get(2).and_then(|arg| next_as_arg(arg)) else {
+        // The reference silently drops the column when the alias is missing;
+        // the statement would then return one column fewer than the reader
+        // asked for, so this refuses instead.
+        refuse(
+            ctx,
+            chain,
+            "`selectSub` needs an alias argument to render the sub-select column".to_string(),
+        );
+        return;
+    };
+    let Some(class) = args.first().and_then(|arg| class_literal(arg)) else {
+        refuse(
+            ctx,
+            chain,
+            "`selectSub` names no sub-entity class this renderer can read".to_string(),
+        );
+        return;
+    };
+    let Some(mut sub_entity) = ctx.columns.find(&class).cloned() else {
+        refuse(
+            ctx,
+            chain,
+            format!(
+                "the `selectSub` entity `{class}` is not in the projection; its table name is needed for the sub-select"
+            ),
+        );
+        return;
+    };
+    // The sub-lambda may reference any projected entity (a correlated condition
+    // names the outer table's class): widen the projection to everything the
+    // main chain knows.
+    let mut related = Vec::with_capacity(ctx.columns.related.len() + 1);
+    related.push(ctx.columns.clone());
+    related.extend(ctx.columns.related.iter().cloned());
+    sub_entity.related = related;
+    let body = strip_lambda_prefix(lambda);
+    let out = render_sub_statement(&body, &sub_entity, ctx.dialect);
+    if out.confidence == Confidence::Unresolved || !out.params.is_empty() {
+        refuse(
+            ctx,
+            chain,
+            "`selectSub`'s sub-select could not be rendered as a literal statement; no SQL is emitted"
+                .to_string(),
+        );
+        return;
+    }
+    let Some(sub_sql) = out.sql else {
+        refuse(
+            ctx,
+            chain,
+            "`selectSub`'s sub-select could not be rendered as a literal statement; no SQL is emitted"
+                .to_string(),
+        );
+        return;
+    };
+    chain.select.push(SelectColumn {
+        alias: String::new(),
+        // The reference renders `rawExpr = "($subSql)"` — the parentheses are
+        // part of the expression, not the operator's.
+        column: format!("({sub_sql})"),
+        as_name: Some(alias),
+        function: None,
+        raw_expr: true,
+    });
+}
+
+/// `from(sub-lambda)` (T-M21-07, the MPJ official
+/// `JoinAbstractLambdaWrapper.from(MFunction)`): the FROM clause declares the
+/// rendered sub-select instead of the table —
+/// `FROM (SELECT tb.id, … FROM user tb WHERE tb.id >= 0 LIMIT 10) t` — with the
+/// outer alias being the main table's alias. The sub-alias comes from the
+/// lambda's `setAlias`, defaulting to `tb` (the reference's default).
+///
+/// A runtime value inside the sub-select would splice a `?` before the WHERE
+/// clause's parameters — the reference renders it but collects no param source
+/// for the sub-select, so the preview rows would misalign; this refuses instead.
+fn parse_from(args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
+    let refuse = |ctx: &mut Ctx, chain: &mut WrapperChain, note: String| {
+        ctx.unresolved = true;
+        push_key(ctx, "wrapper.structural_method");
+        ctx.notes.push(note);
+        ctx.partial = false;
+        chain.unsupported.push("from".to_string());
+    };
+    let Some(lambda) = args.first() else {
+        refuse(ctx, chain, "`from` needs a sub-query lambda".to_string());
+        return;
+    };
+    let body = strip_lambda_prefix(lambda);
+    let sub_alias = extract_string_call(&body, "setAlias").unwrap_or_else(|| "tb".to_string());
+    let inner = remove_call(&body, "setAlias");
+    let joined = JoinWrappers::rehead(&inner, &ctx.columns.class_name);
+    let sub = render_with_alias(
+        &joined,
+        ctx.columns,
+        ctx.dialect,
+        &Default::default(),
+        Some(&sub_alias),
+    );
+    if sub.confidence != Confidence::Exact {
+        refuse(
+            ctx,
+            chain,
+            "`from`'s sub-select could not be rendered as a literal statement; no SQL is emitted"
+                .to_string(),
+        );
+        return;
+    }
+    chain.from_sub = sub.sql;
+}
+
+/// `around(first, last)` (T-M21-09, the MPJ official `Join.around(firstSql,
+/// lastSql)`, 1.4.11+). Two shapes, the reference's `parseAround`:
+///
+/// - the official two-literal form `around("first", "last")` — the first
+///   fragment leads the statement (before `SELECT`), the last renders after
+///   `ORDER BY`, before `LIMIT`;
+/// - the template form `around("sql {0}", v, …)` — the `{i}` placeholders bind
+///   the remaining arguments and the result is the last fragment (the first
+///   argument doubles as the template).
+fn parse_around(args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
+    let Some(first) = args.first().and_then(|arg| string_literal(arg)) else {
+        // The reference drops an unrenderable fragment silently; the statement
+        // would then lose a piece of its shape, which `Partial` says out loud.
+        ctx.partial = true;
+        push_key(ctx, "wrapper.unsupported_method");
+        ctx.notes
+            .push("`around` needs a string fragment; the call is dropped".to_string());
+        chain.unsupported.push("around".to_string());
+        return;
+    };
+    // The official two-literal form: the template carries no `{i}` placeholder
+    // and both arguments are literals.
+    if !first.contains('{')
+        && let Some(last) = args.get(1).and_then(|arg| string_literal(arg))
+    {
+        chain.around_first = Some(first);
+        chain.around_last = Some(last);
+        return;
+    }
+    // The template form: `{i}` binds the remaining arguments.
+    let mut last = first;
+    let mut params: Vec<Value> = Vec::new();
+    for (index, arg) in args.iter().enumerate().skip(1) {
+        let rendered = match parse_value_in(arg, ctx) {
+            Value::Param(source) => {
+                params.push(Value::Param(source));
+                ctx.partial = true;
+                push_key(ctx, "wrapper.param_value");
+                "?".to_string()
+            }
+            value => render_value(&value, ctx.dialect),
+        };
+        last = last.replace(&format!("{{{}}}", index - 1), &rendered);
+    }
+    chain.around_last = Some(last);
+    chain.around_params = params;
 }
 
 /// The first string argument of a call in `text` (`setAlias("tt")` → `tt`).
@@ -1528,6 +1992,247 @@ fn subquery_sql(class: &str, lambda: &str, ctx: &Ctx) -> Option<String> {
         return None;
     }
     out.sql
+}
+
+// ---------------------------------------------------------------------------
+// MPJ: selectCollection post-pass
+// ---------------------------------------------------------------------------
+
+/// Builds every `selectCollection`'s sub-select join (the reference's
+/// `parseCollection`, P06/P07 + T-M21-03 + T-1800):
+///
+/// ```text
+/// LEFT JOIN (SELECT <cols> FROM <child> <alias>) <alias> ON <main-side> = <child-side>
+/// ```
+///
+/// - The columns come from the map lambda's `id`/`result` calls (`*` when it
+///   names none); a nested `collection` call recurses as a LEFT JOIN with the
+///   reference's FK convention `grandchild.{parent}_id = {parent}.id`.
+/// - The ON conditions are reused from the same-child-class `leftJoin` in the
+///   chain — which the collection *replaces* (the plain join is dropped, T-M15-06)
+///   — swapped so the main-table column leads, with the join's alias renamed to
+///   the collection alias (the prefix form names a different one).
+/// - The free form (first argument a VO method reference, no child class) is a
+///   result-mapping marker only and produces no SQL, exactly as the reference
+///   drops it from `collectionCalls`.
+fn apply_collections(chain: &mut WrapperChain, ctx: &mut Ctx) {
+    let calls = std::mem::take(&mut chain.collection_calls);
+    for (args, position) in calls {
+        // Form detection: arg0 a class → the normal form; arg0 a string prefix
+        // with arg1 a class → the prefix form; anything else is the free form.
+        let (child, alias, map) = if let Some(class) = args.first().and_then(|a| class_literal(a)) {
+            let alias = ctx.columns.alias_of(&class);
+            (class, alias, args.get(2).cloned())
+        } else if let (Some(prefix), Some(class)) = (
+            args.first().and_then(|a| string_literal(a)),
+            args.get(1).and_then(|a| class_literal(a)),
+        ) {
+            (class, prefix, args.get(3).cloned())
+        } else {
+            continue;
+        };
+        let Some(entity) = ctx.columns.find(&child).cloned() else {
+            ctx.unresolved = true;
+            push_key(ctx, "wrapper.structural_method");
+            ctx.notes.push(format!(
+                "the `selectCollection` child entity `{child}` is not in the projection; its table name is needed for the sub-select"
+            ));
+            ctx.partial = false;
+            chain.unsupported.push("selectCollection".to_string());
+            return;
+        };
+        let Some(sub_select) = collection_sub_select(map.as_deref(), &entity, &alias, ctx) else {
+            // `collection_sub_select` already marked the reason.
+            ctx.partial = false;
+            chain.unsupported.push("selectCollection".to_string());
+            return;
+        };
+        // The ON: the same-child-class join's conditions, alias-renamed and
+        // swapped; the join itself is replaced by the collection (dropped).
+        let on = match ctx
+            .join_classes
+            .iter()
+            .position(|class| class.as_deref() == Some(child.as_str()))
+        {
+            Some(index) => {
+                ctx.join_classes.remove(index);
+                let join = chain.joins.remove(index);
+                swap_collection_on(join.on, &join.alias, &alias)
+            }
+            None => Vec::new(),
+        };
+        ctx.join_classes
+            .insert(position.min(ctx.join_classes.len()), None);
+        chain.joins.insert(
+            position.min(chain.joins.len()),
+            Join {
+                kind: JoinKind::Left,
+                table: String::new(),
+                alias,
+                on,
+                raw: None,
+                sub_select: Some(sub_select),
+            },
+        );
+    }
+}
+
+/// The map lambda's `id`/`result` columns and the nested `collection` joins,
+/// rendered as `SELECT <cols> FROM <child> <alias>` (+ the nested LEFT JOINs).
+/// `None` marks the chain unresolved (an unmapped column or an unprojected
+/// nested entity — the reference snake-case-guesses the table name there, this
+/// renderer refuses to).
+fn collection_sub_select(
+    map: Option<&str>,
+    entity: &EntityColumns,
+    alias: &str,
+    ctx: &mut Ctx,
+) -> Option<String> {
+    let mut columns: Vec<String> = Vec::new();
+    let mut nested: Vec<String> = Vec::new();
+    if let Some(map_text) = map {
+        let body = strip_lambda_prefix(map_text);
+        for call in extract_calls(&body) {
+            match call.name.as_str() {
+                "id" | "result" => {
+                    let Some(raw) = call.args.first() else {
+                        continue;
+                    };
+                    match collection_column(raw, ctx) {
+                        Some(column) => columns.push(column),
+                        None => {
+                            ctx.unresolved = true;
+                            push_key(ctx, "wrapper.unknown_field");
+                            ctx.notes.push(format!(
+                                "cannot map the `selectCollection` sub-select column `{raw}` to a column"
+                            ));
+                            return None;
+                        }
+                    }
+                }
+                "collection" => {
+                    let Some(grandchild) = call
+                        .args
+                        .first()
+                        .and_then(|arg| class_literal(arg))
+                        .or_else(|| {
+                            // The psi layer may hand the class over as a bare
+                            // identifier; accept that shape too.
+                            call.args.first().and_then(|arg| {
+                                let text = arg.trim();
+                                is_ident(text).then(|| text.to_string())
+                            })
+                        })
+                    else {
+                        ctx.unresolved = true;
+                        push_key(ctx, "wrapper.structural_method");
+                        ctx.notes.push(
+                            "the `selectCollection` nested collection names no entity class this renderer can read"
+                                .to_string(),
+                        );
+                        return None;
+                    };
+                    let Some(grand_entity) = ctx.columns.find(&grandchild).cloned() else {
+                        ctx.unresolved = true;
+                        push_key(ctx, "wrapper.structural_method");
+                        ctx.notes.push(format!(
+                            "the `selectCollection` nested entity `{grandchild}` is not in the projection; its table name is needed for the sub-select"
+                        ));
+                        return None;
+                    };
+                    let grand_alias = ctx.columns.alias_of(&grandchild);
+                    // The map lambda is the last lambda-shaped argument.
+                    let grand_map = call
+                        .args
+                        .iter()
+                        .rev()
+                        .find(|arg| arg.contains("->"))
+                        .cloned();
+                    let grand_sub = collection_sub_select(
+                        grand_map.as_deref(),
+                        &grand_entity,
+                        &grand_alias,
+                        ctx,
+                    )?;
+                    // The reference's FK convention (R7): the grandchild's column
+                    // named after the parent alias + `_id` joins the parent's id.
+                    nested.push(format!(
+                        "LEFT JOIN ({grand_sub}) {grand_alias} ON {grand_alias}.{alias}_id = {alias}.id"
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+    if columns.is_empty() {
+        columns.push("*".to_string());
+    }
+    let select = format!(
+        "SELECT {} FROM {} {}",
+        columns.join(", "),
+        entity.table,
+        alias
+    );
+    Some(if nested.is_empty() {
+        select
+    } else {
+        format!("{select} {}", nested.join(" "))
+    })
+}
+
+/// One `id`/`result` argument → the bare column name (the sub-select renders
+/// unqualified columns, exactly as the reference's `renderCollectionSubSelect`).
+fn collection_column(raw: &str, ctx: &Ctx) -> Option<String> {
+    let (class, getter) = parse_field_ref(raw)?;
+    let field = field_from_getter(&getter);
+    let entity = ctx.columns.find(&class)?;
+    entity.column_for(&field).map(str::to_string)
+}
+
+/// The reused join's ON conditions, prepared for the collection join: every
+/// column token carrying the join's alias is renamed to the collection alias
+/// (the prefix form names a different one, T-1800 Bug3), then each column-to-
+/// column equality is swapped so the main-table column leads — the reference's
+/// unconditional swap, harmless for equality.
+fn swap_collection_on(
+    nodes: Vec<CondNode>,
+    join_alias: &str,
+    collection_alias: &str,
+) -> Vec<CondNode> {
+    let rename = |token: &str| -> String {
+        match token.split_once('.') {
+            Some((alias, rest)) if alias == join_alias => {
+                format!("{collection_alias}.{rest}")
+            }
+            _ => token.to_string(),
+        }
+    };
+    nodes
+        .into_iter()
+        .map(|node| match node {
+            CondNode::Leaf(mut leaf) => {
+                leaf.column = rename(&leaf.column);
+                let swappable = leaf.op == Op::Eq
+                    && !leaf.column.is_empty()
+                    && leaf.values.len() == 1
+                    && matches!(leaf.values[0], Value::Column(_));
+                if let Some(Value::Column(right)) = leaf.values.first_mut() {
+                    *right = rename(right);
+                }
+                if swappable {
+                    let right = match leaf.values.pop() {
+                        Some(Value::Column(right)) => right,
+                        _ => unreachable!("checked above"),
+                    };
+                    let left = std::mem::take(&mut leaf.column);
+                    leaf.column = right;
+                    leaf.values.push(Value::Column(left));
+                }
+                CondNode::Leaf(leaf)
+            }
+            other => other,
+        })
+        .collect()
 }
 
 /// `having("count(*) > {0}", 0)`: the fragment renders verbatim with `{i}`
@@ -1734,13 +2439,32 @@ fn unescape(inner: &str) -> String {
 /// `parse_value`, plus the ON-lambda rule: inside an ON condition the second
 /// argument of a comparison is itself a column (`on.eq(AreaDO::getId,
 /// AddressDO::getAreaId)`), rendered as the qualified column — never as a `?`.
+/// And the `selectSub` rule: inside a sub-statement a method-reference value is
+/// a bare column of whatever entity the receiver names (`OrderEntity::getId` →
+/// `id`), no alias.
 fn parse_value_in(raw: &str, ctx: &mut Ctx) -> Value {
     if ctx.on_mode
         && let Some((alias, column)) = resolve_qualified(raw, ctx)
     {
         return Value::Column(format!("{alias}.{column}"));
     }
+    if ctx.sub_column_values
+        && let Some(column) = resolve_sub_column(raw, ctx)
+    {
+        return Value::Column(column);
+    }
     parse_value(raw)
+}
+
+/// A method-reference value inside a `selectSub` sub-statement → the bare
+/// column name, resolved against the projection the sub-statement was given
+/// (which `parse_select_sub` widened to every projected entity). `None` for
+/// anything that is not a resolvable field reference.
+fn resolve_sub_column(raw: &str, ctx: &Ctx) -> Option<String> {
+    let (class, getter) = parse_field_ref(raw)?;
+    let field = field_from_getter(&getter);
+    let entity = ctx.columns.find(&class)?;
+    entity.column_for(&field).map(str::to_string)
 }
 
 fn parse_value(raw: &str) -> Value {
@@ -1890,22 +2614,38 @@ fn render_column_name(name: &str, dialect: &Dialect) -> String {
 }
 
 fn render_select(chain: &WrapperChain, columns: &EntityColumns, dialect: &Dialect) -> String {
-    let mut sql = match chain.table.as_deref() {
-        Some(t) if chain.main_alias.is_some() => format!(
-            "SELECT {} FROM {} {}",
-            render_select_list(chain, columns, dialect),
-            quote(t, dialect),
-            chain.main_alias.as_deref().unwrap_or("t"),
-        ),
-        // The SELECT list is `*`: the wrapper does not carry a column list, and
-        // the mapper's `<select>` supplies it (`SELECT *` is the neutral case).
-        Some(t) => format!(
-            "SELECT {} FROM {}",
-            render_single_table_list(chain, dialect),
-            quote(t, dialect)
-        ),
-        None => format!("SELECT {}", render_single_table_list(chain, dialect)),
-    };
+    // `around(first, …)`'s first fragment leads the statement
+    // (`/* hint */ SELECT …`, the reference's `rawFirst` position).
+    let mut sql = String::new();
+    if let Some(first) = &chain.around_first {
+        sql.push_str(first);
+        sql.push(' ');
+    }
+    // T-M21-07: `from(sub-lambda)` replaces the FROM target with the rendered
+    // sub-select, aliased by the main table's alias.
+    if let (Some(sub), Some(alias)) = (&chain.from_sub, chain.main_alias.as_deref()) {
+        sql.push_str(&format!(
+            "SELECT {} FROM ({sub}) {alias}",
+            render_select_list(chain, columns, dialect)
+        ));
+    } else {
+        sql.push_str(&match chain.table.as_deref() {
+            Some(t) if chain.main_alias.is_some() => format!(
+                "SELECT {} FROM {} {}",
+                render_select_list(chain, columns, dialect),
+                quote(t, dialect),
+                chain.main_alias.as_deref().unwrap_or("t"),
+            ),
+            // The SELECT list is `*`: the wrapper does not carry a column list, and
+            // the mapper's `<select>` supplies it (`SELECT *` is the neutral case).
+            Some(t) => format!(
+                "SELECT {} FROM {}",
+                render_single_table_list(chain, dialect),
+                quote(t, dialect)
+            ),
+            None => format!("SELECT {}", render_single_table_list(chain, dialect)),
+        });
+    }
     for join in &chain.joins {
         sql.push(' ');
         sql.push_str(&render_join(join, dialect));
@@ -2002,14 +2742,21 @@ fn expand_select_table<'a>(
 }
 
 fn render_select_column(column: &SelectColumn, dialect: &Dialect) -> String {
-    let qualified = if column.alias.is_empty() {
-        render_column_name(&column.column, dialect)
+    // A raw expression (`selectFunc`'s template result, `selectSub`'s
+    // sub-select) is already the complete SQL text: the reference renders it
+    // through `rawExpr` verbatim — no alias prefix, no quoting.
+    let expr = if column.raw_expr {
+        column.column.clone()
     } else {
-        render_column_name(&format!("{}.{}", column.alias, column.column), dialect)
-    };
-    let expr = match column.function {
-        Some(function) => format!("{function}({qualified})"),
-        None => qualified,
+        let qualified = if column.alias.is_empty() {
+            render_column_name(&column.column, dialect)
+        } else {
+            render_column_name(&format!("{}.{}", column.alias, column.column), dialect)
+        };
+        match column.function {
+            Some(function) => format!("{function}({qualified})"),
+            None => qualified,
+        }
     };
     match &column.as_name {
         Some(as_name) => format!("{expr} AS {as_name}"),
@@ -2073,6 +2820,13 @@ fn render_clauses(chain: &WrapperChain, dialect: &Dialect) -> String {
             .collect();
         out.push_str(" ORDER BY ");
         out.push_str(&items.join(", "));
+    }
+    // `around(…, last)`'s last fragment renders between ORDER BY and LIMIT —
+    // MP's LAST segment position, which the reference's `rawAround` matches
+    // (T-M21-09).
+    if let Some(around) = &chain.around_last {
+        out.push(' ');
+        out.push_str(around);
     }
     if let Some(limit) = chain.limit {
         out.push(' ');
@@ -2651,6 +3405,433 @@ mod tests {
             sql.contains("LEFT JOIN area areaDO ON areaDO.id = addressDO.area_id AND areaDO.province = '浙江省'"),
             "{sql}"
         );
+    }
+
+    /// The reference's own `selectSub` parity fixture
+    /// (`SqlPreviewServiceOfficialApiTest.testOfficialApiUnionAndSelectSub`):
+    /// `OrderEntity` + `RefundEntity`, with a correlated sub-select condition.
+    fn order_cols() -> EntityColumns {
+        let order = EntityColumns::new("OrderEntity", "order_entity")
+            .with_column("id", "id", "bigint")
+            .with_column("refundAmount", "refund_amount", "varchar");
+        let refund = EntityColumns::new("RefundEntity", "refund_entity")
+            .with_column("id", "id", "bigint")
+            .with_column("orderId", "order_id", "bigint")
+            .with_column("amount", "amount", "varchar");
+        order.with_related(refund)
+    }
+
+    #[test]
+    fn select_func_template_form_renders_the_bound_expression() {
+        // Demo `aggregateExt`: the template's `%s` takes the main-alias prefix,
+        // the alias argument renders `AS name_len`, exactly the reference's
+        // `parseSelectFunc`.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .select(UserDO::getSex)
+                .selectFunc("CHAR_LENGTH(%s)", c -> c.accept(UserDO::getSex), "name_len")
+                .selectFunc("IFNULL(%s, 0)", c -> c.accept(UserDO::getSex), "age_or_sex")
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .groupBy(UserDO::getSex)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.expect("the chain renders");
+        assert!(
+            sql.contains(
+                "SELECT t.sex, CHAR_LENGTH(t.sex) AS name_len, IFNULL(t.sex, 0) AS age_or_sex FROM",
+            ),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn select_func_enum_form_maps_the_built_ins() {
+        // Demo `distinctAndFunc`: `DefaultFuncEnum.COUNT` / `MAX` map to their SQL
+        // functions over the main-alias column.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .distinct()
+                .select(UserDO::getSex)
+                .selectFunc(DefaultFuncEnum.COUNT, UserDO::getId, "cnt")
+                .selectFunc(DefaultFuncEnum.MAX, UserDO::getAge, "maxAge")"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.expect("the chain renders");
+        assert!(sql.contains("COUNT(t.id) AS cnt"), "{sql}");
+        assert!(sql.contains("MAX(t.age) AS maxAge"), "{sql}");
+    }
+
+    #[test]
+    fn select_func_len_maps_to_length_and_plain_chains_render_bare_columns() {
+        // Reference `QueryWrapperParserSelectTest`: `LEN` → `LENGTH`; a plain
+        // (non-MPJ) chain has no alias context, so the column renders bare.
+        let out = render(
+            r#"new LambdaQueryWrapper<User>()
+                .selectFunc(DefaultFuncEnum.LEN, f -> f.accept(User::getName), "nameLen")"#,
+            &cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        assert_eq!(
+            out.sql.as_deref(),
+            Some("SELECT LENGTH(name) AS nameLen FROM sys_user")
+        );
+    }
+
+    #[test]
+    fn select_func_with_a_runtime_bound_value_refuses_the_render() {
+        // A runtime `{i}` value would splice a `?` into the SELECT list's
+        // parameter order — the same boundary the sub-select renderer honors.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectFunc("IFNULL(%s, {0})", c -> c.accept(UserDO::getSex).values(minAge), "x")"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Unresolved, "{out:?}");
+        assert_eq!(out.sql, None);
+    }
+
+    #[test]
+    fn select_func_with_an_unknown_builtin_degrades_to_partial() {
+        // The reference drops an unknown built-in's column silently; the port
+        // keeps the SQL and says the loss out loud (`Partial`).
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .select(UserDO::getSex)
+                .selectFunc(DefaultFuncEnum.NOPE, UserDO::getId, "x")"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Partial, "{out:?}");
+        assert!(out.sql.is_some());
+        assert!(out.chain.unsupported.contains(&"selectFunc".to_string()));
+    }
+
+    #[test]
+    fn select_sub_renders_a_literal_sub_select_column() {
+        // Demo `selectSubQuery`: the lambda renders as its own single-table
+        // statement, bare columns, wrapped and aliased in the SELECT list.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .selectSub(AddressDO.class, sub -> sub
+                    .select(AddressDO::getTel)
+                    .eq(AddressDO::getUserId, 1), UserDTO::getTel)
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.expect("the chain renders");
+        assert!(
+            sql.contains("(SELECT tel FROM user_address WHERE user_id = 1) AS tel",),
+            "{sql}"
+        );
+        // `user` is a reserved word — the reference quotes the table name too.
+        assert!(
+            sql.contains("FROM `user` t LEFT JOIN user_address addressDO"),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn select_sub_correlated_condition_renders_the_outer_column_bare() {
+        // Reference `SqlPreviewServiceOfficialApiTest`: `eq(RefundEntity::getOrderId,
+        // OrderEntity::getId)` → `order_id = id` — static analysis cannot tell the
+        // outer table apart, so the right side renders bare (the reference's own
+        // 近似说明).
+        let out = render(
+            r#"JoinWrappers.lambda(OrderEntity.class)
+                .selectAll(OrderEntity.class)
+                .selectSub(RefundEntity.class, r -> r
+                    .select(RefundEntity::getAmount)
+                    .eq(RefundEntity::getOrderId, OrderEntity::getId), OrderEntity::getRefundAmount)
+                .eq(OrderEntity::getId, 1001)"#,
+            &order_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        assert_eq!(
+            out.sql.as_deref(),
+            Some(
+                "SELECT t.id, t.refund_amount, (SELECT amount FROM refund_entity WHERE order_id = id) AS refundAmount FROM order_entity t WHERE t.id = 1001"
+            ),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn select_sub_with_a_runtime_value_inside_refuses_the_render() {
+        // A runtime value inside the sub-select would splice a `?` into the
+        // middle of the statement's parameter order — kept unresolved until the
+        // parameter-order scheme lands (documented boundary).
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .selectSub(AddressDO.class, sub -> sub
+                    .select(AddressDO::getTel)
+                    .eq(AddressDO::getUserId, userId), UserDTO::getTel)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Unresolved, "{out:?}");
+        assert_eq!(out.sql, None);
+    }
+
+    #[test]
+    fn select_collection_replaces_the_same_child_join_with_a_sub_select() {
+        // Demo `selectJoinCollection`: the collection's sub-select join reuses the
+        // same-child-class leftJoin's ON conditions (swapped so the main column
+        // leads) and *replaces* that join — the reference's T-M15-06 dedup.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .selectCollection(AddressDO.class, UserDTO::getAddressList)
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.expect("the chain renders");
+        assert!(
+            sql.contains("LEFT JOIN (SELECT * FROM user_address addressDO) addressDO ON t.id = addressDO.user_id"),
+            "{sql}"
+        );
+        // The plain join it replaced must not render twice.
+        assert!(
+            !sql.contains("LEFT JOIN user_address addressDO ON"),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn select_collection_reuses_a_lambda_on_join_s_conditions() {
+        // Demo `selectCollectionWithFilter`: the lambda-ON join's column
+        // comparison is swapped (main column leads) and its value condition kept.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .selectCollection(AddressDO.class, UserDTO::getAddressList)
+                .leftJoin(AddressDO.class, on -> on
+                    .eq(AddressDO::getUserId, UserDO::getId)
+                    .eq(AddressDO::getStatus, 1))
+                .eq(UserDO::getSex, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.expect("the chain renders");
+        assert!(
+            sql.contains("LEFT JOIN (SELECT * FROM user_address addressDO) addressDO ON t.id = addressDO.user_id AND addressDO.status = 1"),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn select_collection_prefix_form_uses_the_prefix_alias_and_map_columns() {
+        // T-M21-03 prefix form (`QueryLabel.java`): the prefix is the sub-select's
+        // table alias and the map lambda's id/result calls are its columns; the
+        // reused join's alias is renamed to the prefix (T-1800 Bug3).
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .selectCollection("addr", AddressDO.class, UserDTO::getAddressList, m -> m
+                    .id(AddressDO::getId)
+                    .result(AddressDO::getTel))
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.expect("the chain renders");
+        assert!(
+            sql.contains(
+                "LEFT JOIN (SELECT id, tel FROM user_address addr) addr ON t.id = addr.user_id"
+            ),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn select_collection_free_form_is_a_mapping_marker_without_sql() {
+        // T-M21-03 free form (first argument a VO method reference, no child
+        // class): no sub-select, no join — the reference drops it the same way.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .selectCollection(UserDTO::getAddressList, m -> m.id(AddressDO::getId))
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.expect("the chain renders");
+        assert!(!sql.contains("LEFT JOIN"), "{sql}");
+    }
+
+    #[test]
+    fn select_collection_with_an_unprojected_child_refuses_the_render() {
+        // 不猜: the reference snake-case-guesses an unknown child's table name;
+        // this renderer refuses (a guessed table is wrong SQL).
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .selectCollection(RecordEntity.class, UserDTO::getRecords)
+                .leftJoin(RecordEntity.class, RecordEntity::getUserId, UserDO::getId)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Unresolved, "{out:?}");
+        assert_eq!(out.sql, None);
+    }
+
+    #[test]
+    fn select_association_is_a_mapping_marker_only() {
+        // Demo `selectAssociation`: the leftJoin already expresses the
+        // association; the reference emits no SQL for the call (T-M7-04) — the
+        // chain renders exactly as if it were absent.
+        let with_it = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .selectAssociation(AddressDO.class, UserDTO::getDefaultAddress)
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        let without_it = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(with_it.confidence, Confidence::Exact, "{with_it:?}");
+        assert_eq!(with_it.sql, without_it.sql, "{with_it:?}");
+    }
+
+    #[test]
+    fn from_renders_the_sub_query_as_the_from_target() {
+        // Reference `mpjJoin_from子查询主表` (T-M21-07): the sub-lambda renders
+        // under its own alias and the FROM clause declares `(sub-select) t` —
+        // the outer alias is the main table's.
+        let out = render(
+            r#"JoinWrappers.lambda(DeviceInfoEntity.class)
+                .selectAll()
+                .from(from -> from
+                    .setAlias("tb")
+                    .selectAll()
+                    .ge(DeviceInfoEntity::getId, 0)
+                    .last("LIMIT 10"))
+                .eq(DeviceInfoEntity::getId, 1001)"#,
+            &device_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        assert_eq!(
+            out.sql.as_deref(),
+            Some(
+                "SELECT t.id, t.station_id, t.device_name FROM (SELECT tb.id, tb.station_id, tb.device_name FROM car_device_info tb WHERE tb.id >= 0 LIMIT 10) t WHERE t.id = 1001"
+            ),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn from_without_set_alias_defaults_to_tb_and_keeps_later_joins() {
+        // Demo `joinFromAndPage` (minus around): no `setAlias` in the lambda →
+        // the reference's `tb` default; joins after `from` still render.
+        let out = render(
+            r#"JoinWrappers.lambda(DeviceInfoEntity.class)
+                .selectAll()
+                .from(from -> from
+                    .selectAll()
+                    .ge(DeviceInfoEntity::getId, 0)
+                    .last("LIMIT 100"))
+                .leftJoin(StationInfoEntity.class, StationInfoEntity::getStationId, DeviceInfoEntity::getStationId)"#,
+            &device_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.expect("the chain renders");
+        assert!(
+            sql.contains("FROM (SELECT tb.id, tb.station_id, tb.device_name FROM car_device_info tb WHERE tb.id >= 0 LIMIT 100) t"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("LEFT JOIN station_info stationInfoEntity ON stationInfoEntity.station_id = t.station_id"),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn around_two_literal_form_leads_and_trails_the_statement() {
+        // Reference `mpjJoin_around双字符串形态` (T-M21-09): the first fragment
+        // renders before SELECT, the last after WHERE (before LIMIT).
+        let out = render(
+            r#"JoinWrappers.lambda(DeviceInfoEntity.class)
+                .around("/* around hint */", "FOR UPDATE")
+                .eq(DeviceInfoEntity::getId, 1)"#,
+            &device_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        assert_eq!(
+            out.sql.as_deref(),
+            Some(
+                "/* around hint */ SELECT t.id, t.station_id, t.device_name FROM car_device_info t WHERE t.id = 1 FOR UPDATE"
+            ),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn around_template_form_binds_arguments_and_renders_between_order_and_limit() {
+        // Reference `mpjJoin_around位置与参数替换` (T-M21-09): the `{i}` template
+        // binds the remaining arguments; the fragment renders after ORDER BY,
+        // before LIMIT.
+        let out = render(
+            r#"JoinWrappers.lambda(DeviceInfoEntity.class)
+                .orderByAsc(DeviceInfoEntity::getId)
+                .around("AND t.id > {0}", 5)
+                .last("LIMIT 10")"#,
+            &device_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        assert_eq!(
+            out.sql.as_deref(),
+            Some(
+                "SELECT t.id, t.station_id, t.device_name FROM car_device_info t ORDER BY t.id ASC AND t.id > 5 LIMIT 10"
+            ),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn around_with_a_runtime_template_value_degrades_to_partial_in_order() {
+        // A runtime `{0}` value renders `?` and joins the parameter order after
+        // the conditions (the fragment sits after ORDER BY).
+        let out = render(
+            r#"JoinWrappers.lambda(DeviceInfoEntity.class)
+                .eq(DeviceInfoEntity::getId, 1)
+                .around("AND t.id > {0}", minId)"#,
+            &device_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Partial, "{out:?}");
+        let sql = out.sql.as_ref().expect("partial carries SQL");
+        assert!(sql.ends_with("AND t.id > ?"), "{sql}");
+        assert_eq!(out.params, vec!["minId"], "{out:?}");
     }
 
     #[test]
