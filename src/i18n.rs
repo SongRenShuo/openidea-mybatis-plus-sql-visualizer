@@ -769,10 +769,26 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     // Docked quick preview (lane L32). The three status texts are the IntelliJ
     // edition's own `log.dockedPreview.*` messages: empty / title / pinned, so
     // the pane reads the same on both platforms.
-    ("view.logs.docked.empty", "Select a row to preview its SQL", "选中一行预览它的 SQL"),
-    ("view.logs.docked.title", "Preview (follows the selection)", "预览（跟随选中行）"),
-    ("view.logs.docked.pinned", "Edited — no longer following", "已编辑 — 不再跟随选中行"),
-    ("view.logs.docked.restore", "Restore and follow", "恢复并跟随"),
+    (
+        "view.logs.docked.empty",
+        "Select a row to preview its SQL",
+        "选中一行预览它的 SQL",
+    ),
+    (
+        "view.logs.docked.title",
+        "Preview (follows the selection)",
+        "预览（跟随选中行）",
+    ),
+    (
+        "view.logs.docked.pinned",
+        "Edited — no longer following",
+        "已编辑 — 不再跟随选中行",
+    ),
+    (
+        "view.logs.docked.restore",
+        "Restore and follow",
+        "恢复并跟随",
+    ),
     // Two input tabs (lane L33, docs/registration/L33.md).
     ("view.logs.tab.log_to_sql.convert", "Convert", "转换"),
     (
