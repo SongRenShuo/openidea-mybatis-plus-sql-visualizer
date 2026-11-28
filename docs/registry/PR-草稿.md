@@ -15,83 +15,62 @@
 Add songrenshuo.mybatis-plus-sql-visualizer
 ```
 
+标题走登记仓的英文惯例（`Add <publisher>.<plugin>`），正文用中文——两者在在册 PR 里都很常见（#367 全中文、#375 全英文）。
+
 ## PR 正文
 
 ```markdown
-Registers a new publisher `songrenshuo` and its first plugin,
-`songrenshuo.mybatis-plus-sql-visualizer` — an SQL debugger for OpenIDEA.
+## 新发布者：`songrenshuo`
 
-### What it does
+- `publishers/songrenshuo.toml` —— 名称 "SongRenShuo"，owner `@SongRenShuo`，一把 Ed25519 公钥，`revoked-keys = []`。
 
-Static restore of the SQL a MyBatis project will really send: mapper XML,
-annotated SQL, iBatis 2.x `<sqlMap>`, and MyBatis-Plus / MPJ Wrapper chains
-(joins, join UPDATE/DELETE, subqueries), with parameters filled in. At runtime
-it captures real executions through a Java agent, or restores pasted console
-logs (MyBatis / iBatis / Hibernate / JdbcTemplate). Every result is checked
-(dialect, unsafe writes, performance rules, rollback plan) and carry a
-confidence: `unresolved` results return a reason instead of a guessed SQL.
+## 新插件：`songrenshuo.mybatis-plus-sql-visualizer` 0.1.0
 
-### Source repository
+OpenIDEA 的 MyBatis SQL 调试插件。它解决的是「这条 SQL 最后到底发出去什么」这个每天都要猜的问题。
+
+### 做什么
+
+**写代码时不启动应用**：把 mapper XML、注解 SQL、iBatis 2.x `<sqlMap>`、MyBatis-Plus / MPJ 的 Wrapper 链（联表、联表更新与删除、子查询）还原成数据库真正会收到的那条 SQL，参数自动回填。
+
+**运行后看真实执行**：Java agent 增强捕获 Application / Spring Boot / JAR 三类运行配置的真实参数与耗时；或者把 MyBatis / iBatis / Hibernate / JdbcTemplate 四族控制台日志粘进面板还原。同结构聚类、去重、慢查询高亮、N+1 疑似检测，双击跳回源码。
+
+**每条结果先过检查**：方言写法、不安全的写操作、性能规则、回滚计划。判不出来就标 `unresolved` 并给原因，绝不猜——这是插件的产品纪律，`unresolved` 不出 SQL。
+
+工具窗五页签：SQL 日志、日志转 SQL、SQL 转 Java、历史、SQL 预览。另有 12 个只读 MCP 工具把同一引擎交给 AI 智能体。
+
+### 源码仓库
 
 https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer
 
-Apache-2.0. The published package is built from this repository by its own CI
-(`.github/workflows/release.yml`, tag-driven), which also runs fmt, clippy,
-the full test suite and `openidea-plugin check` on every push.
+Apache-2.0。发布包由该仓 CI 从源码构建（`.github/workflows/release.yml`，tag 驱动），每次推送还会跑 fmt、clippy、全量测试与 `openidea-plugin check`。
 
-### Why it needs the capabilities it asks for
+### 为什么需要这些能力
 
-Required (agreed at install, no way around them):
+**必需**（安装时整体同意）：
 
-- `project.read` — render and check statements against the project's mapper
-  XML, Java sources and log files. Read-only; the plugin never writes project
-  files.
-- `events` — wake the capture consumer on `websocket-ready` instead of
-  polling; also gutter/navigation markers. Nothing on disk is touched.
-- `storage` — the SQL history tab keeps log snapshots in the plugin's own
-  key-value store (per project, max 10 files / 512 KB each).
+- `project.read` —— 还原与检查语句要读项目里的 mapper XML、Java 源码与日志文件。只读，插件不写项目文件。
+- `events` —— 用 `websocket-ready` 唤醒捕获消费而不是轮询；也用于 gutter 与导航标记。不落盘。
+- `storage` —— 「SQL 历史」页把日志快照存进插件自己的键值存储（按项目隔离，每项目最多 10 个、单文件 512 KB）。
 
-Optional (each has a working fallback, and every feature that needs one says
-so in its UI when it is refused):
+**可选**（每一项都有可用的降级路径，被拒时相关功能会在界面上说明）：
 
-- `java.agent` (high) — attaches the plugin's capture agent to Application /
-  Spring Boot / JAR run configurations so real parameters and timings arrive
-  over a loopback socket. Refused: enhanced capture is unavailable and the
-  plugin says so, pointing at the paste path below. The agent jar is shipped
-  in the package and pinned by hash by the host.
-- `net:127.0.0.1` (medium) — the same capture channel, as a WebSocket client
-  to `127.0.0.1:17890`. Nothing leaves the machine; the manifest declares the
-  loopback host only, no other network capability.
-- `process:java` (high) — starts the bundled, version- and sha256-pinned local
-  engine jar used for Wrapper rendering and EXPLAIN wrapping. Refused: the
-  plugin degrades to plain-text mode and says so in the UI.
-- `clipboard` / `clipboard.read` (medium) — copy a rendered SQL out, and read
-  logs pasted from the clipboard. Refused: both buttons explain the refusal
-  and the panel's own input box still works.
-- `editor.read` (low) — `preview-sql` with no argument reads the current
-  editor's selection or text. Refused: path + statement id and the context
-  menu still work.
+- `java.agent`（高）—— 把插件的捕获 agent 挂到 Application / Spring Boot / JAR 运行配置上，经回环套接字送回真实参数与耗时。被拒：增强捕获不可用，界面明说并指向下面的粘贴路径。agent jar 随包分发，宿主按哈希钉住。
+- `net:127.0.0.1`（中）—— 同一条捕获通道，作为 WebSocket 客户端连 `127.0.0.1:17890`。数据不出本机；清单只声明回环主机，没有其它网络能力。
+- `process:java`（高）—— 启动随包分发、钉了版本与 sha256 的本地引擎 jar，用于 Wrapper 渲染与 EXPLAIN 语句包装。被拒：降级为纯文本模式，界面明示。
+- `clipboard` / `clipboard.read`（中）—— 把渲染出的 SQL 复制出去；从剪贴板读取粘贴的日志。被拒：两个按钮会解释原因，面板自己的输入框照常可用。
+- `editor.read`（低）—— `preview-sql` 不带参数时读当前编辑器的选区或全文。被拒：仍可用路径 + 语句 id 与右键入口。
 
-Paste restore (MyBatis / iBatis / Hibernate / JdbcTemplate console logs into
-the panel) needs **no** capability at all, so the plugin is useful even with
-every optional capability refused.
+**粘贴还原**（把四族控制台日志粘进面板）完全不需要任何能力，所以即使所有可选能力都被拒绝，插件依然可用。
 
-### How it was verified
+### 如何验证过
 
-- `scripts/release-smoke.sh`: fmt check, the full `cargo test` suite (2,273
-  tests), `openidea-plugin build`, signed `pack`, `openidea-plugin check` on
-  the signed package, SHA-256.
-- The published package was downloaded again and verified: SHA-256 matches
-  the attached `.sha256`, `check` passes, `SIGNATURE.json` names this
-  publisher and key.
-- Manual pass in the IDE from the installed package: five panel tabs, static
-  rendering (mapper XML / annotated SQL / Wrapper chain / MPJ join), both the
-  capture-denied and capture-granted paths, paste restore, settings pages
-  (including the Global / This project switch), and an MCP tool call.
+- `scripts/release-smoke.sh`：fmt 检查、全量 `cargo test`（2,273 个测试）、`openidea-plugin build`、签名 `pack`、对签名包跑 `openidea-plugin check`、SHA-256。
+- 发布包重新下载复验：SHA-256 与附带的 `.sha256` 一致、`check` 通过、`SIGNATURE.json` 的发布者与公钥与本 PR 注册的一致。
+- 安装态真机走查：五页签各开一遍；静态渲染（mapper XML / 注解 SQL / Wrapper 链 / MPJ 联表）各验一条；捕获被拒与捕获获准两条路径；粘贴还原；设置各子页（含 Global / This project 切换）；MCP 工具调用一次。
 
-### Versioning
+### 版本
 
-`engines.openidea = "^1.18"`. One version, 0.1.0, first release.
+`engines.openidea = "^1.18"`。一个版本 0.1.0，首次发布。
 ```
 
 ## 提交步骤（真机测试通过后）
@@ -107,7 +86,7 @@ cp <本仓>/docs/registry/plugins.songrenshuo.mybatis-plus-sql-visualizer.toml \
 git add publishers/songrenshuo.toml plugins/songrenshuo.mybatis-plus-sql-visualizer.toml
 git commit -F <提交信息文件>
 git push -u origin HEAD
-gh pr create --repo l0ng-ai/openidea-plugins --title "Add songrenshuo.mybatis-plus-sql-visualizer" --body-file <本文件里 PR 正文那一段>
+gh pr create --repo l0ng-ai/openidea-plugins --title "Add songrenshuo.mybatis-plus-sql-visualizer" --body-file <PR 正文文件>
 ```
 
 ## 审核方会查的点（policy.mdx）
