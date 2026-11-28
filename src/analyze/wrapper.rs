@@ -2304,8 +2304,20 @@ fn parse_exists_subquery(
 /// would read as a complete one.
 fn subquery_sql(class: &str, lambda: &str, ctx: &Ctx) -> Option<(String, Vec<String>)> {
     let entity = ctx.columns.find(class)?;
+    // The sub-render sees the sub entity as its own table plus every entity
+    // the main chain projects: a method-reference value may name the main
+    // entity too (`eq(RefundEntity::getOrderId, OrderEntity::getId)` renders
+    // `order_id = id`, the bare right column the reference's own test
+    // asserts), while columns render bare — there is no alias context inside
+    // a sub-select.
+    let mut projection = entity.clone();
+    for related in std::iter::once(ctx.columns).chain(ctx.columns.related.iter()) {
+        if related.class_name != entity.class_name {
+            projection = projection.with_related(related.clone());
+        }
+    }
     let body = strip_lambda_prefix(lambda);
-    let out = render_with(&body, entity, ctx.dialect, &Default::default());
+    let out = render_sub_statement(&body, &projection, ctx.dialect);
     let sql = out.sql?;
     if out.confidence != Confidence::Exact && out.params.is_empty() {
         return None;
@@ -2763,6 +2775,16 @@ fn unescape(inner: &str) -> String {
 /// `id`), no alias.
 fn parse_value_in(raw: &str, ctx: &mut Ctx) -> Value {
     if ctx.on_mode
+        && let Some((alias, column)) = resolve_qualified(raw, ctx)
+    {
+        return Value::Column(format!("{alias}.{column}"));
+    }
+    // MPJ compares column-to-column wherever a method reference appears in
+    // the value slot — the reference's `QueryWrapperParser.simple()` resolves
+    // both sides as columns, not only inside ON lambdas. Non-MPJ chains keep
+    // the plain-wrapper rule (the value position is a runtime value there).
+    if ctx.mpj
+        && !ctx.sub_column_values
         && let Some((alias, column)) = resolve_qualified(raw, ctx)
     {
         return Value::Column(format!("{alias}.{column}"));
@@ -4636,6 +4658,45 @@ mod tests {
             "{sql}"
         );
         assert_eq!(out.params, vec!["minAge"], "{:?}", out.params);
+    }
+
+    #[test]
+    fn a_subquery_method_reference_value_renders_the_bare_column() {
+        // The reference's own selectSub-style case: the value column belongs
+        // to the main entity and renders bare inside the sub-select
+        // (`eq(RefundEntity::getOrderId, OrderEntity::getId)` → `order_id = id`).
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .in(UserDO::getId, AddressDO.class, sub -> sub
+                    .select(AddressDO::getUserId)
+                    .eq(AddressDO::getUserId, UserDO::getId))"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.as_deref().expect("the chain renders");
+        assert!(
+            sql.contains("t.id IN (SELECT user_id FROM user_address WHERE user_id = id)"),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn an_mpj_condition_value_resolves_as_a_column() {
+        // The reference's `QueryWrapperParser.simple()` resolves a method
+        // reference in the value slot as a column, wherever it appears —
+        // not only inside ON lambdas.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .ge(UserDO::getAge, UserDO::getId)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.as_deref().expect("the chain renders");
+        assert!(sql.contains("WHERE t.age >= t.id"), "{sql}");
     }
 
     #[test]
