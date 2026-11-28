@@ -2,7 +2,7 @@
 
 **Plugin id:** `songrenshuo.mybatis-plus-sql-visualizer`
 **Version:** 2026.11.29
-**Repository:** https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer
+**Repository:** https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer
 **License:** Apache-2.0 (see `LICENSE` and `NOTICE`)
 
 ## What it does

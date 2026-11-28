@@ -162,7 +162,7 @@ sha256 = "<CI 那轮的实际值>"
 
 ```sh
 TOKEN=$(python -c "import json;print(json.load(open('.local/gitee-token.json'))['gitee_personal_access_token'])")
-API="https://gitee.com/api/v5/repos/songrenshuo/openidea-mybatis-plus-sql-visualizer"
+API="https://gitee.com/api/v5/repos/songrenshuo/openidea-mybatis-sql-visualizer"
 
 # 列发行版
 curl -s "$API/releases?access_token=${TOKEN}&per_page=100"

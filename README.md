@@ -1,6 +1,6 @@
 # MyBatis SQL Visualizer（OpenIDEA 版）
 
-[![gate](https://img.shields.io/github/actions/workflow/status/SongRenShuo/openidea-mybatis-plus-sql-visualizer/build.yml?branch=master&label=gate)](https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/actions/workflows/build.yml)
+[![gate](https://img.shields.io/github/actions/workflow/status/SongRenShuo/openidea-mybatis-sql-visualizer/build.yml?branch=master&label=gate)](https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer/actions/workflows/build.yml)
 
 > 服务未启，SQL 先知。
 

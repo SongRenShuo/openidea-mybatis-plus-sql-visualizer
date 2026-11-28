@@ -10,7 +10,7 @@
 你负责建车道、派子代理、合并、清理、最终门禁。不要自己写业务代码（除注册类单点文件与冲突裁决）。
 
 【仓库与环境】
-- 主仓（实施地）：F:\code\Java\Gitee\SongRenShuo\openidea-mybatis-plus-sql-visualizer
+- 主仓（实施地）：F:\code\Java\Gitee\SongRenShuo\openidea-mybatis-sql-visualizer
 - IntelliJ 仓（只读参考 + 引擎侧改动）：F:\code\Java\Gitee\SongRenShuo\mybatis-plus-sql-visualizer
 - 基线：plugin API ^1.15；SDK tag v0.1.51；Rust 1.98.1 + wasm32-wasip2；Node 22.22.3（.nvmdrc）
 - Git Bash 的 PATH 里没有 cargo/openidea-plugin：
@@ -81,7 +81,7 @@ README，提交一次（chore: 注册汇总）。此提交后全量门禁 + 一�
 
 ```
 【车道】<lane 编号与名字>（feat/<lane>，工作树 .worktrees/lane-<lane>）
-【仓库】F:\code\Java\Gitee\SongRenShuo\openidea-mybatis-plus-sql-visualizer\.worktrees\lane-<lane>
+【仓库】F:\code\Java\Gitee\SongRenShuo\openidea-mybatis-sql-visualizer\.worktrees\lane-<lane>
 【先读】AGENTS.md、docs/ARCHITECTURE.md、docs/TASKS.md 中本车道的任务卡
 【你的任务】<从 TASKS.md 抄该车道的任务卡：ID/交付/验收/估时>
 【你拥有的目录】<见 §3 表>；只许改这些目录 + tests/<lane>_*

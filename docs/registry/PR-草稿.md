@@ -40,7 +40,7 @@ OpenIDEA 的 MyBatis SQL 调试插件。它解决的是「这条 SQL 最后到�
 
 ### 源码仓库
 
-https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer
+https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer
 
 Apache-2.0。发布包由该仓 CI 从源码构建（`.github/workflows/release.yml`，tag 驱动），每次推送还会跑 fmt、clippy、全量测试与 `openidea-plugin check`。
 

@@ -1,4 +1,4 @@
-repository = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer"
+repository = "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer"
 suggest = ["pom.xml"]
 
 # 版本发版后回填：sha256 取 CI 那一轮 release.yml 打印的值（本地不打包，
@@ -11,5 +11,5 @@ suggest = ["pom.xml"]
 # 的试验版，不再对外提供，因此这里只留日期制版本。
 [[versions]]
 version = "2026.11.29"
-package = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
+package = "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
 sha256 = "b160c20cc9c3f3d7f754a0227b8abca66525ad1f5511293ad4fb897b6f2fe70e"

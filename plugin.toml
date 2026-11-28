@@ -11,7 +11,7 @@ change-notes = """2026.11.29 — 首个 OpenIDEA 版：mapper XML / 注解 / iBa
 2026.11.29 — 检查面：方言写法、无界写操作、性能规则、回滚计划
 2026.11.29 — 12 个只读 MCP 工具；Gutter 预览图标与 Mapper↔XML 导航
 2026.11.29 — 权限可随时补授，缺失时各功能降级并在界面说明"""
-homepage = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer"
+homepage = "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer"
 license = "Apache-2.0"
 categories = ["tools"]
 # Package logo: the 40×40 icon the IntelliJ plugin ships (Settings › Plugins and

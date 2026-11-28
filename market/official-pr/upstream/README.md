@@ -18,12 +18,12 @@ revoked-keys = []
 ## `plugins/songrenshuo.mybatis-plus-sql-visualizer.toml`
 
 ```toml
-repository = "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer"
+repository = "https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer"
 suggest = ["pom.xml", "build.gradle.kts"]
 
 [[versions]]
 version = "2026.11.29"
-package = "https://github.com/<owner>/openidea-mybatis-plus-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
+package = "https://github.com/<owner>/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
 sha256 = "<sha256 of that package>"
 ```
 
