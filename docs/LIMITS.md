@@ -78,8 +78,16 @@
    setUpdateEntity 的实体值运行期不可知 → 非主键全列 `?` 占位（`@TableId` 列排除）；
    SET 条目解析失败剔除并 `partial`，全部失败 → `unresolved`（没有 SET 的 UPDATE 不是语句）。
    `in`/`exists` lambda 子查询含运行期参数时参数按位置就地嵌入（树序即 SQL 序）；
-   子查询有丢条件等其它缺口仍 `unresolved`。仍未做（`unresolved`，不出 SQL）：
-   `join("关键字")` 自定义关键字；逐形态清单见 `docs/registration/L35a.md` §15。
+   子查询有丢条件等其它缺口仍 `unresolved`。MPJ 方法引用出现在值槽一律列对列比较
+   （原版 `simple()`），子查询内渲染裸列。SELECT/FROM 侧六形态也已渲染（原版语义，
+   逐形态清单见 `docs/registration/L35a.md` §16）：`selectFunc`（模板 `%s` 槽 +
+   `DefaultFuncEnum` 枚举）、`selectSub`（子 SELECT 列，AS 目标属性）、
+   `selectCollection`（一对多子查询 join，复用同类 leftJoin 的 ON 且该 leftJoin
+   不重复渲染）、`selectAssociation`（纯映射标记不产 SQL，no-op）、`from`（数据源
+   子查询，缺省别名 `tb`）、`around`（语句前后包裹，`{i}` 模板支持）。仍未做
+   （`unresolved`，不出 SQL）：`join("关键字")` 自定义关键字；`selectSub`/
+   `selectFunc` 子查询含运行期参数或 `{i}` 值、`selectCollection` 子/孙表不在投影
+   （原版猜 snake_case 表名，本仓不猜）。
 3. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
    `LambdaQueryWrapper` 文本→链由 `src/analyze` 解析（无 PSI 的类型推断），
    `unresolved` 时只给原因，不出 Java 代码。
