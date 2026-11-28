@@ -1,11 +1,7 @@
 id = "songrenshuo.mybatis-plus-sql-visualizer"
 name = "MyBatis SQL Visualizer"
 version = "0.1.0"
-description = """写代码时不用启动应用：mapper XML、注解 SQL、iBatis 2.x sqlMap、MyBatis-Plus / MPJ 的 Wrapper 链（联表、联表更新与删除、子查询）直接还原成数据库真正会收到的那条 SQL，参数自动回填。
-运行后，SQL 日志页签实时看真实执行：Java agent 增强捕获（Application / Spring Boot / JAR 运行配置），或把 MyBatis / iBatis / Hibernate / JdbcTemplate 四族控制台日志粘进面板还原；真实参数与耗时放在一起，同结构聚类、去重、慢查询高亮、N+1 疑似检测，双击跳回源码。
-每条结果先过检查：方言写法、不安全的写操作、性能规则与回滚计划。
-判不出来就标 unresolved 并给原因，绝不猜——服务未启，SQL 先知。
-工具窗五页签：SQL 日志、日志转 SQL、SQL 转 Java、历史、SQL 预览。另有 12 个只读 MCP 工具把同一引擎交给 AI 智能体。交流群二维码：SQL 日志面板工具栏的对话气泡图标。"""
+description = """写代码时不用启动应用：mapper XML、注解 SQL、iBatis 2.x sqlMap、MyBatis-Plus / MPJ 的 Wrapper 链（联表、联表更新与删除、子查询）直接还原成数据库真正会收到的那条 SQL，参数自动回填。｜ 运行后，SQL 日志页签实时看真实执行：Java agent 增强捕获（Application / Spring Boot / JAR 运行配置），或把 MyBatis / iBatis / Hibernate / JdbcTemplate 四族控制台日志粘进面板还原；真实参数与耗时放在一起，同结构聚类、去重、慢查询高亮、N+1 疑似检测，双击跳回源码。｜ 每条结果先过检查：方言写法、不安全的写操作、性能规则与回滚计划。｜ 判不出来就标 unresolved 并给原因，绝不猜——服务未启，SQL 先知。｜ 工具窗五页签：SQL 日志、日志转 SQL、SQL 转 Java、历史、SQL 预览。｜ 12 个只读 MCP 工具把同一引擎交给 AI 智能体。｜ 交流群二维码：SQL 日志面板工具栏的对话气泡图标。"""
 authors = ["songrenshuo"]
 homepage = "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer"
 license = "Apache-2.0"
