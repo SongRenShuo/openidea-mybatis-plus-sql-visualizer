@@ -596,8 +596,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "view.workbench.status.clipboard_missing",
-        "The clipboard capability is not granted; importing from the clipboard is unavailable.",
-        "未授予剪贴板能力，无法从剪贴板导入。",
+        "The clipboard capability is not granted; importing from the clipboard is unavailable. Tick it in Settings › Plugins › Installed › this plugin's Permissions.",
+        "未授予剪贴板能力，无法从剪贴板导入。可在 设置 › 插件 › 已安装 › 本插件的 Permissions 里勾选补授。",
     ),
     (
         "view.workbench.status.imported",
@@ -812,8 +812,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "view.logs.tab.log_to_sql.clipboard_denied",
-        "This build has no clipboard-reading capability (clipboard.read), so the clipboard cannot be read here.",
-        "本构建未获得剪贴板读取能力（clipboard.read），无法读取剪贴板。",
+        "This build has no clipboard-reading capability (clipboard.read), so the clipboard cannot be read here. Tick it in Settings › Plugins › Installed › this plugin's Permissions.",
+        "本构建未获得剪贴板读取能力（clipboard.read），无法读取剪贴板。可在 设置 › 插件 › 已安装 › 本插件的 Permissions 里勾选补授。",
     ),
     (
         "view.logs.tab.log_to_sql.converted",
@@ -1186,8 +1186,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     // so the message names the capability and the fallback that still works.
     (
         "capture.start.denied",
-        "Enhanced capture is unavailable: the {capability} permission was not granted. Grant it when installing the plugin, or paste console logs into the \"Log to SQL\" tab to restore them without any permission.",
-        "增强捕获不可用：未授予 {capability} 权限。可在安装插件时补授，或直接把控制台日志粘进「日志转 SQL」页签还原（无需任何权限）。",
+        "Enhanced capture is unavailable: the {capability} permission was not granted. Tick it in Settings › Plugins › Installed › this plugin's Permissions (any time), or paste console logs into the \"Log to SQL\" tab to restore them without any permission.",
+        "增强捕获不可用：未授予 {capability} 权限。在 设置 › 插件 › 已安装 › 本插件的 Permissions 里勾选即可随时补授；或直接把控制台日志粘进「日志转 SQL」页签还原（无需任何权限）。",
     ),
     // Stopping while nothing is attached but the plugin is still waiting: the
     // generic "no WebSocket is open" reads like a mistake, because the user did
