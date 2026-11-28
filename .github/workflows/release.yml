@@ -208,12 +208,27 @@ jobs:
           api="https://gitee.com/api/v5/repos/${OWNER}/${REPO}"
           release_id="$(curl -fsS --retry 3 "$api/releases?access_token=${GITEE_TOKEN}&per_page=100" \
             | jq -r --arg t "$TAG" '[.[] | select(.tag_name == $t) | .id][0] // empty')"
+          if [ -n "$release_id" ] && [ "$release_id" = "null" ]; then
+            release_id=""
+          fi
           if [ -z "$release_id" ]; then
-            release_id="$(curl -fsS --retry 3 -X POST "$api/releases" \
-              -d "access_token=${GITEE_TOKEN}" \
-              -d "tag_name=${TAG}" \
-              -d "name=${TAG}" \
-              -d "body=See the GitHub release for notes." | jq -r '.id')"
+            # Gitee requires `target_commitish` on create (GitHub does not); the
+            # tag is what the mirror publishes, so the branch behind it is enough.
+            created="$(curl -fsS --retry 3 -X POST "$api/releases" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              --data-urlencode "access_token=${GITEE_TOKEN}" \
+              --data-urlencode "tag_name=${TAG}" \
+              --data-urlencode "target_commitish=${GITHUB_REF_NAME:-master}" \
+              --data-urlencode "name=${TAG}" \
+              --data-urlencode "body=See the GitHub release for notes.")"
+            release_id="$(printf '%s' "$created" | jq -r '.id // empty')"
+            # A failed create returns `{"messages":[…]}` with no id: say what
+            # Gitee said instead of sending `null` to the upload endpoint (which
+            # only comes back as a bare 400).
+            if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
+              echo "::error::creating the Gitee release failed: $created"
+              exit 1
+            fi
           fi
           [ -n "$release_id" ] || { echo "::error::no Gitee release id"; exit 1; }
 
