@@ -2,35 +2,35 @@
   "properties": {
     "shortcuts.preview": {
       "type": "string",
-      "title": "预览 SQL",
+      "title": "预览 SQL 快捷键",
       "group": "Shortcuts",
       "default": "Alt+Shift+Q",
       "description": "只读文案：平台没有快捷键录制 API，请到 设置 › 快捷键（Keymap）中修改。"
     },
     "shortcuts.sqlToJava": {
       "type": "string",
-      "title": "SQL 转 Java",
+      "title": "SQL→Java 快捷键",
       "group": "Shortcuts",
       "default": "Alt+Shift+J",
       "description": "只读文案：平台没有快捷键录制 API，请到 设置 › 快捷键（Keymap）中修改。"
     },
     "shortcuts.explain": {
       "type": "string",
-      "title": "EXPLAIN 选中表",
+      "title": "EXPLAIN 快捷键",
       "group": "Shortcuts",
       "default": "",
       "description": "默认未绑定；只读文案，请到 设置 › 快捷键（Keymap）中修改。"
     },
     "shortcuts.count": {
       "type": "string",
-      "title": "COUNT 选中表",
+      "title": "COUNT 快捷键",
       "group": "Shortcuts",
       "default": "",
       "description": "默认未绑定；只读文案，请到 设置 › 快捷键（Keymap）中修改。"
     },
     "shortcuts.sample": {
       "type": "string",
-      "title": "抽样选中表",
+      "title": "抽样 10 行 快捷键",
       "group": "Shortcuts",
       "default": "",
       "description": "默认未绑定；只读文案，请到 设置 › 快捷键（Keymap）中修改。"

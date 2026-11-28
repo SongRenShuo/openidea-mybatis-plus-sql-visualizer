@@ -1131,7 +1131,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "ui.mapperNavYield",
-        title: "与同类 MyBatis 导航插件共存时让出跳转图标",
+        title: "与同类 MyBatis 导航插件共存时让出 XML 与 Mapper 跳转图标",
         group: "Gutter",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -1139,7 +1139,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "ui.xmlInlineSql",
-        title: "识别通用 XML 内嵌 SQL（叶子标签文本 / CDATA）",
+        title: "识别通用 XML 内嵌 SQL（叶子标签文本/CDATA）",
         group: "XML support",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -1147,7 +1147,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "ui.ibatisXml",
-        title: "iBatis 2.x <sqlMap> 语句预览",
+        title: "预览 iBatis 2.x sqlMap 语句",
         group: "XML support",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -1163,7 +1163,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "ui.consolePrepMode",
-        title: "预览打开时的控制台准备方式",
+        title: "执行控制台",
         group: "Editor",
         kind: Kind::Enum(&["lazy", "lazy_silent", "eager"]),
         default: DefaultValue::Str("lazy"),
@@ -1171,7 +1171,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "ui.pagesXmlSourceMode",
-        title: "自研框架数据源语言",
+        title: "自研框架数据源语言（HQL/SQL）",
         group: "Editor",
         kind: Kind::Enum(&["auto", "sql", "hql"]),
         default: DefaultValue::Str("auto"),
@@ -1195,7 +1195,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "ui.onboardingAnchorTip",
-        title: "首次检测到可预览 SQL 时显示一次性引导",
+        title: "首次检测到可预览的 SQL 代码时显示一次性引导通知",
         group: "Onboarding",
         kind: Kind::Bool,
         default: DefaultValue::Bool(true),
@@ -1234,7 +1234,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     // these rows carry the reference's default keys as read-only text.
     SettingDef {
         key: "shortcuts.preview",
-        title: "预览 SQL",
+        title: "预览 SQL 快捷键",
         group: "Shortcuts",
         kind: Kind::String,
         default: DefaultValue::Str("Alt+Shift+Q"),
@@ -1242,7 +1242,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "shortcuts.sqlToJava",
-        title: "SQL 转 Java",
+        title: "SQL→Java 快捷键",
         group: "Shortcuts",
         kind: Kind::String,
         default: DefaultValue::Str("Alt+Shift+J"),
@@ -1250,7 +1250,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "shortcuts.explain",
-        title: "EXPLAIN 选中表",
+        title: "EXPLAIN 快捷键",
         group: "Shortcuts",
         kind: Kind::String,
         default: DefaultValue::Str(""),
@@ -1258,7 +1258,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "shortcuts.count",
-        title: "COUNT 选中表",
+        title: "COUNT 快捷键",
         group: "Shortcuts",
         kind: Kind::String,
         default: DefaultValue::Str(""),
@@ -1266,7 +1266,7 @@ pub static DEFINITIONS: [SettingDef; 145] = [
     },
     SettingDef {
         key: "shortcuts.sample",
-        title: "抽样选中表",
+        title: "抽样 10 行 快捷键",
         group: "Shortcuts",
         kind: Kind::String,
         default: DefaultValue::Str(""),

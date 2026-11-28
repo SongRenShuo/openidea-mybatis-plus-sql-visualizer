@@ -51,24 +51,24 @@
     },
     "ui.mapperNavYield": {
       "type": "boolean",
-      "title": "与同类 MyBatis 导航插件共存时让出跳转图标",
+      "title": "与同类 MyBatis 导航插件共存时让出 XML 与 Mapper 跳转图标",
       "group": "Gutter",
       "default": true,
-      "description": "仅存储，尚未接线：本仓未做同类插件探测，跳转图标恒定显示。"
+      "description": "检测到同类 MyBatis 导航插件（MyBatisCodeHelperPro、MyBatisX、MyBatisPlus）启用时，隐藏本插件在 Mapper XML 语句行与 Mapper 接口方法行的跳转图标。仅存储，尚未接线：本仓未做同类插件探测，跳转图标恒定显示。"
     },
     "ui.xmlInlineSql": {
       "type": "boolean",
-      "title": "识别通用 XML 内嵌 SQL（叶子标签文本 / CDATA）",
+      "title": "识别通用 XML 内嵌 SQL（叶子标签文本/CDATA）",
       "group": "XML support",
       "default": true,
-      "description": "仅存储，尚未接线：本仓尚未实现通用 XML 内嵌 SQL 识别。"
+      "description": "对任意自研框架 XML 生效：叶子标签文本以 SELECT/INSERT/UPDATE/DELETE 等开头即显示预览图标。仅存储，尚未接线：本仓尚未实现通用 XML 内嵌 SQL 识别。"
     },
     "ui.ibatisXml": {
       "type": "boolean",
-      "title": "iBatis 2.x <sqlMap> 语句预览",
+      "title": "预览 iBatis 2.x sqlMap 语句",
       "group": "XML support",
       "default": true,
-      "description": "仅存储，尚未接线：本仓尚未实现 iBatis 2.x 语句预览。"
+      "description": "对 iBatis 2.x 的 <sqlMap> 文件生效，把 #name# 识别为参数。仅存储，尚未接线：本仓尚未实现 iBatis 2.x 语句预览。"
     },
     "ui.xmlSyntaxHighlight": {
       "type": "boolean",
@@ -100,19 +100,19 @@
     },
     "ui.consolePrepMode": {
       "type": "string",
-      "title": "预览打开时的控制台准备方式",
+      "title": "执行控制台",
       "group": "Editor",
       "enum": ["lazy", "lazy_silent", "eager"],
       "default": "lazy",
-      "description": "lazy = 不建控制台并保留入口；lazy_silent = 不建控制台也不放入口；eager = 打开即准备。仅存储，尚未接线：本仓预览直接读取编辑器，没有执行控制台准备阶段。"
+      "description": "预览打开时是否立刻准备 SQL 控制台：lazy = 按需准备（带入口）；lazy_silent = 按需准备（不放入口）；eager = 打开即准备。仅存储，尚未接线：本仓预览直接读取编辑器，没有执行控制台准备阶段。"
     },
     "ui.pagesXmlSourceMode": {
       "type": "string",
-      "title": "自研框架数据源语言",
+      "title": "自研框架数据源语言（HQL/SQL）",
       "group": "Editor",
       "enum": ["auto", "sql", "hql"],
       "default": "auto",
-      "description": "针对 <pages> 页面 XML 的 <datasource>：自动按实体类相关性判定，或固定按 SQL / HQL 处理。仅存储，尚未接线：本仓尚未实现该解析链。"
+      "description": "适用于 <pages> 下页面标签的 <datasource>：自动按 entityClass 与语句根标识符的关系推断 HQL/SQL，或固定按 SQL / HQL 处理。仅存储，尚未接线：本仓尚未实现该解析链。"
     },
     "ui.joinDiagramNative": {
       "type": "boolean",
@@ -162,7 +162,7 @@
     },
     "ui.onboardingAnchorTip": {
       "type": "boolean",
-      "title": "首次检测到可预览 SQL 时显示一次性引导",
+      "title": "首次检测到可预览的 SQL 代码时显示一次性引导通知",
       "group": "Onboarding",
       "default": true,
       "description": "仅存储，尚未接线：本仓尚无该引导通知。"
