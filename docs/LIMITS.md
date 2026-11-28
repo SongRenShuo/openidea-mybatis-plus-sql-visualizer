@@ -68,10 +68,13 @@
    联表实体的表名与列从工程索引读实体类得到。副表实体不在索引里时该链 `unresolved`
    （不猜表名）。列别名按原版分位：ON 侧按列自己的实体类（A47），条件/ORDER BY/GROUP BY
    一律主表别名 `t`（`columnPrefix`），SELECT 列按列自己的实体类查不到回落主表，
-   `selectAll(Class)` 永远展开主表列（原版 `parseSelectAll` 语义）。仍未做（`unresolved`，不出 SQL）：`selectFunc`/`selectSub`/
-   `selectCollection`/`selectAssociation`/`from(子查询)`/`around`/子表 MConsumer
-   子查询 join/联表 UPDATE 与 DELETE；`exists` 的 lambda 子查询内含运行期参数时整链
-   `unresolved`（参数顺序文本层排不准）。逐形态清单见 `docs/registration/L35a.md` §15。
+   `selectAll(Class)` 永远展开主表列（原版 `parseSelectAll` 语义）。子表 MConsumer 形态（`leftJoin(C, t -> t.setAlias("tt").selectAll().ge(…), left, right)`）
+   渲染为 `LEFT JOIN (SELECT tt.c1, … FROM sub tt WHERE …) tt ON tt.left = 主.right`，
+   子别名取 lambda 内 `setAlias`、无则类名首字母小写。仍未做（`unresolved`，不出 SQL）：
+   `selectFunc`/`selectSub`/`selectCollection`/`selectAssociation`/`from(子查询)`/
+   `around`/`join("关键字")`/联表 UPDATE 与 DELETE；`exists` 的 lambda 子查询内含运行期
+   参数时整链 `unresolved`（参数顺序文本层排不准）。逐形态清单见
+   `docs/registration/L35a.md` §15。
 3. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
    `LambdaQueryWrapper` 文本→链由 `src/analyze` 解析（无 PSI 的类型推断），
    `unresolved` 时只给原因，不出 Java 代码。

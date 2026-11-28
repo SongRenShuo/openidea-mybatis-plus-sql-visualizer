@@ -274,6 +274,12 @@ pub struct Join {
     /// A raw join fragment (`leftJoin("user_address addr on t.id = addr.user_id")`)
     /// is passed through verbatim after the join keyword.
     pub raw: Option<String>,
+    /// The sub-table consumer form
+    /// (`leftJoin(C, t -> t.setAlias("tt").selectAll().ge(…), left, right)`):
+    /// the joined relation is `(sub-select)` rather than a table. The reference
+    /// renders it as `LEFT JOIN (SELECT … FROM sub tt WHERE …) tt ON …`, with
+    /// the sub-alias from the lambda's `setAlias` or the class decapitalised.
+    pub sub_select: Option<String>,
 }
 
 /// One column of the SELECT list: which table alias it belongs to, its column,
@@ -406,6 +412,20 @@ pub fn render_with(
     dialect: &Dialect,
     disabled: &std::collections::BTreeSet<String>,
 ) -> WrapperOutput {
+    render_with_alias(text, columns, dialect, disabled, None)
+}
+
+/// [`render_with`] under an explicit main-table alias: a sub-table consumer
+/// renders its joined relation as a sub-select declared under the sub-alias
+/// (`(SELECT … FROM sub tt WHERE …) tt`), so every qualified column inside it
+/// has to use that name rather than the `t` default.
+pub fn render_with_alias(
+    text: &str,
+    columns: &EntityColumns,
+    dialect: &Dialect,
+    disabled: &std::collections::BTreeSet<String>,
+    alias: Option<&str>,
+) -> WrapperOutput {
     // MPJ recognition must come from the whole text, not from the call list: a
     // chain written `JoinWrappers.lambda(User.class)` names its factory in the
     // *call* (`lambda`), while `new MPJLambdaWrapper<User>()` names it in the
@@ -433,7 +453,7 @@ pub fn render_with(
         partial: false,
         unresolved: false,
         mpj,
-        main_alias: "t".to_string(),
+        main_alias: alias.unwrap_or("t").to_string(),
         join_aliases: Vec::new(),
         on_mode: false,
         dialect,
@@ -1035,6 +1055,7 @@ fn parse_join(name: &str, args: &[String], chain: &mut WrapperChain, ctx: &mut C
             alias: String::new(),
             on: Vec::new(),
             raw: Some(raw),
+            sub_select: None,
         });
         return;
     }
@@ -1072,17 +1093,76 @@ fn parse_join(name: &str, args: &[String], chain: &mut WrapperChain, ctx: &mut C
     let mut on: Vec<CondNode> = Vec::new();
     let is_lambda = |arg: &str| arg.contains("->");
 
-    // A sub-table consumer (`leftJoin(C, t -> t.setAlias("tt")…, left, right)`)
-    // renders a sub-select as the joined table. Not built this version.
+    // Sub-table consumer: `leftJoin(C, t -> t.setAlias("tt").selectAll().ge(…),
+    // left, right)` renders the joined relation as a sub-select —
+    // `LEFT JOIN (SELECT … FROM sub tt WHERE …) tt ON tt.left = main.right`.
+    // The reference builds it with a nested `QueryWrapperParser` over the child
+    // entity's `TableInfo` and takes the sub-alias from the lambda's `setAlias`
+    // (the class decapitalised when it names none).
     if rest.len() == 3 && is_lambda(rest.first().map(String::as_str).unwrap_or("")) {
-        structural(
-            ctx,
-            format!(
-                "`.{}(Class, lambda, …)` renders a sub-select as the joined table, which this version does not build",
+        let body = strip_lambda_prefix(&rest[0]);
+        // The sub-alias: `setAlias("tt")` inside the lambda, else the default.
+        let sub_alias = extract_string_call(&body, "setAlias").unwrap_or(alias.clone());
+        // The sub-select's own text: the lambda body with `setAlias(…)` removed
+        // (the alias moves into the FROM clause the sub-select declares).
+        let inner = remove_call(&body, "setAlias");
+        // The sub-select is an MPJ statement in its own right, rendered under
+        // the sub-alias so its columns and its conditions agree on one name.
+        let sub = {
+            let joined = JoinWrappers::rehead(&inner, &entity.class_name);
+            render_with_alias(
+                &joined,
+                &entity,
+                ctx.dialect,
+                &Default::default(),
+                Some(&sub_alias),
+            )
+        };
+        if sub.confidence == Confidence::Unresolved {
+            ctx.unresolved = true;
+            push_key(ctx, "wrapper.structural_method");
+            ctx.notes.push(format!(
+                "the `.{}` sub-table lambda could not be rendered as a sub-select; no SQL is emitted",
                 name
-            ),
-        );
-        chain.unsupported.push(name.to_string());
+            ));
+            ctx.partial = false;
+            chain.unsupported.push(name.to_string());
+            return;
+        }
+        let sub_sql = sub.sql.unwrap_or_default();
+        // The ON columns: the joined side is the sub-select, so its column takes
+        // the SUB alias (`tt`), not the class-decapsulated one — the reference
+        // prefixes the left column with `alias`, which for this form is the
+        // sub-alias it just declared.
+        let left = resolve_qualified(&rest[1], ctx)
+            .map(|(_, column)| (sub_alias.clone(), column))
+            .or_else(|| string_literal(&rest[1]).map(|column| (sub_alias.clone(), column)));
+        let right = resolve_qualified(&rest[2], ctx)
+            .or_else(|| string_literal(&rest[2]).map(|column| (ctx.main_alias.clone(), column)));
+        let (Some((left_alias, left_col)), Some((right_alias, right_col))) = (left, right) else {
+            ctx.unresolved = true;
+            push_key(ctx, "wrapper.unknown_field");
+            ctx.notes.push(format!(
+                "cannot map the `{name}` ON arguments `{}` / `{}` to columns",
+                rest[1], rest[2]
+            ));
+            ctx.partial = false;
+            chain.unsupported.push(name.to_string());
+            return;
+        };
+        chain.joins.push(Join {
+            kind,
+            table: String::new(),
+            alias: sub_alias,
+            on: vec![CondNode::Leaf(Condition {
+                connector: Connector::And,
+                op: Op::Eq,
+                column: format!("{left_alias}.{left_col}"),
+                values: vec![Value::Column(format!("{right_alias}.{right_col}"))],
+            })],
+            raw: None,
+            sub_select: Some(sub_sql),
+        });
         return;
     }
     // Lambda ON: `leftJoin(C, on -> on.eq(a, b))` — one lambda builds the whole
@@ -1161,6 +1241,7 @@ fn parse_join(name: &str, args: &[String], chain: &mut WrapperChain, ctx: &mut C
         alias,
         on,
         raw: None,
+        sub_select: None,
     });
 }
 
@@ -1306,6 +1387,44 @@ fn parse_select(name: &str, args: &[String], ctx: &mut Ctx, chain: &mut WrapperC
                 function: Some(keyword),
             });
         }
+    }
+}
+
+/// The first string argument of a call in `text` (`setAlias("tt")` → `tt`).
+fn extract_string_call(text: &str, method: &str) -> Option<String> {
+    let at = text.find(&format!("{method}("))?;
+    let rest = &text[at + method.len() + 1..];
+    let close = rest.find(')')?;
+    string_literal(&rest[..close])
+}
+
+/// Drops one whole call (`setAlias("tt")`) from a chain body, including its
+/// argument parentheses, leaving the surrounding chain intact.
+fn remove_call(text: &str, method: &str) -> String {
+    let needle = format!("{method}(");
+    let Some(at) = text.find(&needle) else {
+        return text.to_string();
+    };
+    let after = &text[at + needle.len()..];
+    let Some(close) = after.find(')') else {
+        return text.to_string();
+    };
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..at]);
+    out.push_str(&after[close + 1..]);
+    out
+}
+
+/// Gives a chain body an MPJ head so it is recognised as a join chain: a
+/// sub-table lambda's body (`selectAll().ge(…)`) carries no factory of its own.
+struct JoinWrappers;
+
+impl JoinWrappers {
+    fn rehead(body: &str, class: &str) -> String {
+        format!(
+            "JoinWrappers.lambda({class}.class).{}",
+            body.trim_start_matches('.')
+        )
     }
 }
 
@@ -1909,13 +2028,11 @@ fn render_join(join: &Join, dialect: &Dialect) -> String {
     } else {
         format!(" ON {}", render_nodes(&join.on, dialect))
     };
-    format!(
-        "{} {} {}{}",
-        join.kind.sql(),
-        quote(&join.table, dialect),
-        join.alias,
-        on
-    )
+    let relation = match &join.sub_select {
+        Some(sub) => format!("({sub})"),
+        None => quote(&join.table, dialect),
+    };
+    format!("{} {} {}{}", join.kind.sql(), relation, join.alias, on)
 }
 
 fn render_fragment(chain: &WrapperChain, dialect: &Dialect) -> Option<String> {
@@ -2674,9 +2791,11 @@ mod tests {
     }
 
     #[test]
-    fn a_sub_table_consumer_join_refuses_the_render() {
-        // Demo `joinExtAndSubTable`'s second join renders a sub-select as the
-        // joined table — statement structure this version does not build.
+    fn a_sub_table_consumer_join_renders_a_sub_select() {
+        // Demo `joinExtAndSubTable`'s second join: the joined relation is a
+        // sub-select, with the sub-alias from the lambda's `setAlias` and the
+        // ON columns following A47. The reference renders
+        // `LEFT JOIN (SELECT … FROM sub tt WHERE …) tt ON tt.left = main.right`.
         let out = render(
             r#"JoinWrappers.lambda(DeviceInfoEntity.class)
                 .selectAll(DeviceInfoEntity.class)
@@ -2688,14 +2807,39 @@ mod tests {
             &device_cols(),
             mysql(),
         );
-        assert_eq!(out.confidence, Confidence::Unresolved);
-        assert_eq!(out.sql, None);
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.expect("the chain renders");
+        // The sub-select carries its own FROM under the sub-alias.
         assert!(
-            out.message_keys
-                .contains(&"wrapper.structural_method".to_string()),
-            "{:?}",
-            out.message_keys
+            sql.contains("LEFT JOIN (SELECT tt.station_id, tt.station_name, tt.merchant_id FROM station_info tt WHERE tt.merchant_id >= 0) tt"),
+            "{sql}"
         );
+        // The ON sides: joined column on the left, main column on the right.
+        assert!(sql.contains("ON tt.station_id = t.station_id"), "{sql}");
+        // And the outer FROM keeps the main table.
+        assert!(sql.contains("FROM car_device_info t"), "{sql}");
+    }
+
+    #[test]
+    fn a_sub_table_consumer_without_set_alias_uses_the_class_alias() {
+        // The reference's fallback: no `setAlias` in the lambda → the child
+        // class decapitalised.
+        let out = render(
+            r#"JoinWrappers.lambda(DeviceInfoEntity.class)
+                .selectAll(DeviceInfoEntity.class)
+                .leftJoin(StationInfoEntity.class, t -> t
+                    .selectAll()
+                    .ge(StationInfoEntity::getMerchantId, 0),
+                    StationInfoEntity::getStationId, DeviceInfoEntity::getStationId)"#,
+            &device_cols(),
+            mysql(),
+        );
+        let sql = out.sql.expect("the chain renders");
+        assert!(
+            sql.contains("LEFT JOIN (SELECT stationInfoEntity.station_id"),
+            "{sql}"
+        );
+        assert!(sql.contains(") stationInfoEntity ON"), "{sql}");
     }
 
     #[test]
