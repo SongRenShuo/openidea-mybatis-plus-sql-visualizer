@@ -203,11 +203,25 @@ curl -s "$API/releases?access_token=${TOKEN}&per_page=100"
 curl -s -X POST "$API/releases" --data-urlencode "access_token=${TOKEN}" \
   --data-urlencode "tag_name=<版本>" --data-urlencode "target_commitish=master" \
   --data-urlencode "name=<版本>" --data-urlencode "body=<正文>"
+# 改发行版（改 prerelease 只能走这条：POST 再说一次会 400「该标签已经存在发行版」）
+# PATCH 是整条替换：tag_name / name / body 三项都必须非空，少一项就 400
+# （只发 prerelease 会一次报 tag_name、name、body 三条 missing）
+curl -s -X PATCH "$API/releases/<id>" --data-urlencode "access_token=${TOKEN}" \
+  --data-urlencode "tag_name=<版本>" --data-urlencode "name=<版本>" \
+  --data-urlencode "body=<正文>" --data-urlencode "prerelease=true"
 # 传附件
 curl -s -X POST "$API/releases/<id>/attach_files" -F "access_token=${TOKEN}" -F "file=@<包>"
 # 删发行版
 curl -s -X DELETE "$API/releases/<id>?access_token=${TOKEN}"
 ```
+
+三个字段级坑（2026-11-30 逐个实测）：
+
+| 现象 | 真因 |
+| --- | --- |
+| `{"messages":["prerelease is invalid"]}` 400 | `prerelease=` 空值也发。只在值非空时追加这个参数，不传等价于 false |
+| `{"message":"验证错误，该标签已经存在发行版"}` 400 | 对已有 tag 再 POST。改 flag 要走 PATCH |
+| `{"messages":["body is missing"]}` 400 | PATCH 漏 `body`。整条替换，三个必填字段都要带 |
 
 令牌存 `.local/gitee-token.json`（`.local/*` 已被 gitignore，唯一放行 `README.md`）。**绝不入库、不写进日志。**
 

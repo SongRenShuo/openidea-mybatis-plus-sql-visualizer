@@ -27,9 +27,15 @@
 
 ## 提 PR 的具体步骤
 
-现在**还不能提**。卡在一个前置：已发布的 `2026.11.29` 包，包内 id 是旧名
-`songrenshuo.mybatis-plus-sql-visualizer`，而插件 id 已改为
-`songrenshuo.mybatis-sql-visualizer`。宿主与登记仓都要求「包内 id = 登记 id」：
+**第一步已经完成**：`2026.11.30-beta.1` 是按新 id 构建的包，双端字节一致
+（sha256 `69bde5fb5f4b5abf5df054d2461636753ab472dd50f38f6f9b62f5f4b935721d`），
+包内 `id = "songrenshuo.mybatis-sql-visualizer"`。
+
+**仍不能提**，卡在第二件事：这一版带 `-beta` 后缀，而按
+`docs/规范/版本号规范-说明文档.md`「上架市场的版本必须去掉后缀」。登记要一个
+正式版本对一条 `[[versions]]`，所以等正式版 `2026.11.30` 发出来再走回填。
+
+为什么不能拿旧包凑：宿主与登记仓都要求「包内 id = 登记 id」：
 
 - 宿主：`crates/ide-host/src/plugins/market.rs` 的 `verify_market_package`，把
   `manifest.id` / `manifest.version` / `digest` 三者与索引条目一次比较，不等即报
@@ -38,14 +44,15 @@
   所以旧包不能靠改索引糊弄过去；
 - 登记仓 CI 下载包、跑 `check`、验签，同样过不去。
 
-因此本目录两个 `.toml` 的 `[[versions]]` 是**注释状态**，`market/official-pr/registry-entry.json`
-的 `download` / `digest` 是 `null`。这是刻意的：填上旧包只会让 CI 一提交就红。
+因此本目录两个 `.toml` 的 `[[versions]]` 仍是**注释状态**，`market/official-pr/registry-entry.json`
+的 `download` / `digest` 仍是 `null`。这是刻意的：填 beta 会被上游判「市场版本不应带后缀」、
+填旧包会被判 id 不符，两种都让 CI 一提交就红。
 
 ### 解锁顺序（缺一不可）
 
-1. **发一版按新 id 构建的包**：按 `.agents/skills/openidea-release-workflow/SKILL.md`
-   走一轮完整发行（改 `plugin.toml` + `Cargo.toml` 的 version → 提交推 master →
-   `git tag <版本>` → 推 tag → `release.yml` 是唯一构建者）。确认包内
+1. ~~**发一版按新 id 构建的包**~~ ✅ 2026-11-30 完成：`2026.11.30-beta.1`。
+   正式版 `2026.11.30` 仍按同一套流程发（改 `plugin.toml` + `Cargo.toml` 的 version →
+   提交推 master → `git tag <版本>` → 推 tag → `release.yml` 是唯一构建者）。确认包内
    `plugin.toml` 的 `id` 已是 `songrenshuo.mybatis-sql-visualizer`：
 
    ```sh

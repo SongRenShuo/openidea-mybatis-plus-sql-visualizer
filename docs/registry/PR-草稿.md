@@ -24,7 +24,7 @@ Add songrenshuo.mybatis-sql-visualizer
 
 - `publishers/songrenshuo.toml` —— 名称 "SongRenShuo"，owner `@SongRenShuo`，一把 Ed25519 公钥，`revoked-keys = []`。
 
-## 新插件：`songrenshuo.mybatis-sql-visualizer` 2026.11.29
+## 新插件：`songrenshuo.mybatis-sql-visualizer` 2026.11.30
 
 OpenIDEA 的 MyBatis SQL 调试插件。它解决的是「这条 SQL 最后到底发出去什么」这个每天都要猜的问题。
 
@@ -74,7 +74,7 @@ Apache-2.0。发布包由该仓 CI 从源码构建（`.github/workflows/release.
 
 ### 版本
 
-`engines.openidea = "^1.18"`。首次发布，版本号 `2026.11.29`（日期制，tag 不带 `v` 前缀）。
+`engines.openidea = "^1.18"`。首次发布，版本号 `2026.11.30`（日期制，tag 不带 `v` 前缀）。
 ```
 
 ## 提交步骤（真机测试通过后）

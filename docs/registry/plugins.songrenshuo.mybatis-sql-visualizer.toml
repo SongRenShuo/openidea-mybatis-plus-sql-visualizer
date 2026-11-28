@@ -15,11 +15,16 @@ suggest = ["pom.xml"]
 # 已发布的 2026.11.29 包**包内 id 仍是旧名**，宿主安装时会比对「包内 id = 索引 id」
 # （`crates/ide-host/src/plugins/market.rs` 的 `verify_market_package`，id/version/digest
 # 三者在 438 行一次性比较），签名也是对着 id 签的（`crates/ide-extension/src/package.rs`
-# 的 `signed_message`，消息首段就是 id）。因此这里不再放
-# 一条指向旧包的 `[[versions]]`——那会一提交就被上游 CI 判 id 不符。第一份按新 id
-# 构建的包随下一版发布后，用 build-index.sh 从包里取 sha256 回填下面这条。
+# 的 `signed_message`，消息首段就是 id）。因此这里不放一条指向旧包的 `[[versions]]`
+# ——那会一提交就被上游 CI 判 id 不符。
+#
+# 2026-11-30：第一份按新 id 构建的包已经发出（`2026.11.30-beta.1`，
+# sha256 69bde5fb5f4b5abf5df054d2461636753ab472dd50f38f6f9b62f5f4b935721d，
+# GitHub 与 Gitee 双端字节一致，包内 id 已是新名）。但它带 `-beta` 后缀，
+# 按版本号规范「上架市场的版本必须去掉后缀」，所以这一条不复用 beta 的哈希：
+# 正式版 `2026.11.30` 发出来之后再填，一个版本对一条登记。
 #
 # [[versions]]
-# version = "2026.11.29"
-# package = "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
-# sha256 = "b160c20cc9c3f3d7f754a0227b8abca66525ad1f5511293ad4fb897b6f2fe70e"
+# version = "2026.11.30"
+# package = "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.30/songrenshuo.mybatis-sql-visualizer-2026.11.30.oiplugin"
+# sha256 = "<正式版 CI 那一轮打印的值>"

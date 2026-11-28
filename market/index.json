@@ -754,20 +754,21 @@
   ],
   "plugins": [
     {
-      "id": "songrenshuo.mybatis-plus-sql-visualizer",
+      "id": "songrenshuo.mybatis-sql-visualizer",
       "name": "MyBatis SQL Visualizer",
-      "version": "2026.11.29",
+      "version": "2026.11.30-beta.1",
       "description": "写代码时不用启动应用：mapper XML、注解 SQL、iBatis 2.x sqlMap、MyBatis-Plus / MPJ 的 Wrapper 链（联表、联表更新与删除、子查询）直接还原成数据库真正会收到的那条 SQL，参数自动回填。｜ 运行后，SQL 日志页签实时看真实执行：Java agent 增强捕获（Application / Spring Boot / JAR 运行配置），或把 MyBatis / iBatis / Hibernate / JdbcTemplate 四族控制台日志粘进面板还原；真实参数与耗时放在一起，同结构聚类、去重、慢查询高亮、N+1 疑似检测，双击跳回源码。｜ 每条结果先过检查：方言写法、不安全的写操作、性能规则与回滚计划。｜ 判不出来就标 unresolved 并给原因，绝不猜——服务未启，SQL 先知。｜ 工具窗五页签：SQL 日志、日志转 SQL、SQL 转 Java、历史、SQL 预览。｜ 12 个只读 MCP 工具把同一引擎交给 AI 智能体。｜ 交流群二维码：SQL 日志面板工具栏的对话气泡图标。｜ 权限用途（设置 › 插件 › 已安装 › 本插件的 Permissions 可随时勾选或取消）：读项目是还原 SQL 的根基；增强捕获需 java.agent 与 net:127.0.0.1（拒绝时用「日志转 SQL」粘贴还原，无需权限）；process:java 只用于启动哈希校验过的本地引擎 jar（EXPLAIN 与预览执行）；剪贴板两项只服务复制与导入。",
       "authors": [
         "songrenshuo"
       ],
       "publisher": "songrenshuo",
-      "download": "https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin",
-      "digest": "3669fb85a7e6fab0b915bdd7bee979cf088c04541d92db4006c24706b2a9ac4d",
+      "download": "https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.30-beta.1/songrenshuo.mybatis-sql-visualizer-2026.11.30-beta.1.oiplugin",
+      "digest": "69bde5fb5f4b5abf5df054d2461636753ab472dd50f38f6f9b62f5f4b935721d",
       "capabilities": [
         "project.read",
         "events",
         "storage",
+        "java.agent",
         "clipboard",
         "clipboard.read",
         "process:java",
@@ -783,7 +784,7 @@
         "dark": null
       },
       "homepage": "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer",
-      "notes": "2026.11.29 — 首个 OpenIDEA 版：mapper XML / 注解 / iBatis / Wrapper 链静态还原 SQL，参数自动回填\n2026.11.29 — MyBatis-Plus 与 MPJ 全形态：联表、联表更新与删除、子查询\n2026.11.29 — SQL 日志五页签：增强捕获、四族日志粘贴还原、聚类去重、慢查询、N+1\n2026.11.29 — 检查面：方言写法、无界写操作、性能规则、回滚计划\n2026.11.29 — 12 个只读 MCP 工具；Gutter 预览图标与 Mapper↔XML 导航\n2026.11.29 — 权限可随时补授，缺失时各功能降级并在界面说明",
+      "notes": "2026.11.30-beta.1 — 内测版：装了 2026.11.29 的用户会收到升级提示\n2026.11.30-beta.1 — 快速预览与 IntelliJ 版对齐：工具栏按钮改为开关，在日志列表下方打开停靠面板并跟随选中行，可就地编辑，编辑后固定，「恢复并跟随」回到原 SQL\n2026.11.30-beta.1 — 渲染、校验、CRUD、回滚计划这类命令不再抢开「输出」页签；构建号、索引统计这类诊断命令与出错时仍会打开\n2026.11.30-beta.1 — 插件标识改为 songrenshuo.mybatis-sql-visualizer：装过旧版的请先卸载旧版，两者会同时出现在插件页\n2026.11.30-beta.1 — 市场索引每日自动并入官方索引，另提供含本插件的自建索引；装签名包时把市场地址指向它",
       "downloads": null,
       "featured": false,
       "suggest": []

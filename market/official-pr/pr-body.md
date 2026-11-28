@@ -1,7 +1,7 @@
 # Add MyBatis SQL Visualizer to the plugin marketplace
 
 **Plugin id:** `songrenshuo.mybatis-sql-visualizer`
-**Version:** 2026.11.29
+**Version:** 2026.11.30
 **Repository:** https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer
 **License:** Apache-2.0 (see `LICENSE` and `NOTICE`)
 
@@ -15,7 +15,7 @@ never produces SQL.
 
 ## Package
 
-- `songrenshuo.mybatis-sql-visualizer-<version>.oiplugin`（2026.11.29 那份包的包内 id 仍是旧名，下一版起按新 id 构建）
+- `songrenshuo.mybatis-sql-visualizer-<version>.oiplugin`（包内 id 已是 `songrenshuo.mybatis-sql-visualizer`，与登记 id 一致）
 - sha256: `<filled by dist/*.sha256 after release>`
 - Built with `openidea-plugin` 0.1.55, plugin API 1.18, Rust 1.98.1 (wasm32-wasip2).
 

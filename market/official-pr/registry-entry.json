@@ -1,8 +1,8 @@
 {
-  "_status": "blocked: 等第一份按新 id 构建并发布的包。这里不放 download/digest，因为 已发布的 2026.11.29 包包内 id 是旧名 songrenshuo.mybatis-plus-sql-visualizer，与下面的 id 不符，宿主（crates/ide-host/src/plugins/market.rs 的 verify_market_package，id/version/digest 一次比较）与登记仓 CI 都会拒收。",
+  "_status": "blocked: 新 id 的包已发出（2026.11.30-beta.1，sha256 69bde5fb5f4b5abf5df054d2461636753ab472dd50f38f6f9b62f5f4b935721d，双端一致，包内 id = songrenshuo.mybatis-sql-visualizer），但它带 -beta 后缀，上架市场的版本必须去掉后缀。等正式版 2026.11.30 发布后再填 download/digest；在此之前保持 null，登记仓 CI 会在 id/version/digest 三者任一不符时拒收。",
   "id": "songrenshuo.mybatis-sql-visualizer",
   "name": "MyBatis SQL Visualizer",
-  "version": "2026.11.29",
+  "version": "2026.11.30",
   "description": "Renders MyBatis mapper XML, annotation SQL, iBatis 2.x, MyBatis-Plus wrappers and SQL logs into executable SQL, and checks a statement before it reaches a database. Every result carries exact/partial/unresolved confidence; unresolved never produces SQL.",
   "authors": ["songrenshuo"],
   "publisher": "songrenshuo",
