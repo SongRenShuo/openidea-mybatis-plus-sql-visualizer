@@ -12,10 +12,10 @@ publish = false
 # parity harness (T1-12) and the ignored jar e2e test can call `core` directly.
 crate-type = ["cdylib", "rlib"]
 
-# Pinned to the SDK shipped with openidea-plugin 0.1.51 (plugin API 1.15).
-# Building against `main` targets API 1.16, which no released IDE loads.
+# Pinned to the SDK shipped with openidea-plugin 0.1.55 (plugin API 1.18).
+# Building against `main` may target a newer API that no released IDE loads.
 [dependencies]
-openidea-plugin = { git = "https://github.com/l0ng-ai/openidea", tag = "v0.1.54" }
+openidea-plugin = { git = "https://github.com/l0ng-ai/openidea", tag = "v0.1.55" }
 # JSON for the engine protocol, MCP argument/result bodies and log records.
 # Both are Apache-2.0/MIT and already in the SDK's tree, so the build cost is nil.
 serde = { version = "1", features = ["derive"] }

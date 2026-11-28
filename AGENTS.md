@@ -14,7 +14,7 @@
 | 项 | 值 |
 | --- | --- |
 | 插件 API | `engines.openidea = "^1.15"`；**不得**使用 1.16 特性（`frames`、`markdown_hover`、`customEditors.binary`） |
-| SDK | `openidea-plugin = { git = "...", tag = "v0.1.51" }`；脚手架必须用 0.1.51 的 CLI 生成 |
+| SDK | `openidea-plugin = { git = "...", tag = "v0.1.55" }`（插件 API 仍 1.18）；脚手架用 0.1.51 的 CLI 生成 |
 | Rust | 1.98.1（`rust-toolchain.toml`），target `wasm32-wasip2` |
 | Node | 22.22.3（`.nvmdrc`，NVM Desktop 目录级切换） |
 
