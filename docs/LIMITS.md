@@ -159,12 +159,15 @@
 17. **日志面板的「设置」按钮不打开 IDE 设置页**：原版点齿轮会定位到
    `Tools > SQL Visualizer > SQL 日志`；插件 API 1.18 没有「打开设置页」的调用，也没有写设置
    的 API（只有 `host::setting_bool/string/number` 读）。本版点齿轮在当前面板弹一层设置摘要：
-   列出 SQL 日志相关项的当前值与「在 IDE 设置 › 工具 › MyBatis SQL Visualizer › SQL 日志 中修改」
-   的路径；改设置仍需去 IDE 设置页。原版设置页里的「修改快捷键」录制器同理做不到——快捷键页
-   只列出默认键位并指向 IDE Keymap。
-18. **没有项目级设置页**：原版 `SQL Visualizer（当前项目）` 按项目覆盖方言、参数替换、格式化、
-   逻辑删除等 10 项；插件清单目前只能声明应用级设置页，本仓不造项目级覆盖。需要按项目不同的
-   取值时，在 IDE 里切换全局值。
+   列出 SQL 日志相关项的当前值与「在 IDE 设置 › 插件 › MyBatis SQL Visualizer › SQL 日志 中修改」
+   的路径（插件的设置页挂在设置树的「插件」分组下，不是原版的「工具」分组）；改设置仍需去
+   IDE 设置页。原版设置页里的「修改快捷键」录制器同理做不到——快捷键页只列出默认键位并指向
+   IDE Keymap。
+18. **项目级覆盖由宿主原生提供，无需自建**（2026-11-28 修正，原条目「没有项目级设置页」过时）：
+   插件设置页右上角有 `Global / This project` 切换（设置页头注明「插件的设置；项目可以覆盖」），
+   宿主读值时按当前项目取覆盖后的生效值（`plugin_settings(plugin, root)` 走项目的
+   `settings.effective()`，见 `crates/ide-host/src/plugins/api.rs`）。原版 `SQL Visualizer
+   （当前项目）` 的按项目覆盖语义由此覆盖，插件侧无需再做。
 19. **颜色项是文本，不是取色器**：设置的 schema 只有 `boolean / integer / string / enum` 四种
    控件，CRUD 四色因此是 `#RRGGBB` 文本框（带校验与默认值），没有原版的颜色选择器。
 20. **预览 SQL 区是只读展示**：原版预览编辑器可直接改 SQL；本版 web 编辑器做行号 + 高亮 + 复制，

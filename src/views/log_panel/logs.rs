@@ -1271,13 +1271,14 @@ mod tests {
         let (host, _guard) = test_host();
         handle_panel_message(&host, "{\"op\":\"settings\"}").unwrap();
         // The page renders its own settings card on the click (lane L2); a
-        // second notification only repeated the same line with a stale page
-        // path ("Settings → Plugins"), so the op now leaves the Output pointer
-        // alone and the path there is the one the card shows.
+        // second notification only repeated the same line, so the op leaves
+        // the Output pointer alone and the path there is the one the card
+        // shows. The hint names the real path (Settings › Plugins › … since
+        // the plugin settings live under the Plugins group), so no stale-path
+        // assertion applies any more.
         assert!(host.notifications().is_empty(), "no duplicate notification");
         let out = &host.output()[common::CHANNEL];
         assert!(out.contains(&t("view.logs.settings.path_hint")), "{out}");
-        assert!(!out.contains("Plugins"), "stale page path: {out}");
     }
 
     #[test]

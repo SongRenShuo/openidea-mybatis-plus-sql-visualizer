@@ -233,8 +233,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ("view.logs.settings.title", "Settings", "设置"),
     (
         "view.logs.settings.guide",
-        "Open Settings › Tools › MyBatis SQL Visualizer › SQL Log to change the dialect and log options.",
-        "请在 设置 › 工具 › MyBatis SQL Visualizer › SQL 日志 中修改方言与日志选项。",
+        "Open Settings › Plugins › MyBatis SQL Visualizer › SQL Log to change the dialect and log options.",
+        "请在 设置 › 插件 › MyBatis SQL Visualizer › SQL 日志 中修改方言与日志选项。",
     ),
     ("view.logs.button.help", "Help", "帮助"),
     ("view.logs.status.follow_on", "Following latest", "跟随最新"),
@@ -1075,8 +1075,8 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     (
         "view.logs.settings.path_hint",
-        "Change these in Settings \u{203a} Tools \u{203a} MyBatis SQL Visualizer \u{203a} SQL Logs.",
-        "在 IDE 设置 \u{203a} 工具 \u{203a} MyBatis SQL Visualizer \u{203a} SQL 日志 中修改。",
+        "Change these in Settings \u{203a} Plugins \u{203a} MyBatis SQL Visualizer \u{203a} SQL Logs.",
+        "在 IDE 设置 \u{203a} 插件 \u{203a} MyBatis SQL Visualizer \u{203a} SQL 日志 中修改。",
     ),
     ("view.logs.settings.on", "On", "开"),
     ("view.logs.settings.off", "Off", "关"),
