@@ -7,12 +7,12 @@
 两个文件（内容见同目录两个 .toml）：
 
 1. `publishers/songrenshuo.toml` —— 注册发布者与公钥
-2. `plugins/songrenshuo.mybatis-plus-sql-visualizer.toml` —— 插件仓库地址与版本表
+2. `plugins/songrenshuo.mybatis-sql-visualizer.toml` —— 插件仓库地址与版本表
 
 ## PR 标题
 
 ```
-Add songrenshuo.mybatis-plus-sql-visualizer
+Add songrenshuo.mybatis-sql-visualizer
 ```
 
 标题走登记仓的英文惯例（`Add <publisher>.<plugin>`），正文用中文——两者在在册 PR 里都很常见（#367 全中文、#375 全英文）。
@@ -24,7 +24,7 @@ Add songrenshuo.mybatis-plus-sql-visualizer
 
 - `publishers/songrenshuo.toml` —— 名称 "SongRenShuo"，owner `@SongRenShuo`，一把 Ed25519 公钥，`revoked-keys = []`。
 
-## 新插件：`songrenshuo.mybatis-plus-sql-visualizer` 0.1.0
+## 新插件：`songrenshuo.mybatis-sql-visualizer` 0.1.0
 
 OpenIDEA 的 MyBatis SQL 调试插件。它解决的是「这条 SQL 最后到底发出去什么」这个每天都要猜的问题。
 
@@ -79,14 +79,14 @@ Apache-2.0。发布包由该仓 CI 从源码构建（`.github/workflows/release.
 gh repo fork l0ng-ai/openidea-plugins --clone=false
 gh repo clone <your-fork> /tmp/openidea-plugins
 cd /tmp/openidea-plugins
-git checkout -b add-songrenshuo-mybatis-plus-sql-visualizer
+git checkout -b add-songrenshuo-mybatis-sql-visualizer
 cp <本仓>/docs/registry/publishers.songrenshuo.toml publishers/songrenshuo.toml
-cp <本仓>/docs/registry/plugins.songrenshuo.mybatis-plus-sql-visualizer.toml \
-   plugins/songrenshuo.mybatis-plus-sql-visualizer.toml
-git add publishers/songrenshuo.toml plugins/songrenshuo.mybatis-plus-sql-visualizer.toml
+cp <本仓>/docs/registry/plugins.songrenshuo.mybatis-sql-visualizer.toml \
+   plugins/songrenshuo.mybatis-sql-visualizer.toml
+git add publishers/songrenshuo.toml plugins/songrenshuo.mybatis-sql-visualizer.toml
 git commit -F <提交信息文件>
 git push -u origin HEAD
-gh pr create --repo l0ng-ai/openidea-plugins --title "Add songrenshuo.mybatis-plus-sql-visualizer" --body-file <PR 正文文件>
+gh pr create --repo l0ng-ai/openidea-plugins --title "Add songrenshuo.mybatis-sql-visualizer" --body-file <PR 正文文件>
 ```
 
 ## 审核方会查的点（policy.mdx）

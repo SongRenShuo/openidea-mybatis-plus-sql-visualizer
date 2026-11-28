@@ -96,7 +96,7 @@ Rules that are not negotiable:
   package the IDE would then refuse to install.
 
 `MPSV_PUBLISHER` is the publisher id the key is registered under — the prefix of
-the plugin id (`songrenshuo` for `songrenshuo.mybatis-plus-sql-visualizer`). It
+the plugin id (`songrenshuo` for `songrenshuo.mybatis-sql-visualizer`). It
 defaults to `authors[0]` in `plugin.toml`, and the script prints which one it
 used.
 

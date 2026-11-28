@@ -93,7 +93,13 @@ https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer/raw/master/market/
    （前端 `src/features/plugins/PluginsPage.tsx` 的 `editMarketUrl`，接口
    `plugin_set_market_url`）。
 2. 填入上面的地址，保存后列表刷新。
-3. 搜索 `MyBatis SQL Visualizer`，或看 id `songrenshuo.mybatis-plus-sql-visualizer`。
+3. 搜索 `MyBatis SQL Visualizer`。插件 id 已于 2026-11-29 改为
+   `songrenshuo.mybatis-sql-visualizer`，但**本文件的 `index.json` 里仍是旧 id**
+   （`songrenshuo.mybatis-plus-sql-visualizer`）：索引由 `scripts/build-index.sh` 从已签名的包
+   生成，而线上那份 2026.11.29 包的包内 id 是旧名。宿主安装时比对「包内 id = 索引 id」
+   （`crates/ide-host/src/plugins/market.rs` 的 `verify_market_package`），比不过就报
+   `the download does not match the marketplace's entry`。所以索引不能先于包改：
+   第一份按新 id 构建的包发出去之后，重跑 `build-index.sh` 覆盖本文件，id 自然变新。
 4. 判断是否生效，别只看界面文案：Windows 上
    `%APPDATA%\ai.l0ng.openidea\plugins\market-index.json` 会被重写，`publishers`
    里应出现 `songrenshuo`。文件没变就是 URL 没被接受或没刷新。

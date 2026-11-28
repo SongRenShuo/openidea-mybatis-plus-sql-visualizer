@@ -3,13 +3,23 @@ suggest = ["pom.xml"]
 
 # 版本发版后回填：sha256 取 CI 那一轮 release.yml 打印的值（本地不打包，
 # 见 .agents/skills/openidea-release-workflow 的单一构建者铁律）。包附件挂
-# GitHub Release <version>（songrenshuo.mybatis-plus-sql-visualizer-<version>.oiplugin），
+# GitHub Release <version>（songrenshuo.mybatis-sql-visualizer-<version>.oiplugin），
 # Gitee 发行版挂同样的字节。
 # tag 即版本号原文，不带 `v` 前缀（2026-11-29 起，见 docs/规范/版本号规范-说明文档.md）。
 #
 # 2026-11-29：0.1.0 那条已按要求删除（连同其 tag 与 Release）。它是切换前
 # 的试验版，不再对外提供，因此这里只留日期制版本。
-[[versions]]
-version = "2026.11.29"
-package = "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
-sha256 = "b160c20cc9c3f3d7f754a0227b8abca66525ad1f5511293ad4fb897b6f2fe70e"
+#
+# 2026-11-29 改名：插件 id 由 `songrenshuo.mybatis-plus-sql-visualizer` 改为
+# `songrenshuo.mybatis-sql-visualizer`（文件名跟着改，上游登记仓以文件名作插件键）。
+# 已发布的 2026.11.29 包**包内 id 仍是旧名**，宿主安装时会比对「包内 id = 索引 id」
+# （`crates/ide-host/src/plugins/market.rs` 的 `verify_market_package`，id/version/digest
+# 三者在 438 行一次性比较），签名也是对着 id 签的（`crates/ide-extension/src/package.rs`
+# 的 `signed_message`，消息首段就是 id）。因此这里不再放
+# 一条指向旧包的 `[[versions]]`——那会一提交就被上游 CI 判 id 不符。第一份按新 id
+# 构建的包随下一版发布后，用 build-index.sh 从包里取 sha256 回填下面这条。
+#
+# [[versions]]
+# version = "2026.11.29"
+# package = "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
+# sha256 = "b160c20cc9c3f3d7f754a0227b8abca66525ad1f5511293ad4fb897b6f2fe70e"

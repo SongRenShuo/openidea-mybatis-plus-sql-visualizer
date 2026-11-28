@@ -7,7 +7,11 @@
 | 文件 | 提交到登记仓的路径 |
 | --- | --- |
 | `publishers.songrenshuo.toml` | `publishers/songrenshuo.toml`（首次，注册发布者与公钥） |
-| `plugins.songrenshuo.mybatis-plus-sql-visualizer.toml` | `plugins/songrenshuo.mybatis-plus-sql-visualizer.toml` |
+| `plugins.songrenshuo.mybatis-sql-visualizer.toml` | `plugins/songrenshuo.mybatis-sql-visualizer.toml` |
+
+> 2026-11-29 插件 id 改名（`mybatis-plus-` → `mybatis-`）：文件名与 id 同步改。登记仓
+> 以文件名作插件键，且 CI 会比对「包内 id = 登记 id」，所以条目里的 `[[versions]]`
+> 先注释着，等第一份按新 id 构建的包发出来再回填。
 
 ## 上架流程（官方 docs/zh/plugins/publishing/marketplace.mdx）
 

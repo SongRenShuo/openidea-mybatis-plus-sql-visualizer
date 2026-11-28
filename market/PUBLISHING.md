@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 开源 | 源码公开、构建可复现 | Apache-2.0（`LICENSE`），CI 固定 CLI 0.1.51 + Rust 1.98.1 |
 | 许可白名单 | Apache-2.0 / MIT / BSD 系；禁 GPL、AGPL | 直接依赖只有 `serde`、`serde_json` 与 SDK；`NOTICE` 已记 JSqlParser（取 Apache-2.0 分支）与 ASM（BSD-3-Clause） |
-| 插件 id | `<publisher>.<name>`，前缀与 publisher 完全一致 | `songrenshuo.mybatis-plus-sql-visualizer` |
+| 插件 id | `<publisher>.<name>`，前缀与 publisher 完全一致 | `songrenshuo.mybatis-sql-visualizer`（2026-11-29 起；旧名 `…mybatis-plus-sql-visualizer`，已发布的 2026.11.29 包包内仍是旧名） |
 | 版本一致 | tag = `plugin.toml` 版本 | `release.yml` 里有一条硬校验 |
 | 签名 | 公钥已登记在该索引的 publisher 下；包 signed | `scripts/release.sh` 缺密钥直接失败 |
 | digest 一致 | 索引条目的 `digest` 由 `build-index.sh` 从同一份包生成（它是内容摘要，不是文件 sha256） | 见 `docs/registration/L10.md` 的一致性步骤 |

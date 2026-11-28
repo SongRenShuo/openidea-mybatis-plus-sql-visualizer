@@ -16,6 +16,10 @@
 1. **已发布的签名包**：`songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin`（仓库根目录，非 `dist/`）
    及其 `.sha256`，由 `scripts/release.sh` 产出，并已上传到 GitHub Release / Gitee 镜像
    （见 `market/README.md` 与 `.github/workflows/release.yml`）。
+   **注意**：这份 2026.11.29 包的包内 id 是旧名 `songrenshuo.mybatis-plus-sql-visualizer`
+   （2026-11-29 改名之前构建的）。插件 id 已改为 `songrenshuo.mybatis-sql-visualizer`，
+   而登记仓 CI 与宿主都会比对「包内 id = 登记 id」，所以提 PR 前必须换成第一份按新 id
+   构建的包；`upstream/plugins/*.toml` 里的 `[[versions]]` 因此先注释着。
 2. **发布者密钥已进索引**：`scripts/build-index.sh` 用 `MPSV_KEY_FILE` 生成 `market/index.json`，
    并把该索引托管到 HTTPS（Gitee Pages 或任意静态托管）。
 3. **仓库公开**：官方注册表只收开源插件；本仓为 Apache-2.0，`NOTICE` 已列 JSqlParser/ASM。

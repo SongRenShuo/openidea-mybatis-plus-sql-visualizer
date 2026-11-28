@@ -88,7 +88,7 @@ MyBatis SQL Visualizer 是 OpenIDEA 的 SQL 调试插件。写代码时，不启
 
 ```sh
 openidea-plugin build          # → dist/plugin.wasm，按安装态校验
-openidea-plugin pack           # → songrenshuo.mybatis-plus-sql-visualizer-<version>.oiplugin
+openidea-plugin pack           # → songrenshuo.mybatis-sql-visualizer-<version>.oiplugin
 ```
 
 在 Settings › Plugins 里安装生成的 `.oiplugin`；开发期也可以直接挂目录：

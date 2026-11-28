@@ -1,7 +1,12 @@
 repository = "https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer"
 suggest = ["pom.xml", "build.gradle.kts"]
 
-[[versions]]
-version = "2026.11.29"
-package = "https://github.com/<owner>/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
-sha256 = "b160c20cc9c3f3d7f754a0227b8abca66525ad1f5511293ad4fb897b6f2fe70e"
+# 2026-11-29 改名：插件 id 由 `songrenshuo.mybatis-plus-sql-visualizer` 改为
+# `songrenshuo.mybatis-sql-visualizer`。已发布的 2026.11.29 包包内 id 仍是旧名，
+# 而登记仓 CI 会下载包、跑 `check`、比对 id 与验签，所以这条不能再指向旧包。
+# 第一份按新 id 构建的包随下一版发布后再取消注释并回填 package 与 sha256。
+#
+# [[versions]]
+# version = "2026.11.29"
+# package = "https://github.com/<owner>/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
+# sha256 = "b160c20cc9c3f3d7f754a0227b8abca66525ad1f5511293ad4fb897b6f2fe70e"

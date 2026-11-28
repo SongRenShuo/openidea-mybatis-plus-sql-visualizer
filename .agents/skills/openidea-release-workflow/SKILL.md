@@ -131,7 +131,7 @@ sha256sum /tmp/gh.oiplugin /tmp/ge.oiplugin
 
 ## 7 登记条目回填
 
-`docs/registry/plugins.songrenshuo.mybatis-plus-sql-visualizer.toml` 加一个 `[[versions]]`：
+`docs/registry/plugins.songrenshuo.mybatis-sql-visualizer.toml` 加一个 `[[versions]]`：
 
 ```toml
 [[versions]]
