@@ -1182,11 +1182,12 @@ mod tests {
             assert_eq!(model["source"], "com.example.UserMapper.touch");
             assert_eq!(model["confidence"], "exact");
             assert_eq!(model["kind"], "xml");
-            assert!(
-                model["sql"]
-                    .as_str()
-                    .is_some_and(|sql| sql.contains("UPDATE users SET name = ?"))
-            );
+            assert!(model["sql"].as_str().is_some_and(|sql| {
+                sql.split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("UPDATE users SET name = ?")
+            }));
             // A successful preview leaves the Output tab alone; the shell is the
             // surface. (Errors still go there, tested below.)
             assert!(
@@ -1517,9 +1518,11 @@ public interface UserMapper {
             assert_eq!(model["confidence"], "exact");
             assert_eq!(model["source"], "/project/UserMapper.java#rename");
             assert!(
-                model["sql"]
-                    .as_str()
-                    .is_some_and(|sql| sql.contains("UPDATE users")),
+                model["sql"].as_str().is_some_and(|sql| sql
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("UPDATE users")),
                 "{model}"
             );
         });
@@ -1558,9 +1561,11 @@ public interface UserMapper {
             assert_eq!(model["confidence"], "exact");
             assert_eq!(model["source"], "/project/SimpleMapper.java#deleteById");
             assert!(
-                model["sql"]
-                    .as_str()
-                    .is_some_and(|sql| sql.contains("DELETE FROM users WHERE id = ?")),
+                model["sql"].as_str().is_some_and(|sql| sql
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("DELETE FROM users WHERE id = ?")),
                 "{model}"
             );
         });
@@ -1583,9 +1588,11 @@ public interface UserMapper {
             assert_eq!(model["kind"], "sql");
             assert_eq!(model["source"], "/project/UserSqlMap.xml#selectById");
             assert!(
-                model["sql"]
-                    .as_str()
-                    .is_some_and(|sql| sql.contains("SELECT * FROM users WHERE id = ?")),
+                model["sql"].as_str().is_some_and(|sql| sql
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("SELECT * FROM users WHERE id = ?")),
                 "{model}"
             );
         });
@@ -1664,7 +1671,11 @@ public class User {
 
             let model = model_of(&preview_state(&host));
             assert_eq!(model["confidence"], "exact", "{model}");
-            assert_eq!(model["sql"], "SELECT * FROM sys_user WHERE status = 'A'");
+            assert_eq!(
+                model["sql"],
+                "SELECT * FROM sys_user
+WHERE status = 'A'"
+            );
         });
     }
 
@@ -1685,7 +1696,11 @@ public class User {
 
             let model = model_of(&preview_state(&host));
             assert_eq!(model["confidence"], "partial", "{model}");
-            assert_eq!(model["sql"], "SELECT * FROM sys_user WHERE age = 18");
+            assert_eq!(
+                model["sql"],
+                "SELECT * FROM sys_user
+WHERE age = 18"
+            );
             assert!(
                 model["reason"]
                     .as_str()
@@ -1749,9 +1764,11 @@ public class UserService {
             assert_eq!(model["kind"], "wrapper");
             assert_eq!(model["table"], "sys_user");
             assert!(
-                model["sql"]
-                    .as_str()
-                    .is_some_and(|sql| sql.contains("FROM sys_user WHERE status = ?")),
+                model["sql"].as_str().is_some_and(|sql| sql
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("FROM sys_user WHERE status = ?")),
                 "{model}"
             );
             // The chain, not the whole file: the declaration and the one call
@@ -1797,9 +1814,11 @@ public class UserService {
             let model = model_of(&preview_state(&host));
             assert_eq!(model["kind"], "wrapper");
             assert!(
-                model["sql"]
-                    .as_str()
-                    .is_some_and(|sql| sql.contains("status = ?")),
+                model["sql"].as_str().is_some_and(|sql| sql
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("status = ?")),
                 "{model}"
             );
         });
@@ -1820,9 +1839,11 @@ public class UserService {
             let model = model_of(&preview_state(&host));
             assert_eq!(model["confidence"], "exact");
             assert!(
-                model["sql"]
-                    .as_str()
-                    .is_some_and(|sql| sql.contains("DELETE FROM users")),
+                model["sql"].as_str().is_some_and(|sql| sql
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("DELETE FROM users")),
                 "{model}"
             );
         });
@@ -1892,9 +1913,11 @@ public class UserService {
             let model = model_of(&preview_state(&host));
             assert_eq!(model["confidence"], "partial", "{model}");
             assert!(
-                model["sql"]
-                    .as_str()
-                    .is_some_and(|sql| sql.contains("FROM users")),
+                model["sql"].as_str().is_some_and(|sql| sql
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("FROM users")),
                 "{model}"
             );
             assert!(

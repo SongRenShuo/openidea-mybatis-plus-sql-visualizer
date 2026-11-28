@@ -95,7 +95,14 @@ fn category1_wrapper_exact_renders() {
     for (src, expected) in cases {
         let out = render(src, &cols(), dialect_named("MySQL"));
         assert_eq!(out.confidence, Confidence::Exact, "src={src}\n{out:?}");
-        assert_eq!(out.sql.as_deref(), Some(*expected), "src={src}");
+        assert_eq!(
+            out.sql
+                .as_deref()
+                .map(|sql| sql.split_whitespace().collect::<Vec<_>>().join(" "))
+                .as_deref(),
+            Some(*expected),
+            "src={src}"
+        );
     }
 }
 
@@ -187,7 +194,14 @@ fn category2_wrapper_degradation() {
     for (src, confidence, sql, key) in cases {
         let out = render(src, &cols(), mysql);
         assert_eq!(out.confidence, *confidence, "src={src}\n{out:?}");
-        assert_eq!(out.sql.as_deref(), *sql, "src={src}\n{out:?}");
+        assert_eq!(
+            out.sql
+                .as_deref()
+                .map(|sql| sql.split_whitespace().collect::<Vec<_>>().join(" "))
+                .as_deref(),
+            *sql,
+            "src={src}\n{out:?}"
+        );
         if !key.is_empty() {
             assert!(
                 out.message_keys.contains(&key.to_string()),

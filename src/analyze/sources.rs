@@ -1130,7 +1130,10 @@ public interface UserMapper {
             mysql(),
         );
         assert_eq!(out.confidence, Confidence::Exact, "{:?}", out.notes);
-        assert_eq!(out.sql, "SELECT * FROM sys_user WHERE name = 'Ada'");
+        assert_eq!(
+            out.sql.split_whitespace().collect::<Vec<_>>().join(" "),
+            "SELECT * FROM sys_user WHERE name = 'Ada'"
+        );
     }
 
     #[test]

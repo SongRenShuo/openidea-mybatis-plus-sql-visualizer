@@ -842,7 +842,8 @@ fn render_sql_kind_reaches_the_wrapper_source() {
     assert_eq!(response["confidence"], "exact");
     assert_eq!(
         response["data"]["sql"],
-        "SELECT * FROM sys_user WHERE status = 'A'"
+        "SELECT * FROM sys_user
+WHERE status = 'A'"
     );
 }
 

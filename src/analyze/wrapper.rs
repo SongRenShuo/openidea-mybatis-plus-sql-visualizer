@@ -428,7 +428,9 @@ fn labels_with(nodes: &[CondNode], prefix: &str, dialect: &Dialect) -> Vec<(Stri
         let id = format!("{prefix}{index}");
         let label = match node {
             CondNode::Leaf(condition) => render_leaf(condition, dialect),
-            CondNode::Group { inner, .. } => format!("({})", render_nodes(inner, dialect)),
+            CondNode::Group { inner, .. } => {
+                format!("({})", render_nodes(inner, dialect, false))
+            }
         };
         if label.is_empty() {
             continue;
@@ -507,7 +509,21 @@ pub fn render_with_alias(
     disabled: &std::collections::BTreeSet<String>,
     alias: Option<&str>,
 ) -> WrapperOutput {
-    render_inner(text, columns, dialect, disabled, alias, false)
+    render_with_alias_compact(text, columns, dialect, disabled, alias, false)
+}
+
+/// [`render_with_alias`], with an explicit compact flag: `false` renders the
+/// multi-line clause layout the reference defaults to (`compact = false`),
+/// `true` the single-line one its nested sub-selects use.
+pub fn render_with_alias_compact(
+    text: &str,
+    columns: &EntityColumns,
+    dialect: &Dialect,
+    disabled: &std::collections::BTreeSet<String>,
+    alias: Option<&str>,
+    compact: bool,
+) -> WrapperOutput {
+    render_inner(text, columns, dialect, disabled, alias, false, compact)
 }
 
 /// A `selectSub` lambda rendered as its own statement: method-reference values
@@ -516,9 +532,21 @@ pub fn render_with_alias(
 /// `ColumnArg` right side — there is no alias context inside a sub-select, so
 /// the column renders without one.
 fn render_sub_statement(text: &str, columns: &EntityColumns, dialect: &Dialect) -> WrapperOutput {
-    render_inner(text, columns, dialect, &Default::default(), None, true)
+    // Sub-selects render compact (single-line): the reference passes
+    // `compact = true` to every nested `generate` — the statement lives
+    // inside parentheses of the outer one.
+    render_inner(
+        text,
+        columns,
+        dialect,
+        &Default::default(),
+        None,
+        true,
+        true,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_inner(
     text: &str,
     columns: &EntityColumns,
@@ -526,6 +554,7 @@ fn render_inner(
     disabled: &std::collections::BTreeSet<String>,
     alias: Option<&str>,
     sub_column_values: bool,
+    compact: bool,
 ) -> WrapperOutput {
     // MPJ recognition must come from the whole text, not from the call list: a
     // chain written `JoinWrappers.lambda(User.class)` names its factory in the
@@ -652,14 +681,14 @@ fn render_inner(
 
     let sql = match (confidence, chain.kind) {
         (Confidence::Unresolved, _) => None,
-        (_, WrapperKind::Query) => Some(render_select(&effective, columns, dialect)),
+        (_, WrapperKind::Query) => Some(render_select(&effective, columns, dialect, compact)),
         // A join-update chain (`JoinWrappers.update(C)`) renders the whole
         // UPDATE — joins, SET and WHERE — the way the reference's
         // `UpdateJoinConverter` does. A plain update wrapper keeps the
         // fragment-only shape: UPDATE/SET come from the mapper.
-        (_, WrapperKind::Update) if mpj => Some(render_update(&effective, dialect)),
-        (_, WrapperKind::Delete) => Some(render_delete(&effective, columns, dialect)),
-        (_, WrapperKind::Update) => render_fragment(&effective, dialect),
+        (_, WrapperKind::Update) if mpj => Some(render_update(&effective, dialect, compact)),
+        (_, WrapperKind::Delete) => Some(render_delete(&effective, columns, dialect, compact)),
+        (_, WrapperKind::Update) => render_fragment(&effective, dialect, compact),
     };
 
     // The parameter order follows the statement: SET (`t.col = ?`) precedes
@@ -1509,12 +1538,13 @@ fn parse_join(name: &str, args: &[String], chain: &mut WrapperChain, ctx: &mut C
         // the sub-alias so its columns and its conditions agree on one name.
         let sub = {
             let joined = JoinWrappers::rehead(&inner, &entity.class_name);
-            render_with_alias(
+            render_with_alias_compact(
                 &joined,
                 &entity,
                 ctx.dialect,
                 &Default::default(),
                 Some(&sub_alias),
+                true,
             )
         };
         if sub.confidence == Confidence::Unresolved {
@@ -2099,12 +2129,13 @@ fn parse_from(args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
     let sub_alias = extract_string_call(&body, "setAlias").unwrap_or_else(|| "tb".to_string());
     let inner = remove_call(&body, "setAlias");
     let joined = JoinWrappers::rehead(&inner, &ctx.columns.class_name);
-    let sub = render_with_alias(
+    let sub = render_with_alias_compact(
         &joined,
         ctx.columns,
         ctx.dialect,
         &Default::default(),
         Some(&sub_alias),
+        true,
     );
     if sub.confidence != Confidence::Exact {
         refuse(
@@ -2954,7 +2985,17 @@ fn render_column_name(name: &str, dialect: &Dialect) -> String {
     }
 }
 
-fn render_select(chain: &WrapperChain, columns: &EntityColumns, dialect: &Dialect) -> String {
+fn render_select(
+    chain: &WrapperChain,
+    columns: &EntityColumns,
+    dialect: &Dialect,
+    compact: bool,
+) -> String {
+    // The reference defaults to the multi-line layout (`compact = false`):
+    // every clause starts on a new line, top-level conditions indent under
+    // WHERE; compact joins clauses with spaces — and is what its nested
+    // sub-selects use.
+    let nl = if compact { " " } else { "\n" };
     // `around(first, …)`'s first fragment leads the statement
     // (`/* hint */ SELECT …`, the reference's `rawFirst` position).
     let mut sql = String::new();
@@ -2988,14 +3029,14 @@ fn render_select(chain: &WrapperChain, columns: &EntityColumns, dialect: &Dialec
         });
     }
     for join in &chain.joins {
-        sql.push(' ');
+        sql.push_str(nl);
         sql.push_str(&render_join(join, dialect));
     }
-    if let Some(where_sql) = render_where(chain, dialect) {
-        sql.push(' ');
+    if let Some(where_sql) = render_where(chain, dialect, compact) {
+        sql.push_str(nl);
         sql.push_str(&where_sql);
     }
-    sql.push_str(&render_clauses(chain, dialect));
+    sql.push_str(&render_clauses(chain, dialect, compact));
     sql
 }
 
@@ -3114,7 +3155,7 @@ fn render_join(join: &Join, dialect: &Dialect) -> String {
     let on = if join.on.is_empty() {
         String::new()
     } else {
-        format!(" ON {}", render_nodes(&join.on, dialect))
+        format!(" ON {}", render_nodes(&join.on, dialect, false))
     };
     let relation = match &join.sub_select {
         Some(sub) => format!("({sub})"),
@@ -3123,10 +3164,10 @@ fn render_join(join: &Join, dialect: &Dialect) -> String {
     format!("{} {} {}{}", join.kind.sql(), relation, join.alias, on)
 }
 
-fn render_fragment(chain: &WrapperChain, dialect: &Dialect) -> Option<String> {
-    let where_part = render_where(chain, dialect)?;
+fn render_fragment(chain: &WrapperChain, dialect: &Dialect, compact: bool) -> Option<String> {
+    let where_part = render_where(chain, dialect, compact)?;
     let mut sql = where_part;
-    sql.push_str(&render_clauses(chain, dialect));
+    sql.push_str(&render_clauses(chain, dialect, compact));
     Some(sql)
 }
 
@@ -3135,12 +3176,13 @@ fn render_fragment(chain: &WrapperChain, dialect: &Dialect) -> Option<String> {
 /// then the WHERE, then `last` verbatim at the end. Only `last` carries over
 /// from the tail clauses — GROUP BY/HAVING/ORDER BY are not part of an
 /// UPDATE.
-fn render_update(chain: &WrapperChain, dialect: &Dialect) -> String {
+fn render_update(chain: &WrapperChain, dialect: &Dialect, compact: bool) -> String {
+    let nl = if compact { " " } else { "\n" };
     let alias = chain.main_alias.as_deref().unwrap_or("t");
     let table = chain.table.as_deref().unwrap_or("");
     let mut sql = format!("UPDATE {} {alias}", quote(table, dialect));
     for join in &chain.joins {
-        sql.push(' ');
+        sql.push_str(nl);
         sql.push_str(&render_join(join, dialect));
     }
     let sets: Vec<String> = chain
@@ -3155,13 +3197,13 @@ fn render_update(chain: &WrapperChain, dialect: &Dialect) -> String {
             SetItem::Raw(fragment) => fragment.clone(),
         })
         .collect();
-    sql.push_str(&format!(" SET {}", sets.join(", ")));
-    if let Some(where_sql) = render_where(chain, dialect) {
-        sql.push(' ');
+    sql.push_str(&format!("{} SET {}", nl, sets.join(", ")));
+    if let Some(where_sql) = render_where(chain, dialect, compact) {
+        sql.push_str(nl);
         sql.push_str(&where_sql);
     }
     if let Some(last) = &chain.last {
-        sql.push(' ');
+        sql.push_str(nl);
         sql.push_str(last);
     }
     sql
@@ -3173,7 +3215,13 @@ fn render_update(chain: &WrapperChain, dialect: &Dialect) -> String {
 /// target renders its own default alias (the main entity → the main alias),
 /// even when the join declared a different one — the reference does the same,
 /// documented as its own behaviour.
-fn render_delete(chain: &WrapperChain, columns: &EntityColumns, dialect: &Dialect) -> String {
+fn render_delete(
+    chain: &WrapperChain,
+    columns: &EntityColumns,
+    dialect: &Dialect,
+    compact: bool,
+) -> String {
+    let nl = if compact { " " } else { "\n" };
     let alias = chain.main_alias.as_deref().unwrap_or("t");
     let mut targets: Vec<String> = Vec::new();
     let push_target = |targets: &mut Vec<String>, name: String| {
@@ -3214,23 +3262,25 @@ fn render_delete(chain: &WrapperChain, columns: &EntityColumns, dialect: &Dialec
         quote(table, dialect)
     );
     for join in &chain.joins {
-        sql.push(' ');
+        sql.push_str(nl);
         sql.push_str(&render_join(join, dialect));
     }
-    if let Some(where_sql) = render_where(chain, dialect) {
-        sql.push(' ');
+    if let Some(where_sql) = render_where(chain, dialect, compact) {
+        sql.push_str(nl);
         sql.push_str(&where_sql);
     }
     if let Some(last) = &chain.last {
-        sql.push(' ');
+        sql.push_str(nl);
         sql.push_str(last);
     }
     sql
 }
 
 /// GROUP BY / HAVING / ORDER BY / LIMIT / LAST (the WHERE clause belongs to
-/// the caller); the clause order is the standard SQL one.
-fn render_clauses(chain: &WrapperChain, dialect: &Dialect) -> String {
+/// the caller); the clause order is the standard SQL one. Multi-line mode
+/// starts each clause on its own line, compact mode joins with spaces.
+fn render_clauses(chain: &WrapperChain, dialect: &Dialect, compact: bool) -> String {
+    let nl = if compact { " " } else { "\n" };
     let mut out = String::new();
     if !chain.group_by.is_empty() {
         let items: Vec<String> = chain
@@ -3238,11 +3288,11 @@ fn render_clauses(chain: &WrapperChain, dialect: &Dialect) -> String {
             .iter()
             .map(|column| render_column_name(column, dialect))
             .collect();
-        out.push_str(" GROUP BY ");
+        out.push_str(&format!("{nl}GROUP BY "));
         out.push_str(&items.join(", "));
     }
     if let Some(having) = &chain.having {
-        out.push_str(" HAVING ");
+        out.push_str(&format!("{nl}HAVING "));
         out.push_str(having);
     }
     if !chain.order_by.is_empty() {
@@ -3257,32 +3307,35 @@ fn render_clauses(chain: &WrapperChain, dialect: &Dialect) -> String {
                 )
             })
             .collect();
-        out.push_str(" ORDER BY ");
+        out.push_str(&format!("{nl}ORDER BY "));
         out.push_str(&items.join(", "));
     }
     // `around(…, last)`'s last fragment renders between ORDER BY and LIMIT —
     // MP's LAST segment position, which the reference's `rawAround` matches
     // (T-M21-09).
     if let Some(around) = &chain.around_last {
-        out.push(' ');
+        out.push_str(nl);
         out.push_str(around);
     }
     if let Some(limit) = chain.limit {
-        out.push(' ');
+        out.push_str(nl);
         out.push_str(&dialect.render_limit(limit, None));
     }
     if let Some(last) = &chain.last {
-        out.push(' ');
+        out.push_str(nl);
         out.push_str(last);
     }
     out
 }
 
-fn render_where(chain: &WrapperChain, dialect: &Dialect) -> Option<String> {
+fn render_where(chain: &WrapperChain, dialect: &Dialect, compact: bool) -> Option<String> {
     if chain.conditions.is_empty() {
         return None;
     }
-    let body = render_nodes(&chain.conditions, dialect);
+    // Multi-line mode indents the top-level conditions under WHERE (the
+    // reference's `renderConditionList(indent = !compact)`); groups and ON
+    // lists always render inline.
+    let body = render_nodes(&chain.conditions, dialect, !compact);
     if body.is_empty() {
         None
     } else {
@@ -3290,15 +3343,20 @@ fn render_where(chain: &WrapperChain, dialect: &Dialect) -> Option<String> {
     }
 }
 
-fn render_nodes(nodes: &[CondNode], dialect: &Dialect) -> String {
+/// One condition tree level. `indent` (true at the top level of a WHERE in
+/// multi-line mode) puts every following condition on its own line with four
+/// leading spaces before the connector; groups render their body inline and
+/// recurse with `indent = false`.
+fn render_nodes(nodes: &[CondNode], dialect: &Dialect, indent: bool) -> String {
     let mut parts = Vec::new();
     let mut first = true;
     for node in nodes {
         let (connector, body) = match node {
             CondNode::Leaf(c) => (c.connector, render_leaf(c, dialect)),
-            CondNode::Group { connector, inner } => {
-                (*connector, format!("({})", render_nodes(inner, dialect)))
-            }
+            CondNode::Group { connector, inner } => (
+                *connector,
+                format!("({})", render_nodes(inner, dialect, false)),
+            ),
         };
         if body.is_empty() {
             continue;
@@ -3306,11 +3364,13 @@ fn render_nodes(nodes: &[CondNode], dialect: &Dialect) -> String {
         if first {
             parts.push(body);
             first = false;
+        } else if indent {
+            parts.push(format!("\n    {} {}", connector_sql(connector), body));
         } else {
             parts.push(format!("{} {}", connector_sql(connector), body));
         }
     }
-    parts.join(" ")
+    parts.join(if indent { "" } else { " " })
 }
 
 fn connector_sql(c: Connector) -> &'static str {
@@ -3444,6 +3504,13 @@ mod tests {
     use super::*;
     use crate::core::dialect;
 
+    /// Collapses the multi-line layout to one line: most assertions pin the
+    /// statement's content and order, not its formatting (one dedicated test
+    /// pins the newlines themselves).
+    fn one_line(sql: &str) -> String {
+        sql.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
     fn cols() -> EntityColumns {
         EntityColumns::new("User", "sys_user")
             .with_column("id", "id", "bigint")
@@ -3472,7 +3539,7 @@ mod tests {
             out.message_keys,
             out.notes
         );
-        out.sql.expect("an exact result carries SQL")
+        one_line(out.sql.expect("an exact result carries SQL").as_str())
     }
 
     /// The 30-case corpus: every entry must be `exact`, ≥90% is the T5-4 bar
@@ -3608,7 +3675,11 @@ mod tests {
         for (src, expected) in cases {
             let out = render(src, &cols(), mysql());
             assert_eq!(out.confidence, Confidence::Exact, "src={src}\n{out:?}");
-            assert_eq!(out.sql.as_deref(), Some(*expected), "src={src}\n{out:?}");
+            assert_eq!(
+                out.sql.as_deref().map(one_line).as_deref(),
+                Some(*expected),
+                "src={src}\n{out:?}"
+            );
             exact += 1;
         }
         assert!(
@@ -3649,7 +3720,10 @@ mod tests {
             mysql(),
         );
         assert_eq!(out.confidence, Confidence::Partial);
-        assert_eq!(out.sql.as_deref(), Some("WHERE status = 'A'"));
+        assert_eq!(
+            out.sql.as_deref().map(one_line).as_deref(),
+            Some("WHERE status = 'A'")
+        );
         assert_eq!(out.chain.kind, WrapperKind::Update);
         assert!(
             out.message_keys
@@ -3666,7 +3740,7 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Partial);
         assert_eq!(
-            out.sql.as_deref(),
+            out.sql.as_deref().map(one_line).as_deref(),
             Some("SELECT * FROM sys_user WHERE status = 'A'")
         );
         assert!(
@@ -3683,7 +3757,10 @@ mod tests {
             mysql(),
         );
         assert_eq!(out.confidence, Confidence::Partial);
-        assert_eq!(out.sql.as_deref(), Some("SELECT * FROM sys_user"));
+        assert_eq!(
+            out.sql.as_deref().map(one_line).as_deref(),
+            Some("SELECT * FROM sys_user")
+        );
         assert!(
             out.message_keys
                 .contains(&"wrapper.unsupported_method".to_string())
@@ -3765,7 +3842,7 @@ mod tests {
         assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
         let sql = out.sql.as_deref().expect("exact renders SQL");
         assert_eq!(
-            sql,
+            one_line(sql),
             "SELECT t.id, t.station_id, t.device_name \
              FROM car_device_info t \
              LEFT JOIN station_info stationInfoEntity ON stationInfoEntity.station_id = t.station_id \
@@ -3917,7 +3994,7 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
         assert_eq!(
-            out.sql.as_deref(),
+            out.sql.as_deref().map(one_line).as_deref(),
             Some("SELECT LENGTH(name) AS nameLen FROM sys_user")
         );
     }
@@ -3974,10 +4051,8 @@ mod tests {
             "{sql}"
         );
         // `user` is a reserved word — the reference quotes the table name too.
-        assert!(
-            sql.contains("FROM `user` t LEFT JOIN user_address addressDO"),
-            "{sql}"
-        );
+        assert!(sql.contains("FROM `user` t"), "{sql}");
+        assert!(sql.contains("LEFT JOIN user_address addressDO"), "{sql}");
     }
 
     #[test]
@@ -3998,7 +4073,7 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
         assert_eq!(
-            out.sql.as_deref(),
+            out.sql.as_deref().map(one_line).as_deref(),
             Some(
                 "SELECT t.id, t.refund_amount, (SELECT amount FROM refund_entity WHERE order_id = id) AS refundAmount FROM order_entity t WHERE t.id = 1001"
             ),
@@ -4178,7 +4253,7 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
         assert_eq!(
-            out.sql.as_deref(),
+            out.sql.as_deref().map(one_line).as_deref(),
             Some(
                 "SELECT t.id, t.station_id, t.device_name FROM (SELECT tb.id, tb.station_id, tb.device_name FROM car_device_info tb WHERE tb.id >= 0 LIMIT 10) t WHERE t.id = 1001"
             ),
@@ -4226,7 +4301,7 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
         assert_eq!(
-            out.sql.as_deref(),
+            out.sql.as_deref().map(one_line).as_deref(),
             Some(
                 "/* around hint */ SELECT t.id, t.station_id, t.device_name FROM car_device_info t WHERE t.id = 1 FOR UPDATE"
             ),
@@ -4249,7 +4324,7 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
         assert_eq!(
-            out.sql.as_deref(),
+            out.sql.as_deref().map(one_line).as_deref(),
             Some(
                 "SELECT t.id, t.station_id, t.device_name FROM car_device_info t ORDER BY t.id ASC AND t.id > 5 LIMIT 10"
             ),
@@ -4491,7 +4566,7 @@ mod tests {
         assert_eq!(out.confidence, Confidence::Partial, "{out:?}");
         let sql = out.sql.as_deref().expect("the chain renders");
         assert_eq!(
-            sql,
+            one_line(sql),
             "UPDATE `user` t \
              INNER JOIN user_address addressDO ON addressDO.user_id = t.id \
              SET t.name = ?, t.sex = ?, t.age = ?, t.head_img = ?, \
@@ -4524,7 +4599,11 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
         assert_eq!(
-            out.sql.as_deref().expect("the chain renders"),
+            out.sql
+                .as_deref()
+                .map(one_line)
+                .as_deref()
+                .expect("the chain renders"),
             "UPDATE `user` u \
              LEFT JOIN user_address addressDO ON addressDO.user_id = u.id \
              SET u.name = 'x' \
@@ -4547,7 +4626,11 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
         assert_eq!(
-            out.sql.as_deref().expect("the chain renders"),
+            out.sql
+                .as_deref()
+                .map(one_line)
+                .as_deref()
+                .expect("the chain renders"),
             "UPDATE `user` t \
              LEFT JOIN address t1 on t1.user_id = t.id \
              SET t.name = 'x', t1.tel = '138' \
@@ -4590,7 +4673,12 @@ mod tests {
             mysql(),
         );
         assert_eq!(
-            main_only.sql.as_deref().expect("the chain renders"),
+            main_only
+                .sql
+                .as_deref()
+                .map(one_line)
+                .as_deref()
+                .expect("the chain renders"),
             "DELETE t FROM `user` t \
              INNER JOIN user_address addressDO ON addressDO.user_id = t.id \
              WHERE t.status = 0"
@@ -4605,7 +4693,12 @@ mod tests {
             mysql(),
         );
         assert_eq!(
-            explicit.sql.as_deref().expect("the chain renders"),
+            explicit
+                .sql
+                .as_deref()
+                .map(one_line)
+                .as_deref()
+                .expect("the chain renders"),
             "DELETE t, addressDO FROM `user` t \
              INNER JOIN user_address addr ON addr.user_id = t.id \
              WHERE t.head_img IS NULL"
@@ -4620,7 +4713,11 @@ mod tests {
             mysql(),
         );
         assert_eq!(
-            all.sql.as_deref().expect("the chain renders"),
+            all.sql
+                .as_deref()
+                .map(one_line)
+                .as_deref()
+                .expect("the chain renders"),
             "DELETE t, addressDO FROM `user` t \
              LEFT JOIN user_address addressDO ON addressDO.user_id = t.id \
              WHERE t.id = 1001"
@@ -4852,7 +4949,7 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Partial);
         assert_eq!(
-            out.sql.as_deref(),
+            out.sql.as_deref().map(one_line).as_deref(),
             Some("SELECT * FROM sys_user WHERE status = ?")
         );
         assert!(
@@ -4889,7 +4986,7 @@ mod tests {
         );
         assert_eq!(out.confidence, Confidence::Partial);
         assert_eq!(
-            out.sql.as_deref(),
+            out.sql.as_deref().map(one_line).as_deref(),
             Some("SELECT * FROM sys_user WHERE status IN (?)")
         );
     }
