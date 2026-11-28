@@ -270,14 +270,19 @@ jobs:
           fi
           [ -n "$release_id" ] || { echo "::error::no Gitee release id"; exit 1; }
 
-          # A re-run on an existing release keeps its body, so the flag is patched
-          # by id (PATCH is a whole-record replace: `tag_name` and `name` go with
-          # it, or Gitee clears them).
+          # A re-run must also correct the flag on a release created earlier, so
+          # it is patched by id. PATCH is a whole-record replace and refuses the
+          # request unless `tag_name`, `name` and `body` all arrive non-empty
+          # (`{"messages":["body is missing"]}` is what omitting one returns);
+          # measured against an existing release: those three plus `prerelease`
+          # → 200, and `prerelease` alone → `tag_name is missing` + `name is
+          # missing` + `body is missing`.
           curl -fsS --retry 3 -X PATCH "$api/releases/${release_id}" \
             -H "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode "access_token=${GITEE_TOKEN}" \
             --data-urlencode "tag_name=${TAG}" \
             --data-urlencode "name=${TAG}" \
+            --data-urlencode "body=See the GitHub release for notes." \
             "${pre_args[@]}" > /dev/null
 
           for f in dist/*.oiplugin dist/*.sha256; do
