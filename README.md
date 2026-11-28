@@ -10,7 +10,7 @@ MyBatis SQL Visualizer 是 OpenIDEA 的 SQL 调试插件。写代码时，不启
 
 ## 这是哪一版
 
-本仓是 IntelliJ 插件 **MyBatis SQL Visualizer** 的 OpenIDEA 端口。两个版本同名、同图标，区别只在宿主平台。功能更全、日常在用的那一版在这里：
+本仓是 IntelliJ 插件 **MyBatis SQL Visualizer** 的 OpenIDEA 端口。两个版本同名、同图标，区别只在宿主平台。功能更全、日常在用的那一版在这里（主仓在 Gitee，GitHub 是镜像）：
 
 - Gitee：https://gitee.com/songrenshuo/mybatis-plus-sql-visualizer
 - GitHub：https://github.com/SongRenShuo/mybatis-plus-sql-visualizer
