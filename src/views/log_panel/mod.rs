@@ -526,6 +526,12 @@ fn labels_tabs() -> Value {
         "tabHistory": t("view.logs.tab.history"),
         // Fifth tab, the preview workbench (lane L23).
         "tabPreview": t("view.logs.tab.preview"),
+        // Docked quick preview under the log list (lane L32): the reference's
+        // three `log.dockedPreview.*` status texts plus its restore label.
+        "dockedEmpty": t("view.logs.docked.empty"),
+        "dockedTitle": t("view.logs.docked.title"),
+        "dockedPinned": t("view.logs.docked.pinned"),
+        "dockedRestore": t("view.logs.docked.restore"),
         // The two input tabs (lane L33): each is a standalone pane with an
         // input editor on top, a result editor below and a status line.
         "tabLogToSqlConvert": t("view.logs.tab.log_to_sql.convert"),

@@ -603,6 +603,30 @@
     #panelSqlToJava .optfull { grid-column: 1 / -1; width: 100%; }
     #panelSqlToJava .opthalf { width: 100%; }
 
+    /* Docked quick preview (L32): a pane under the log list, mirroring the
+       IntelliJ edition's `SqlDockedPreview`. `min-height: 0` on the list is what
+       lets this pane take space without pushing the status line out of view. */
+    .dockedpreview {
+      flex: 0 0 auto; display: flex; flex-direction: column;
+      height: 220px; min-height: 80px; resize: vertical; overflow: hidden;
+      margin: 0 8px 6px; border: 1px solid var(--openidea-border); border-radius: 3px;
+      background: var(--openidea-bg-input);
+    }
+    .dockedhead {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+      padding: 3px 8px; border-bottom: 1px solid var(--openidea-border);
+      color: var(--openidea-fg-muted); font-size: 11px;
+    }
+    .dockedstatus { flex: 1 1 auto; min-width: 0; }
+    #dockedRestore { flex: 0 0 auto; }
+    .dockedsql {
+      flex: 1 1 auto; min-height: 0; width: 100%; box-sizing: border-box;
+      margin: 0; padding: 6px 8px; resize: none; border: 0;
+      color: var(--openidea-fg); background: transparent;
+      font: var(--openidea-font-size, 13px)/1.5 var(--openidea-font-mono, monospace);
+      white-space: pre; overflow: auto;
+    }
+
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -762,6 +786,21 @@
 
   <div id="list" class="list"></div>
   <div id="empty" class="empty" hidden></div>
+
+  <!-- Docked preview (L32, aligned with the IntelliJ edition's
+       `SqlDockedPreview`): the quick-preview toolbar button is a *toggle* that
+       opens this pane under the list, and the pane follows the list selection —
+       one row selected shows that row's SQL, several selects say so, none shows
+       the empty state. Editing the SQL pins it (it stops following), and the
+       restore button puts the original back and resumes following. The reference
+       keeps the same three status texts (`log.dockedPreview.*`). -->
+  <div id="dockedPreview" class="dockedpreview" hidden>
+    <div class="dockedhead">
+      <span id="dockedStatus" class="dockedstatus"></span>
+      <button id="dockedRestore" class="linkbtn" type="button" hidden></button>
+    </div>
+    <textarea id="dockedSql" class="dockedsql" spellcheck="false" wrap="off"></textarea>
+  </div>
 
   <div class="status">
     <span id="statusLeft"></span>
@@ -987,6 +1026,15 @@
       // Signature of the rendered log rows: a state push that does not change
       // them must not rebuild the list (scroll and selection survive).
       var rowsSig = null;
+      // The rows of the last push, so the docked preview can look a line up
+      // without re-reading the DOM (L32).
+      var lastRows = [];
+      // Docked preview state (L32): `dockedOpen` is the toggle, `dockedPinned`
+      // means the user edited the SQL so it must stop following the selection,
+      // and `dockedOriginal` is what restore puts back.
+      var dockedOpen = false;
+      var dockedPinned = false;
+      var dockedOriginal = null;
       var ui = {
         types: { select: true, insert: true, update: true, delete: true, create: true, drop: true },
         slowOnly: false, dedupe: true, matchCase: false, regex: false, keyword: '',
@@ -1300,6 +1348,8 @@
         labelIconButton($('settingsBtn'), L.settings || 'Settings');
         // Quick preview hands the selected row to the preview workbench.
         labelIconButton($('previewBtn'), L.preview || 'Quick preview');
+        setText($('dockedRestore'), L.dockedRestore || 'Restore and follow');
+        setDockedStatus(L.dockedEmpty || '');
         labelIconButton($('communityBtn'), L.community || 'Community');
         labelIconButton($('helpBtn'), L.help || 'Help');
         labelIconButton($('searchBtn'), L.search || 'Search');
@@ -1689,6 +1739,87 @@
         }
         // The two input tabs are standalone panes (L33): selecting a row no
         // longer feeds them, so no state round-trip is asked for here.
+        refreshDockedPreview();
+      }
+
+      // Docked quick preview (L32), the IntelliJ edition's `SqlDockedPreview`.
+      //
+      // The reference's toolbar button is a ToggleAction: selected means the
+      // pane under the list is open, and the pane follows the list selection.
+      // Editing the SQL inside pins it — following stops, a restore button
+      // appears, and pressing it puts the original text back and resumes. The
+      // three status texts are the reference's own (`log.dockedPreview.*`).
+
+      function dockedSqlFor(line) {
+        for (var i = 0; i < lastRows.length; i++) {
+          if (String(lastRows[i].line) === String(line)) { return lastRows[i].sql || ''; }
+        }
+        return null;
+      }
+
+      function setDockedStatus(text) {
+        setText($('dockedStatus'), text);
+      }
+
+      function refreshDockedPreview() {
+        if (!dockedOpen) { return; }
+        var area = $('dockedSql');
+        // Pinned: the user's edits win until they ask to follow again. The
+        // reference makes exactly this check before touching the document.
+        if (dockedPinned) {
+          setDockedStatus(L.dockedPinned || '');
+          $('dockedRestore').hidden = false;
+          return;
+        }
+        var none = L.dockedEmpty || '';
+        if (selectedLine == null) {
+          dockedOriginal = null;
+          area.value = '';
+          setDockedStatus(none);
+          $('dockedRestore').hidden = true;
+          return;
+        }
+        var sql = dockedSqlFor(selectedLine);
+        if (sql == null) {
+          dockedOriginal = null;
+          area.value = '';
+          setDockedStatus(none);
+          $('dockedRestore').hidden = true;
+          return;
+        }
+        dockedOriginal = sql;
+        if (area.value !== sql) { area.value = sql; }
+        setDockedStatus(L.dockedTitle || '');
+        $('dockedRestore').hidden = true;
+      }
+
+      function openDockedPreview() {
+        dockedOpen = true;
+        dockedPinned = false;
+        $('dockedPreview').hidden = false;
+        $('previewBtn').setAttribute('aria-pressed', 'true');
+        $('previewBtn').classList.add('tog-on');
+        refreshDockedPreview();
+      }
+
+      function closeDockedPreview() {
+        dockedOpen = false;
+        dockedPinned = false;
+        dockedOriginal = null;
+        $('dockedPreview').hidden = true;
+        $('previewBtn').setAttribute('aria-pressed', 'false');
+        $('previewBtn').classList.remove('tog-on');
+      }
+
+      function toggleDockedPreview() {
+        if (dockedOpen) { closeDockedPreview(); } else { openDockedPreview(); }
+      }
+
+      function restoreDockedPreview() {
+        dockedPinned = false;
+        var area = $('dockedSql');
+        if (dockedOriginal != null && area.value !== dockedOriginal) { area.value = dockedOriginal; }
+        refreshDockedPreview();
       }
 
       // Lane L26: at the bottom means `scrollTop + clientHeight >= scrollHeight
@@ -1701,6 +1832,9 @@
       function renderList(state) {
         var list = $('list');
         var rows = state.rows || [];
+        // The docked preview looks lines up here rather than in the DOM (L32):
+        // a filtered-out row keeps its SQL but has no element to read.
+        lastRows = rows;
         var threshold = state.slow_threshold_ms;
         // The engine half of the row's database badge (L32): what the settings
         // page configured, so a row never claims a connection it does not know.
@@ -1750,6 +1884,9 @@
         // event is swallowed so it never looks like the user scrolled away.
         suppressScroll = true;
         if (!paused && follow && wasAtBottom) { list.scrollTop = list.scrollHeight; }
+        // A rebuilt list can change the selected row's SQL (a format toggle, a
+        // fresh push), so the docked pane re-reads it here (L32).
+        refreshDockedPreview();
       }
 
       function updateCounts(state) {
@@ -2633,17 +2770,21 @@
         openSheet('community');
         post({ op: 'community' });
       });
-      // Quick preview (L32, L42): the selected row is handed to the preview
-      // workbench as a cross-view message — the panel names the line, the host
-      // resolves it and `preview_target()` decides where it lands, so neither
-      // side hard-codes the channel. Sending the line (not the SQL) keeps the
-      // parsed log rows the single source. With nothing selected only the tab
-      // comes forward, over the same boundary.
-      $('previewBtn').addEventListener('click', function () {
-        if (selectedLine != null) {
-          post({ op: 'preview-send', line: selectedLine, selectTab: true });
-        } else {
-          post({ op: 'preview-send', selectTab: true });
+      // Docked quick preview (L32): the reference's `previewToggleAction` is a
+      // ToggleAction that opens the pane under the list, not a button that
+      // navigates away — so this toggles. Handing the row to the preview tab
+      // stays available where it belongs: the row's double-click and the
+      // context menu's "quick preview" entry post `open-line` / `preview-send`.
+      $('previewBtn').addEventListener('click', toggleDockedPreview);
+      $('dockedRestore').addEventListener('click', restoreDockedPreview);
+      $('dockedSql').addEventListener('input', function () {
+        if (!dockedOpen) { return; }
+        // Typing pins the pane: the reference stops following as soon as the
+        // document differs from the SQL it was opened with.
+        if (dockedOriginal != null && $('dockedSql').value !== dockedOriginal) {
+          dockedPinned = true;
+          setDockedStatus(L.dockedPinned || '');
+          $('dockedRestore').hidden = false;
         }
       });
 
