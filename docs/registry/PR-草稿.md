@@ -24,7 +24,7 @@ Add songrenshuo.mybatis-sql-visualizer
 
 - `publishers/songrenshuo.toml` —— 名称 "SongRenShuo"，owner `@SongRenShuo`，一把 Ed25519 公钥，`revoked-keys = []`。
 
-## 新插件：`songrenshuo.mybatis-sql-visualizer` 0.1.0
+## 新插件：`songrenshuo.mybatis-sql-visualizer` 2026.11.29
 
 OpenIDEA 的 MyBatis SQL 调试插件。它解决的是「这条 SQL 最后到底发出去什么」这个每天都要猜的问题。
 
@@ -64,13 +64,17 @@ Apache-2.0。发布包由该仓 CI 从源码构建（`.github/workflows/release.
 
 ### 如何验证过
 
-- `scripts/release-smoke.sh`：fmt 检查、全量 `cargo test`（2,273 个测试）、`openidea-plugin build`、签名 `pack`、对签名包跑 `openidea-plugin check`、SHA-256。
-- 发布包重新下载复验：SHA-256 与附带的 `.sha256` 一致、`check` 通过、`SIGNATURE.json` 的发布者与公钥与本 PR 注册的一致。
+- `scripts/release-smoke.sh`：fmt 检查、两个门禁脚本（版本号、清单 API）、全量 `cargo test`、
+  `openidea-plugin build`、`openidea-plugin check .`。这个脚本**不产出包**——发布包由 CI 的
+  `release.yml` 唯一构建（同源在 Windows 与 Linux 上编出的 wasm 不逐字节相同，本机包哈希
+  与线上包哈希必然不同）。
+- 发布包重新下载复验：SHA-256 与附带的 `.sha256` 一致、`check` 通过、`SIGNATURE.json` 的
+  发布者与公钥与本 PR 注册的一致。
 - 安装态真机走查：五页签各开一遍；静态渲染（mapper XML / 注解 SQL / Wrapper 链 / MPJ 联表）各验一条；捕获被拒与捕获获准两条路径；粘贴还原；设置各子页（含 Global / This project 切换）；MCP 工具调用一次。
 
 ### 版本
 
-`engines.openidea = "^1.18"`。一个版本 0.1.0，首次发布。
+`engines.openidea = "^1.18"`。首次发布，版本号 `2026.11.29`（日期制，tag 不带 `v` 前缀）。
 ```
 
 ## 提交步骤（真机测试通过后）

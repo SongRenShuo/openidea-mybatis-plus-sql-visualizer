@@ -9,15 +9,15 @@
 
 Renders MyBatis mapper XML, annotation SQL, iBatis 2.x, MyBatis-Plus wrappers and
 SQL logs into executable SQL, checks a statement before it reaches a database,
-and exposes the same engine to agents through 11 MCP tools. Every result carries
-an explicit `exact` / `partial` / `unresolved` confidence; `unresolved` never
-produces SQL.
+and exposes the same engine to agents through 12 read-only MCP tools. Every result
+carries an explicit `exact` / `partial` / `unresolved` confidence; `unresolved`
+never produces SQL.
 
 ## Package
 
 - `songrenshuo.mybatis-sql-visualizer-<version>.oiplugin`（2026.11.29 那份包的包内 id 仍是旧名，下一版起按新 id 构建）
 - sha256: `<filled by dist/*.sha256 after release>`
-- Built with `openidea-plugin` 0.1.51, plugin API 1.15, Rust 1.98.1 (wasm32-wasip2).
+- Built with `openidea-plugin` 0.1.55, plugin API 1.18, Rust 1.98.1 (wasm32-wasip2).
 
 ## Capabilities, and why each is needed
 

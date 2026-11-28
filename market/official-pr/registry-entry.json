@@ -1,16 +1,26 @@
 {
+  "_status": "blocked: 等第一份按新 id 构建并发布的包。这里不放 download/digest，因为 已发布的 2026.11.29 包包内 id 是旧名 songrenshuo.mybatis-plus-sql-visualizer，与下面的 id 不符，宿主（crates/ide-host/src/plugins/market.rs 的 verify_market_package，id/version/digest 一次比较）与登记仓 CI 都会拒收。",
   "id": "songrenshuo.mybatis-sql-visualizer",
   "name": "MyBatis SQL Visualizer",
   "version": "2026.11.29",
   "description": "Renders MyBatis mapper XML, annotation SQL, iBatis 2.x, MyBatis-Plus wrappers and SQL logs into executable SQL, and checks a statement before it reaches a database. Every result carries exact/partial/unresolved confidence; unresolved never produces SQL.",
   "authors": ["songrenshuo"],
   "publisher": "songrenshuo",
-  "download": "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin",
-  "digest": "b160c20cc9c3f3d7f754a0227b8abca66525ad1f5511293ad4fb897b6f2fe70e",
-  "capabilities": ["project.read", "events", "clipboard", "process:java", "net:127.0.0.1"],
-  "engine": "^1.15",
+  "download": null,
+  "digest": null,
+  "capabilities": [
+    "project.read",
+    "events",
+    "storage",
+    "clipboard",
+    "clipboard.read",
+    "process:java",
+    "net:127.0.0.1",
+    "editor.read"
+  ],
+  "engine": "^1.18",
   "categories": ["tools"],
   "icon": null,
   "homepage": "https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer",
-  "notes": "package still carries the pre-rename id songrenshuo.mybatis-plus-sql-visualizer (built 2026-11-29); the next release rebuilds it under the new id. Requires re-approving capabilities if the plugin was linked before this version: the manifest now declares events as required."
+  "notes": "Requires re-approving capabilities if the plugin was linked before this version: the manifest now declares events as required."
 }

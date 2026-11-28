@@ -24,3 +24,86 @@
 ## 换密钥
 
 私钥泄露或轮换时：`openidea-plugin endorse "<新公钥>" --key 旧密钥 --publisher songrenshuo` 打印背书 JSON，随 PR 更新 `publishers/songrenshuo.toml` 的 `keys`（旧 key 保留在被吊销前仍有效；被盗则加 `revoked-keys`）。
+
+## 提 PR 的具体步骤
+
+现在**还不能提**。卡在一个前置：已发布的 `2026.11.29` 包，包内 id 是旧名
+`songrenshuo.mybatis-plus-sql-visualizer`，而插件 id 已改为
+`songrenshuo.mybatis-sql-visualizer`。宿主与登记仓都要求「包内 id = 登记 id」：
+
+- 宿主：`crates/ide-host/src/plugins/market.rs` 的 `verify_market_package`，把
+  `manifest.id` / `manifest.version` / `digest` 三者与索引条目一次比较，不等即报
+  `the download does not match the marketplace's entry`；
+- 签名也绑 id：`crates/ide-extension/src/package.rs` 的 `signed_message` 首段就是 id，
+  所以旧包不能靠改索引糊弄过去；
+- 登记仓 CI 下载包、跑 `check`、验签，同样过不去。
+
+因此本目录两个 `.toml` 的 `[[versions]]` 是**注释状态**，`market/official-pr/registry-entry.json`
+的 `download` / `digest` 是 `null`。这是刻意的：填上旧包只会让 CI 一提交就红。
+
+### 解锁顺序（缺一不可）
+
+1. **发一版按新 id 构建的包**：按 `.agents/skills/openidea-release-workflow/SKILL.md`
+   走一轮完整发行（改 `plugin.toml` + `Cargo.toml` 的 version → 提交推 master →
+   `git tag <版本>` → 推 tag → `release.yml` 是唯一构建者）。确认包内
+   `plugin.toml` 的 `id` 已是 `songrenshuo.mybatis-sql-visualizer`：
+
+   ```sh
+   unzip -p songrenshuo.mybatis-sql-visualizer-<版本>.oiplugin plugin.toml | head -1
+   # 应打印: id = "songrenshuo.mybatis-sql-visualizer"
+   ```
+
+2. **三方 sha256 校验**（CI 自报 = GitHub 资产 = Gitee 资产），读数见 SKILL §6。
+3. **回填三处**（哈希必须一致，否则登记仓 CI 直接拒收）：
+   - `docs/registry/plugins.songrenshuo.mybatis-sql-visualizer.toml` 的 `[[versions]]`
+     取消注释并填新包；
+   - `market/official-pr/registry-entry.json` 的 `download` 与 `digest`；
+   - `market/official-pr/upstream/plugins/songrenshuo.mybatis-sql-visualizer.toml`。
+4. **本地跑一遍门禁**：`bash scripts/check-version-format.sh` 退出 0。
+5. **提 PR**（体例取自上游 `l0ng-ai/openidea-plugins` 的 README：一个 publisher
+   文件 + 一个插件文件，纯文本 TOML，无 CLA）：
+
+   ```sh
+   gh repo fork l0ng-ai/openidea-plugins --clone=false
+   gh repo clone <your-fork> /tmp/openidea-plugins
+   cd /tmp/openidea-plugins
+   git checkout -b add-songrenshuo-mybatis-sql-visualizer
+   cp <本仓>/docs/registry/publishers.songrenshuo.toml publishers/songrenshuo.toml
+   cp <本仓>/docs/registry/plugins.songrenshuo.mybatis-sql-visualizer.toml \
+      plugins/songrenshuo.mybatis-sql-visualizer.toml
+   git add publishers/songrenshuo.toml plugins/songrenshuo.mybatis-sql-visualizer.toml
+   git commit -F <提交信息文件>
+   git push -u origin HEAD
+   gh pr create --repo l0ng-ai/openidea-plugins \
+     --title "Add songrenshuo.mybatis-sql-visualizer" \
+     --body-file <本仓>/market/official-pr/pr-body.md
+   ```
+
+   标题走上游惯例 `Add <publisher>.<plugin>`；正文中英混排在上游在册 PR 里都常见。
+6. **等审核**：新发布者与新插件由维护者人工读源码（源码仓公开、开源许可、包的
+   构建来源、每项高风险能力的理由）。可能需要几轮修改。
+7. **合流后回读**：登记仓 CI 发布它自己的 `index.json`，一小时内并入官方
+   `plugins-index.json`。取官方索引确认出现我们的条目：
+
+   ```sh
+   curl -fsSL https://github.com/l0ng-ai/openidea/releases/latest/download/plugins-index.json \
+     | python -c "import json,sys;d=json.load(sys.stdin);print([p['id'] for p in d['plugins'] if p['publisher']=='songrenshuo'])"
+   ```
+
+   然后把 IDE 的市场地址改回官方默认（或清空），本仓的 `market-refresh.yml`
+   就成了无害空转，见 `market/README.md` 的「这份索引怎么保持新鲜」。
+
+### 需要用户确认的点
+
+以下每条都不该由代理代决：
+
+1. **什么时候发那一版新 id 的包**——日期制下版本号即发布当天，跨午夜要用户指定日期。
+2. **是否授权 push tag / 触发 `release.yml` / 双端上传**——发布是对外动作，本仓规矩是
+   必须先拿到明确授权。
+3. **是否授权 fork 与提 PR**——PR 会署名到用户的 GitHub 账号，且触发维护者人工审核。
+4. **`publishers.songrenshuo.toml` 的 `owners`**——现在写的是 `SongRenShuo`。这是
+   「有权改这条发布者条目的 GitHub 账号」，选错等于把改条目权交给别人。
+5. **市场地址是否改回官方**——改回后国内用户拉 GitHub 附件可能变慢；留着自建索引
+   则失去「官方收录」的部分意义。两边各有代价，属于产品取舍。
+6. **是否保留自建索引 workflow**——官方收录后它可以删，也可以留着当 Gitee 镜像入口。
+
