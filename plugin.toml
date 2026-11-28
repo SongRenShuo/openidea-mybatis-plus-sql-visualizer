@@ -1,7 +1,7 @@
 id = "songrenshuo.mybatis-plus-sql-visualizer"
 name = "MyBatis SQL Visualizer"
 version = "0.1.0"
-description = "Renders MyBatis mapper XML, annotation SQL, Wrapper chains and SQL logs into executable SQL, and checks a statement before it touches a database."
+description = "Renders MyBatis mapper XML, annotation SQL, iBatis 2.x sqlMap, MyBatis-Plus / MPJ wrapper chains (joins, join updates and deletes, subqueries) and SQL logs into the executable SQL the database will receive, with real parameters filled in, and checks every statement before it runs: dialect quoting, unsafe writes, 21 performance rules. 服务未启，SQL 先知。Every result carries an exact / partial / unresolved confidence — unresolved never invents SQL — and 12 read-only MCP tools expose the same engine to AI agents."
 authors = ["songrenshuo"]
 homepage = "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer"
 license = "Apache-2.0"
