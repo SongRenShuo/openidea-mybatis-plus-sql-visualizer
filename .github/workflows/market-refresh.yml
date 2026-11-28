@@ -1,0 +1,94 @@
+name: market-refresh
+
+# Keeps market/index.json from going stale.
+#
+# Why this exists: OpenIDEA holds ONE marketplace URL (`crates/ide-host/src/
+# plugins/market.rs`: the user's value replaces the default rather than adding
+# to it), and installing a signed package needs the publisher key inside
+# whichever index is in use. So ours is a *merged snapshot* — our own entries
+# plus everything official. That snapshot stops tracking upstream the moment it
+# is committed, so official plugins added later would never appear.
+#
+# `merge <ours> <official> --keep songrenshuo` refreshes the official half and
+# keeps ours verbatim (Gitee download URL, homepage). That is also why this job
+# needs NO signing key: it republishes entries, it does not sign a package.
+#
+# The merge and every guard live in `scripts/refresh-market.py` rather than
+# inline: a Python block inside a YAML `run: |` is hard to run locally, and the
+# guards are the entire value of this job. `scripts/refresh-market.test.sh`
+# drives both directions (clean input passes, each broken input fails).
+on:
+  schedule:
+    # 03:17 UTC — off the hour, so it does not queue behind the busiest slot.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# A manual dispatch landing on top of the nightly run would have both jobs
+# merge, commit and push the same file; the second push then fails non-fast-
+# forward and the run looks broken when nothing was wrong.
+concurrency:
+  group: market-refresh
+  cancel-in-progress: false
+
+env:
+  CLI_TAG: v0.1.55
+  PUBLISHER: songrenshuo
+  # The official index the IDE ships with.
+  OFFICIAL_INDEX: https://github.com/l0ng-ai/openidea/releases/latest/download/plugins-index.json
+
+jobs:
+  refresh:
+    name: merge the official index in
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install openidea-plugin ${{ env.CLI_TAG }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o /tmp/openidea-plugin.gz \
+            "https://github.com/l0ng-ai/openidea/releases/download/${CLI_TAG}/openidea-plugin-linux-x86_64.gz"
+          gunzip -c /tmp/openidea-plugin.gz > /usr/local/bin/openidea-plugin
+          chmod +x /usr/local/bin/openidea-plugin
+          openidea-plugin --version | tee /tmp/cli-version.txt
+          grep -F "0.1.55" /tmp/cli-version.txt
+
+      # A failed fetch must not commit an index holding no official plugins:
+      # the merge would then quietly ship a one-plugin marketplace, which a user
+      # reads as a network problem. The script checks shape (format, plugin
+      # count, publishers), not byte count — a cached error page is non-empty too.
+      - name: Merge, keeping our own entries
+        run: |
+          set -euo pipefail
+          python3 scripts/refresh-market.py \
+            --official "$OFFICIAL_INDEX" \
+            --index market/index.json \
+            --out market/index.json \
+            --publisher "$PUBLISHER"
+
+      # Only commit when the content actually moved: the merged document is
+      # rebuilt from the official one every run, so a quiet day would otherwise
+      # add a commit that changes nothing.
+      - name: Commit when it changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- market/index.json; then
+            echo "market/index.json is unchanged — nothing to commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add market/index.json
+          # Message through a file: the repo's convention is 中文 subject plus a
+          # body, and `-F -` cannot carry one safely through this YAML block.
+          cat > /tmp/commit-msg.txt <<'MSG'
+          chore(market): 同步官方插件索引
+
+          每日拉官方 plugins-index.json 并 merge 进来：保留 songrenshuo 自己的条目
+          （Gitee 下载地址与 homepage 不动），其余发布者与插件整体取官方最新。
+          MSG
+          git commit -F /tmp/commit-msg.txt
+          git push
