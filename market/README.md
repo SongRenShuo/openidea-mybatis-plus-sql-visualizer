@@ -81,17 +81,34 @@ openidea-plugin merge market/index.json https://…/index.json --keep songrenshu
 
 ## 在 IDE 里填 URL
 
-1. `Ctrl+,` 打开 Settings（设置）› Plugins（插件）页。
-2. 找到索引/仓库（marketplace index / repository）一行，填入
-   `https://…/market/index.json`，保存后刷新列表。
-3. 搜索插件名 `MyBatis SQL Visualizer`，或直接看 id
-   `songrenshuo.mybatis-plus-sql-visualizer`。
+**本仓已提交 `market/index.json`**，直接用它的 raw 地址：
+
+```
+https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer/raw/master/market/index.json
+```
+
+实测该地址直接返回 JSON（HTTP 200），不需要开 Gitee Pages。
+
+1. Settings（设置）› Plugins（插件）页 → 齿轮菜单 → **Plugin Repository**
+   （前端 `src/features/plugins/PluginsPage.tsx` 的 `editMarketUrl`，接口
+   `plugin_set_market_url`）。
+2. 填入上面的地址，保存后列表刷新。
+3. 搜索 `MyBatis SQL Visualizer`，或看 id `songrenshuo.mybatis-plus-sql-visualizer`。
 4. 判断是否生效，别只看界面文案：Windows 上
    `%APPDATA%\ai.l0ng.openidea\plugins\market-index.json` 会被重写，`publishers`
    里应出现 `songrenshuo`。文件没变就是 URL 没被接受或没刷新。
-5. 1.15 里这一项的具体标签名以 IDE 实际界面为准（本轮没有在真机点过这一步，
-   ROADMAP 的 P-6 仍然是「待证伪」）。没有这个入口时，退回手动安装：把
-   `.oiplugin` 放进插件目录，或先用 `sha256sum -c` 校验再安装。
+
+**为什么必须有这份自建索引**：签名包安装时要求索引里有发布者公钥
+（`crates/ide-extension/src/package.rs` 的 `verify`）。官方索引里没有
+`songrenshuo`，直接装包会报 `unknown publisher "songrenshuo"`。本仓这份以官方
+索引为基底 merge 进来，填了它既能看到官方 275 个插件，也能装本插件。
+
+`download` 指向 Gitee 发行版而非 GitHub：国内拉 GitHub 附件经常失败，这正是
+自建索引的意义所在。
+
+**每次发版都要重生成**：`scripts/build-index.sh` 生成自己的部分，再
+`openidea-plugin merge` 并入官方索引，覆盖 `market/index.json` 后提交。
+完整命令见 `.agents/skills/openidea-release-workflow/SKILL.md`。
 
 ## 更新语义
 
