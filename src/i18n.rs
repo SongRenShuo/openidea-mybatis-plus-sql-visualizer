@@ -1419,6 +1419,16 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "update 包装器只渲染条件片段",
     ),
     (
+        "wrapper.update_set_unparsed",
+        "A SET call of the join update could not be resolved and is dropped",
+        "联表更新的一个 SET 调用解析不了，已从 SET 清单剔除",
+    ),
+    (
+        "wrapper.update_set_missing",
+        "No SET call of the join update could be resolved, so no SQL is emitted",
+        "联表更新的 SET 调用一个也解析不了，因此不输出 SQL",
+    ),
+    (
         "wrapper.unknown_field",
         "A field is not mapped to a column",
         "有字段没有映射到列",

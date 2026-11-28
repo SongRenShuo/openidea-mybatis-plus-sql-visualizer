@@ -50,12 +50,17 @@ pub struct EntityModel {
     pub columns: Vec<EntityColumn>,
     /// Fields that were skipped, each with the reason (`static`, `collection`, …).
     pub skipped: Vec<String>,
+    /// The column `@TableId` names, when any field declared it. The join-update
+    /// renderer excludes it from `setUpdateEntity`'s column expansion, the way
+    /// the reference filters `!it.isId`.
+    pub primary_key: Option<String>,
 }
 
 impl EntityModel {
     /// The projection `analyze::wrapper` renders against.
     pub fn columns(&self) -> EntityColumns {
         let mut columns = EntityColumns::new(&self.class_name, &self.table);
+        columns.primary_key = self.primary_key.clone();
         for column in &self.columns {
             columns = columns.with_column(&column.field, &column.column, &column.sql_type);
         }
@@ -90,9 +95,15 @@ pub fn parse_entity(class_name: &str, java: &str) -> EntityModel {
     };
     let mut columns = Vec::new();
     let mut skipped = Vec::new();
+    let mut primary_key = None;
     for (annotations, declaration) in field_declarations(java) {
         match read_field(&annotations, &declaration) {
-            Ok(column) => columns.push(column),
+            Ok(column) => {
+                if primary_key.is_none() && annotation_args(&annotations, "TableId").is_some() {
+                    primary_key = Some(column.column.clone());
+                }
+                columns.push(column);
+            }
             Err(reason) => skipped.push(reason),
         }
     }
@@ -102,6 +113,7 @@ pub fn parse_entity(class_name: &str, java: &str) -> EntityModel {
         table_declared: declared_table.is_some(),
         columns,
         skipped,
+        primary_key,
     }
 }
 

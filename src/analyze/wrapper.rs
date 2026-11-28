@@ -53,6 +53,11 @@ pub struct EntityColumns {
     /// receiver names, which is also how MPJ picks the ON-side table alias.
     /// The command layer fills this from the project index; empty = single-table.
     pub related: Vec<EntityColumns>,
+    /// The column `@TableId` names, when the source declared it. The join
+    /// update's `setUpdateEntity` expands every non-id column, the way the
+    /// reference filters `!it.isId`; `None` expands them all (the honest
+    /// approximation when the source never said which column is the id).
+    pub primary_key: Option<String>,
 }
 
 impl EntityColumns {
@@ -62,7 +67,14 @@ impl EntityColumns {
             table: table.to_string(),
             columns: Vec::new(),
             related: Vec::new(),
+            primary_key: None,
         }
+    }
+
+    /// Names the entity's id column (builder style).
+    pub fn with_primary_key(mut self, column: &str) -> Self {
+        self.primary_key = Some(column.to_string());
+        self
     }
 
     /// Adds a column mapping (builder style).
@@ -116,6 +128,37 @@ pub enum WrapperKind {
     #[default]
     Query,
     Update,
+    /// A `JoinWrappers.delete(C)` chain: the multi-table DELETE the reference's
+    /// `DeleteJoinConverter` builds (`DELETE t, t1 FROM user t … WHERE …`).
+    Delete,
+}
+
+/// One SET assignment of a join-update chain, in call order. The reference's
+/// `UpdateJoinConverter.parseSet` produces the same two shapes: an explicit
+/// `column = value` pair or a raw fragment it already rendered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetItem {
+    /// `set(col, val)` / `setIfExists(col, val)`: the qualified column (the
+    /// main alias prefix, or a caller-written `t1.tel` verbatim) and its value.
+    Assign { column: String, value: Value },
+    /// `setSql`/`setApply`/`setIncrBy`/`setDecrBy`: a fully rendered fragment.
+    Raw(String),
+}
+
+/// One entry of the multi-table DELETE's target list, resolved against the
+/// joins at render time (the reference resolves `deleteAll()` the same way).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteTarget {
+    /// The main table's alias.
+    Main,
+    /// `delete(X.class)`: the class's own default alias — the main entity
+    /// resolves to the main alias, a joined one to its decapitalised class
+    /// name (the reference ignores an explicit join alias here, on purpose).
+    Class(String),
+    /// `delete("t1")`: the caller's string, verbatim.
+    Raw(String),
+    /// `deleteAll()`: the main alias plus every join alias.
+    All,
 }
 
 /// How a condition joins to the previous one.
@@ -164,8 +207,9 @@ pub enum Value {
     /// qualified column, never as a parameter.
     Column(String),
     /// A rendered sub-select (`in(User::getId, AddressDO.class, sub -> …)`),
-    /// already single-line. The parentheses come from the operator.
-    SubQuery(String),
+    /// already single-line, with the parameter sources its own `?`s stand for,
+    /// in SQL order. The parentheses come from the operator.
+    SubQuery(String, Vec<String>),
 }
 
 impl Value {
@@ -236,6 +280,13 @@ pub struct WrapperChain {
     /// The main table's alias (`setAlias("x")`); MPJ's default is `t`.
     pub main_alias: Option<String>,
     pub distinct: bool,
+    /// A join-update chain's SET assignments, in call order.
+    pub sets: Vec<SetItem>,
+    /// Parameter sources the SET side contributed, in SQL order (SET precedes
+    /// WHERE, so these come before the condition parameters).
+    pub set_params: Vec<Value>,
+    /// A `JoinWrappers.delete` chain's delete targets, in call order.
+    pub delete_targets: Vec<DeleteTarget>,
 }
 
 /// How a join combines the joined table (`LEFT JOIN` / `INNER JOIN` / …).
@@ -319,8 +370,13 @@ pub fn param_sources(nodes: &[CondNode]) -> Vec<String> {
         match node {
             CondNode::Leaf(condition) => {
                 for value in &condition.values {
-                    if let Value::Param(source) = value {
-                        out.push(source.clone());
+                    match value {
+                        Value::Param(source) => out.push(source.clone()),
+                        // The `?`s inside a rendered sub-select stand for the
+                        // sources the sub-render collected, already in SQL
+                        // order (the tree order is the statement order).
+                        Value::SubQuery(_, params) => out.extend(params.iter().cloned()),
+                        _ => {}
                     }
                 }
             }
@@ -434,17 +490,6 @@ pub fn render_with_alias(
         || text.contains("MPJQueryWrapper")
         || text.contains("JoinWrappers")
         || text.contains("MPJWrappers");
-    // A join-update/delete writes several tables at once: the SET list and the
-    // multi-table DELETE target are statement structure this renderer does not
-    // build, so it refuses rather than emitting a single-table statement.
-    if mpj && (text.contains("JoinWrappers.update(") || text.contains("JoinWrappers.delete(")) {
-        return structural_output(
-            columns,
-            vec!["`.updateJoin`/`.deleteJoin` writes several tables at once; the SET list and the delete targets are statement structure this version does not render".to_string()],
-            vec!["updateJoin".to_string()],
-            &["wrapper.structural_method".to_string()],
-        );
-    }
 
     let mut ctx = Ctx {
         columns,
@@ -519,12 +564,22 @@ pub fn render_with_alias(
         ctx.notes
             .push("the entity table is unknown; pass EntityColumns.table".to_string());
     }
-    if chain.kind == WrapperKind::Update {
+    if chain.kind == WrapperKind::Update && !mpj {
         ctx.partial = true;
         push_key(&mut ctx, "wrapper.update_fragment_only");
         ctx.notes.push(
             "update wrappers render only the condition fragment; UPDATE/SET come from the mapper"
                 .to_string(),
+        );
+    }
+    // A join-update with no usable SET call is not an UPDATE: the statement
+    // would be syntactically wrong, not just less specific. The reference
+    // warns about the dropped calls instead; here the whole render refuses.
+    if chain.kind == WrapperKind::Update && mpj && chain.sets.is_empty() {
+        ctx.unresolved = true;
+        push_key(&mut ctx, "wrapper.update_set_missing");
+        ctx.notes.push(
+            "no `set` call of this join-update chain could be resolved; an UPDATE without SET is not a statement".to_string(),
         );
     }
 
@@ -544,10 +599,35 @@ pub fn render_with_alias(
     let sql = match (confidence, chain.kind) {
         (Confidence::Unresolved, _) => None,
         (_, WrapperKind::Query) => Some(render_select(&effective, columns, dialect)),
+        // A join-update chain (`JoinWrappers.update(C)`) renders the whole
+        // UPDATE — joins, SET and WHERE — the way the reference's
+        // `UpdateJoinConverter` does. A plain update wrapper keeps the
+        // fragment-only shape: UPDATE/SET come from the mapper.
+        (_, WrapperKind::Update) if mpj => Some(render_update(&effective, dialect)),
+        (_, WrapperKind::Delete) => Some(render_delete(&effective, columns, dialect)),
         (_, WrapperKind::Update) => render_fragment(&effective, dialect),
     };
 
-    let mut params = param_sources(&effective.conditions);
+    // The parameter order follows the statement: SET (`t.col = ?`) precedes
+    // WHERE, and HAVING comes after the conditions.
+    let mut params = Vec::new();
+    for value in &chain.set_params {
+        if let Value::Param(source) = value {
+            params.push(source.clone());
+        }
+    }
+    // The `setUpdateEntity` approximation and `set(col, ?)`-style entries
+    // carry their runtime value as an Assign, not a raw fragment.
+    for item in &chain.sets {
+        if let SetItem::Assign {
+            value: Value::Param(source),
+            ..
+        } = item
+        {
+            params.push(source.clone());
+        }
+    }
+    params.extend(param_sources(&effective.conditions));
     params.extend(chain.having_params.iter().filter_map(|value| match value {
         Value::Param(source) => Some(source.clone()),
         _ => None,
@@ -636,28 +716,6 @@ fn class_literal(arg: &str) -> Option<String> {
         return None;
     }
     Some(class.rsplit('.').next().unwrap_or(class).to_string())
-}
-
-/// An `unresolved` render that names the structure it could not build. The
-/// chain still carries the table, so the reason line can point at the entity.
-fn structural_output(
-    columns: &EntityColumns,
-    notes: Vec<String>,
-    unsupported: Vec<String>,
-    keys: &[String],
-) -> WrapperOutput {
-    WrapperOutput {
-        confidence: Confidence::Unresolved,
-        sql: None,
-        chain: WrapperChain {
-            table: non_empty(&columns.table),
-            unsupported,
-            ..Default::default()
-        },
-        params: Vec::new(),
-        message_keys: keys.to_vec(),
-        notes,
-    }
 }
 
 fn push_key(ctx: &mut Ctx, key: &str) {
@@ -808,6 +866,15 @@ fn split_args(text: &str) -> Vec<String> {
 }
 
 fn detect_kind(text: &str) -> Option<WrapperKind> {
+    // The MPJ join-update/delete factories name their statement family in the
+    // factory call; check them first, before the substring `Wrapper` rules
+    // below could mistake them for query chains.
+    if text.contains("JoinWrappers.update(") || text.contains("JoinWrappers.updateAndNull(") {
+        return Some(WrapperKind::Update);
+    }
+    if text.contains("JoinWrappers.delete(") {
+        return Some(WrapperKind::Delete);
+    }
     // Check the longer/more specific names first: "LambdaQueryWrapper" contains
     // the substring "QueryWrapper".
     for (name, kind) in [
@@ -839,8 +906,15 @@ fn parse_calls(
     let mut nodes = Vec::new();
     for call in calls {
         match call.name.as_str() {
-            // Factory / meta calls that build the wrapper, not conditions.
-            "lambdaQuery" | "query" | "lambdaUpdate" | "update" | "delete" | "lambda" => {}
+            // Factory / meta calls that build the wrapper, not conditions. A
+            // non-MPJ chain's `delete` is the mapper's consumption point, a
+            // no-op here; the join-delete's `delete(X.class, …)` names the
+            // tables to delete.
+            "lambdaQuery" | "query" | "lambdaUpdate" | "update" | "lambda" => {}
+            "delete" if !ctx.mpj || call.args.is_empty() => {}
+            name @ ("delete" | "deleteAll") if ctx.mpj => {
+                parse_delete_call(name, &call.args, chain)
+            }
             // `setAlias("x")` names the main table; `setTableName` is a runtime
             // table swap the text cannot evaluate (the reference treats it as a
             // no-op too).
@@ -912,9 +986,28 @@ fn parse_calls(
                         Op::NotExists
                     },
                     column: String::new(),
-                    values: vec![Value::SubQuery(sql)],
+                    values: vec![Value::SubQuery(sql, Vec::new())],
                 }));
                 *pending = Connector::And;
+            }
+            // A join-update's SET family and a join-delete's target list (the
+            // reference's UpdateJoinConverter / DeleteJoinConverter). Only MPJ
+            // chains carry them; a plain update wrapper keeps its mapper-owned
+            // SET and stays fragment-only.
+            name if ctx.mpj
+                && matches!(
+                    name,
+                    "set"
+                        | "setIfExists"
+                        | "setSql"
+                        | "setApply"
+                        | "setIncrBy"
+                        | "setDecrBy"
+                        | "setUpdateEntity"
+                        | "setUpdateEntityAndNull"
+                ) =>
+            {
+                parse_set_call(name, &call.args, ctx, chain)
             }
             name if is_join_method(name) => parse_join(name, &call.args, chain, ctx),
             name @ ("selectAll" | "select" | "selectAs" | "selectIgnore" | "selectCount"
@@ -1007,6 +1100,225 @@ fn structural(ctx: &mut Ctx, note: String) {
     push_key(ctx, "wrapper.structural_method");
     ctx.notes.push(note);
     ctx.partial = false;
+}
+
+// ---------------------------------------------------------------------------
+// MPJ: the join-update SET family and the join-delete targets
+// ---------------------------------------------------------------------------
+
+/// A bare `true`/`false` first argument: the condition prefix of
+/// `set(cond, col, val)`, which the reference strips before reading the
+/// column and the value.
+fn is_boolean_flag(raw: &str) -> bool {
+    matches!(raw.trim(), "true" | "false")
+}
+
+/// Dispatches the join-update SET family to its shape. The reference keeps
+/// the same split in `UpdateJoinConverter.parseSet`.
+fn parse_set_call(name: &str, args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
+    match name {
+        "set" | "setIfExists" => parse_set(args, ctx, chain),
+        "setSql" | "setApply" => parse_set_sql(name, args, ctx, chain),
+        "setIncrBy" | "setDecrBy" => parse_set_incr(name, args, ctx, chain),
+        _ => parse_set_entity(ctx, chain),
+    }
+}
+
+/// `set(col, val)` / `setIfExists(col, val)` — the same rules the reference's
+/// `parseSet` documents: a boolean first argument is a condition prefix, a
+/// method-reference column always takes the main alias (cross-table ownership
+/// is statically unknowable), a string column that already carries `t1.tel`
+/// passes through verbatim, and a value taken from another column (the
+/// three-argument form) is dropped with a note — the reference leaves that
+/// entry out of the SET list too.
+fn parse_set(args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
+    let start = if args.len() >= 3 && is_boolean_flag(&args[0]) {
+        1
+    } else {
+        0
+    };
+    let Some(column) = args.get(start).and_then(|a| render_set_column(a, ctx)) else {
+        drop_set_call(ctx, chain, "set", args);
+        return;
+    };
+    match args.get(start + 1) {
+        Some(value) if value.contains("::") => {
+            ctx.partial = true;
+            push_key(ctx, "wrapper.update_set_unparsed");
+            ctx.notes.push(format!(
+                "`set({column}, …)` takes its value from a column; the SET entry is dropped"
+            ));
+            chain.unsupported.push("set".to_string());
+        }
+        Some(value) => {
+            let value = parse_value_in(value, ctx);
+            chain.sets.push(SetItem::Assign { column, value });
+        }
+        None => drop_set_call(ctx, chain, "set", args),
+    }
+}
+
+/// `setSql("t.update_by = {0}", v)` / `setApply(cond, "t.name = concat(%s, …)",
+/// c -> c.accept(col), …)`: the fragment renders verbatim with `{i}` replaced
+/// by the argument values and, for `setApply`, the `%s` slot by the column the
+/// accept-lambda names — the demo's documented shape. Runtime values render
+/// as `?` and join the SET-side parameter order (SET precedes WHERE in the
+/// statement).
+fn parse_set_sql(name: &str, args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
+    let start = if args.len() >= 2 && is_boolean_flag(&args[0]) {
+        1
+    } else {
+        0
+    };
+    let Some(template) = args.get(start).and_then(|a| string_literal(a)) else {
+        drop_set_call(ctx, chain, name, args);
+        return;
+    };
+    let mut out = template;
+    let mut params: Vec<Value> = Vec::new();
+    let mut rest_index = start + 1;
+    if out.contains("%s") {
+        let column = args
+            .get(rest_index)
+            .and_then(|body| accept_argument(body))
+            .and_then(|raw| render_set_column(&raw, ctx));
+        match column {
+            Some(column) => {
+                out = out.replace("%s", &column);
+                rest_index += 1;
+            }
+            None => {
+                ctx.partial = true;
+                push_key(ctx, "wrapper.update_set_unparsed");
+                ctx.notes.push(
+                    "`setApply(...)` has a `%s` slot its lambda does not fill; it stays verbatim"
+                        .to_string(),
+                );
+            }
+        }
+    }
+    for (index, arg) in args.iter().enumerate().skip(rest_index) {
+        let rendered = match parse_value_in(arg, ctx) {
+            Value::Param(source) => {
+                params.push(Value::Param(source));
+                "?".to_string()
+            }
+            value => render_value(&value, ctx.dialect),
+        };
+        out = out.replace(&format!("{{{}}}", index - rest_index), &rendered);
+    }
+    chain.set_params.extend(params);
+    chain.sets.push(SetItem::Raw(out));
+}
+
+/// `setIncrBy(col, n)` / `setDecrBy(col, n)` render `col = col ± n` against
+/// the main alias, the reference's raw-fragment shape. A runtime `n` renders
+/// `?` and joins the SET-side parameter order.
+fn parse_set_incr(name: &str, args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
+    let start = if args.len() >= 3 && is_boolean_flag(&args[0]) {
+        1
+    } else {
+        0
+    };
+    let Some(column) = args.get(start).and_then(|a| render_set_column(a, ctx)) else {
+        drop_set_call(ctx, chain, name, args);
+        return;
+    };
+    let Some(value) = args.get(start + 1) else {
+        drop_set_call(ctx, chain, name, args);
+        return;
+    };
+    let op = if name == "setIncrBy" { "+" } else { "-" };
+    let rendered = match parse_value_in(value, ctx) {
+        Value::Param(source) => {
+            chain.set_params.push(Value::Param(source));
+            "?".to_string()
+        }
+        value => render_value(&value, ctx.dialect),
+    };
+    chain
+        .sets
+        .push(SetItem::Raw(format!("{column} = {column} {op} {rendered}")));
+}
+
+/// `setUpdateEntity(entity)` / `setUpdateEntityAndNull(entity)`: the entity's
+/// runtime field values are statically unknowable, so every non-id column of
+/// the main table renders `t.col = ?` — the reference's documented
+/// approximation (`AndNull` also includes null fields, statically
+/// indistinguishable, so the two share one shape). The id column is excluded
+/// when the projection named one.
+fn parse_set_entity(ctx: &mut Ctx, chain: &mut WrapperChain) {
+    let alias = ctx.main_alias.clone();
+    let primary_key = ctx.columns.primary_key.clone();
+    for (_, column, _) in &ctx.columns.columns {
+        if primary_key.as_deref() == Some(column) {
+            continue;
+        }
+        chain.sets.push(SetItem::Assign {
+            column: format!("{alias}.{column}"),
+            value: Value::Param(format!("entity.{column}")),
+        });
+    }
+}
+
+/// A SET call the renderer could not turn into an assignment: kept out of the
+/// SET list with a note, the way the reference collects `unparsedSets`.
+fn drop_set_call(ctx: &mut Ctx, chain: &mut WrapperChain, name: &str, args: &[String]) {
+    ctx.partial = true;
+    push_key(ctx, "wrapper.update_set_unparsed");
+    ctx.notes.push(format!(
+        "`{name}({})` could not be resolved to a SET entry; it is dropped",
+        args.join(", ")
+    ));
+    chain.unsupported.push(name.to_string());
+}
+
+/// A SET column: a method reference always qualifies by the main alias (the
+/// reference's ownership approximation); a string column with its own
+/// `t1.tel` qualifier passes through verbatim; a bare string column gets the
+/// main alias.
+fn render_set_column(raw: &str, ctx: &Ctx) -> Option<String> {
+    let alias = ctx.main_alias.clone();
+    if let Some(column) = string_literal(raw) {
+        return Some(if column.contains('.') {
+            column
+        } else {
+            format!("{alias}.{column}")
+        });
+    }
+    let (class, getter) = parse_field_ref(raw)?;
+    let entity = ctx.columns.find(&class)?;
+    let field = field_from_getter(&getter);
+    let column = entity.column_for(&field)?.to_string();
+    Some(format!("{alias}.{column}"))
+}
+
+/// The argument of the first `.accept(...)` call in a lambda body
+/// (`c -> c.accept(UserDO::getName)` → `UserDO::getName`), the column slot
+/// the demo's `setApply` fills.
+fn accept_argument(body: &str) -> Option<String> {
+    let start = body.find(".accept(")? + ".accept(".len();
+    let rest = &body[start..];
+    let end = rest.find(')')?;
+    let arg = rest[..end].trim();
+    (!arg.is_empty()).then(|| arg.to_string())
+}
+
+/// The delete targets of a `JoinWrappers.delete` chain: `delete(X.class)` /
+/// `delete("t1")` / `deleteAll()`, kept symbolic and resolved against the
+/// joins at render time — `deleteAll` may appear before the join calls.
+fn parse_delete_call(name: &str, args: &[String], chain: &mut WrapperChain) {
+    if name == "deleteAll" {
+        chain.delete_targets.push(DeleteTarget::All);
+        return;
+    }
+    for arg in args {
+        if let Some(class) = class_literal(arg) {
+            chain.delete_targets.push(DeleteTarget::Class(class));
+        } else if let Some(table) = string_literal(arg) {
+            chain.delete_targets.push(DeleteTarget::Raw(table));
+        }
+    }
 }
 
 /// The table alias MPJ gives `class`: the explicit one a join declared, else
@@ -1464,7 +1776,7 @@ fn parse_in_subquery(
         return;
     };
     let class = class_literal(&args[1]).expect("dispatch checked");
-    let Some(sub) = subquery_sql(&class, &args[2], ctx) else {
+    let Some((sub, sub_params)) = subquery_sql(&class, &args[2], ctx) else {
         ctx.unresolved = true;
         push_key(ctx, "wrapper.structural_method");
         ctx.notes.push(format!(
@@ -1479,7 +1791,7 @@ fn parse_in_subquery(
         connector: *pending,
         op,
         column,
-        values: vec![Value::SubQuery(sub)],
+        values: vec![Value::SubQuery(sub, sub_params)],
     }));
     *pending = Connector::And;
 }
@@ -1494,7 +1806,7 @@ fn parse_exists_subquery(
     nodes: &mut Vec<CondNode>,
 ) {
     let class = class_literal(&args[0]).expect("dispatch checked");
-    let Some(sub) = subquery_sql(&class, &args[1], ctx) else {
+    let Some((sub, sub_params)) = subquery_sql(&class, &args[1], ctx) else {
         ctx.unresolved = true;
         push_key(ctx, "wrapper.structural_method");
         ctx.notes.push(format!(
@@ -1513,21 +1825,28 @@ fn parse_exists_subquery(
         connector: *pending,
         op,
         column: String::new(),
-        values: vec![Value::SubQuery(sub)],
+        values: vec![Value::SubQuery(sub, sub_params)],
     }));
     *pending = Connector::And;
 }
 
-/// The lambda's body rendered as a standalone SELECT, single-line. `None` when
-/// the class has no projection or the sub-select is not fully literal.
-fn subquery_sql(class: &str, lambda: &str, ctx: &Ctx) -> Option<String> {
+/// The lambda's body rendered as a standalone SELECT, single-line, with the
+/// parameter sources of its own `?`s. `None` when the class has no projection
+/// or the sub-select is not fully literal. A sub-render with runtime values
+/// (`eq(Field, variable)` → `?`) is accepted and the sources ride along in
+/// SQL order — the order of the condition tree *is* the order of the `?`s in
+/// the statement. Any other gap the sub-render reports (a dropped condition,
+/// an unmapped field) still refuses: embedding a partially-blind sub-select
+/// would read as a complete one.
+fn subquery_sql(class: &str, lambda: &str, ctx: &Ctx) -> Option<(String, Vec<String>)> {
     let entity = ctx.columns.find(class)?;
     let body = strip_lambda_prefix(lambda);
     let out = render_with(&body, entity, ctx.dialect, &Default::default());
-    if out.confidence != Confidence::Exact {
+    let sql = out.sql?;
+    if out.confidence != Confidence::Exact && out.params.is_empty() {
         return None;
     }
-    out.sql
+    Some((sql, out.params))
 }
 
 /// `having("count(*) > {0}", 0)`: the fragment renders verbatim with `{i}`
@@ -2042,6 +2361,104 @@ fn render_fragment(chain: &WrapperChain, dialect: &Dialect) -> Option<String> {
     Some(sql)
 }
 
+/// The join-update statement: `UPDATE <table> <alias> [JOIN…] SET … WHERE …`.
+/// The clause order is the reference's `generateUpdate`: joins before SET,
+/// then the WHERE, then `last` verbatim at the end. Only `last` carries over
+/// from the tail clauses — GROUP BY/HAVING/ORDER BY are not part of an
+/// UPDATE.
+fn render_update(chain: &WrapperChain, dialect: &Dialect) -> String {
+    let alias = chain.main_alias.as_deref().unwrap_or("t");
+    let table = chain.table.as_deref().unwrap_or("");
+    let mut sql = format!("UPDATE {} {alias}", quote(table, dialect));
+    for join in &chain.joins {
+        sql.push(' ');
+        sql.push_str(&render_join(join, dialect));
+    }
+    let sets: Vec<String> = chain
+        .sets
+        .iter()
+        .map(|item| match item {
+            SetItem::Assign { column, value } => format!(
+                "{} = {}",
+                render_column_name(column, dialect),
+                render_value(value, dialect)
+            ),
+            SetItem::Raw(fragment) => fragment.clone(),
+        })
+        .collect();
+    sql.push_str(&format!(" SET {}", sets.join(", ")));
+    if let Some(where_sql) = render_where(chain, dialect) {
+        sql.push(' ');
+        sql.push_str(&where_sql);
+    }
+    if let Some(last) = &chain.last {
+        sql.push(' ');
+        sql.push_str(last);
+    }
+    sql
+}
+
+/// The join-delete statement: `DELETE <targets> FROM <table> <alias>
+/// [JOIN…] [WHERE …]`, the reference's `generateDelete` multi-table shape.
+/// `deleteAll()` expands to the main alias plus every join alias; a class
+/// target renders its own default alias (the main entity → the main alias),
+/// even when the join declared a different one — the reference does the same,
+/// documented as its own behaviour.
+fn render_delete(chain: &WrapperChain, columns: &EntityColumns, dialect: &Dialect) -> String {
+    let alias = chain.main_alias.as_deref().unwrap_or("t");
+    let mut targets: Vec<String> = Vec::new();
+    let push_target = |targets: &mut Vec<String>, name: String| {
+        if !targets.iter().any(|existing| existing == &name) {
+            targets.push(name);
+        }
+    };
+    for target in &chain.delete_targets {
+        match target {
+            DeleteTarget::Main => push_target(&mut targets, alias.to_string()),
+            DeleteTarget::All => {
+                push_target(&mut targets, alias.to_string());
+                for join in &chain.joins {
+                    push_target(&mut targets, join.alias.clone());
+                }
+            }
+            DeleteTarget::Raw(raw) => push_target(&mut targets, raw.clone()),
+            DeleteTarget::Class(class) => {
+                let name = if columns
+                    .find(class)
+                    .is_some_and(|e| e.class_name == columns.class_name)
+                {
+                    alias.to_string()
+                } else {
+                    columns.alias_of(class)
+                };
+                push_target(&mut targets, name);
+            }
+        }
+    }
+    if targets.is_empty() {
+        targets.push(alias.to_string());
+    }
+    let table = chain.table.as_deref().unwrap_or("");
+    let mut sql = format!(
+        "DELETE {} FROM {} {alias}",
+        targets.join(", "),
+        quote(table, dialect)
+    );
+    for join in &chain.joins {
+        sql.push(' ');
+        sql.push_str(&render_join(join, dialect));
+    }
+    if let Some(where_sql) = render_where(chain, dialect) {
+        sql.push(' ');
+        sql.push_str(&where_sql);
+    }
+    if let Some(last) = &chain.last {
+        sql.push(' ');
+        sql.push_str(last);
+    }
+    sql
+}
+
 /// GROUP BY / HAVING / ORDER BY / LIMIT / LAST (the WHERE clause belongs to
 /// the caller); the clause order is the standard SQL one.
 fn render_clauses(chain: &WrapperChain, dialect: &Dialect) -> String {
@@ -2134,7 +2551,7 @@ fn render_leaf(c: &Condition, dialect: &Dialect) -> String {
         } else {
             "NOT EXISTS"
         };
-        let Some(Value::SubQuery(sql)) = c.values.first() else {
+        let Some(Value::SubQuery(sql, _)) = c.values.first() else {
             return String::new();
         };
         return format!("{keyword} ({sql})");
@@ -2214,14 +2631,14 @@ fn value_pattern_text(v: &Value) -> String {
         // A column never appears as a LIKE pattern; keep the match total.
         Value::Column(_) => String::new(),
         // Neither does a sub-select.
-        Value::SubQuery(_) => String::new(),
+        Value::SubQuery(..) => String::new(),
     }
 }
 
 fn render_value(v: &Value, dialect: &Dialect) -> String {
     match v {
         Value::Column(name) => render_column_name(name, dialect),
-        Value::SubQuery(sql) => sql.clone(),
+        Value::SubQuery(sql, _) => sql.clone(),
         Value::Str(s) => format!("'{}'", escape_sql(s)),
         Value::Num(n) => n.clone(),
         Value::Bool(b) => {
@@ -2527,7 +2944,8 @@ mod tests {
             .with_column("name", "name", "varchar")
             .with_column("sex", "sex", "int")
             .with_column("age", "age", "int")
-            .with_column("headImg", "head_img", "varchar");
+            .with_column("headImg", "head_img", "varchar")
+            .with_primary_key("id");
         let address = EntityColumns::new("AddressDO", "user_address")
             .with_column("id", "id", "bigint")
             .with_column("userId", "user_id", "bigint")
@@ -2840,6 +3258,222 @@ mod tests {
             "{sql}"
         );
         assert!(sql.contains(") stationInfoEntity ON"), "{sql}");
+    }
+
+    // MPJ: join-update / join-delete (the reference's UpdateJoinConverter /
+    // DeleteJoinConverter, demo-repo parity) -----------------------------
+
+    #[test]
+    fn a_join_update_renders_the_whole_statement() {
+        // demo `updateJoinExt` in full: setUpdateEntity (entity values are
+        // statically unknowable → every non-id column renders `t.col = ?`),
+        // a cross-table `set` (the reference approximates by the main alias),
+        // the three-argument form (dropped, with a note — the reference does
+        // the same), incr/decr and the `%s` slot of setApply.
+        let out = render(
+            r#"JoinWrappers.update(UserDO.class)
+                .setUpdateEntity(new UserDO().setAge(20))
+                .set(AddressDO::getTel, "13800000000")
+                .set(UserDO::getHeadImg, UserDO::getName, "addr")
+                .setIncrBy(UserDO::getAge, 1)
+                .setDecrBy(true, UserDO::getSex, 1)
+                .setApply(true, "t.name = concat(%s, '_u')", c -> c.accept(UserDO::getName))
+                .innerJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(AddressDO::getStatus, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        // The dropped three-argument `set` narrows the SET list, so the
+        // statement stays partial, like the reference's warning.
+        assert_eq!(out.confidence, Confidence::Partial, "{out:?}");
+        let sql = out.sql.as_deref().expect("the chain renders");
+        assert_eq!(
+            sql,
+            "UPDATE `user` t \
+             INNER JOIN user_address addressDO ON addressDO.user_id = t.id \
+             SET t.name = ?, t.sex = ?, t.age = ?, t.head_img = ?, \
+             t.tel = '13800000000', t.age = t.age + 1, t.sex = t.sex - 1, \
+             t.name = concat(t.name, '_u') \
+             WHERE t.status = 1"
+        );
+        // SET parameters precede the condition's.
+        assert_eq!(
+            out.params,
+            vec!["entity.name", "entity.sex", "entity.age", "entity.head_img"],
+            "{:?}",
+            out.params
+        );
+    }
+
+    #[test]
+    fn a_join_update_takes_its_alias_from_set_alias() {
+        // The reference's own test: `setAlias("u")` retitles the statement,
+        // the SET and the condition; the lambda ON keeps the entity aliases.
+        let out = render(
+            r#"JoinWrappers.update(UserDO.class)
+                .setAlias("u")
+                .leftJoin(AddressDO.class, on -> on
+                    .eq(AddressDO::getUserId, UserDO::getId))
+                .set(UserDO::getName, "x")
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        assert_eq!(
+            out.sql.as_deref().expect("the chain renders"),
+            "UPDATE `user` u \
+             LEFT JOIN user_address addressDO ON addressDO.user_id = u.id \
+             SET u.name = 'x' \
+             WHERE u.id = 1"
+        );
+    }
+
+    #[test]
+    fn a_join_update_passes_raw_joins_and_qualified_columns_through() {
+        // The reference's own tests: a boolean prefix before `set`, a raw SQL
+        // join fragment, a caller-qualified `t1.tel` SET column and condition.
+        let out = render(
+            r#"JoinWrappers.update(UserDO.class)
+                .set(true, UserDO::getName, "x")
+                .set("t1.tel", "138")
+                .leftJoin("address t1 on t1.user_id = t.id")
+                .eq("t1.status", "1")"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        assert_eq!(
+            out.sql.as_deref().expect("the chain renders"),
+            "UPDATE `user` t \
+             LEFT JOIN address t1 on t1.user_id = t.id \
+             SET t.name = 'x', t1.tel = '138' \
+             WHERE t1.status = '1'"
+        );
+    }
+
+    #[test]
+    fn a_join_update_with_only_unusable_set_calls_refuses() {
+        // An UPDATE without a usable SET is not a statement: refuse instead
+        // of rendering one that would fail to parse in a real database.
+        let out = render(
+            r#"JoinWrappers.update(UserDO.class)
+                .set(UserDO::getHeadImg, UserDO::getName, "addr")
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Unresolved, "{out:?}");
+        assert_eq!(out.sql, None);
+        assert!(
+            out.message_keys
+                .contains(&"wrapper.update_set_missing".to_string()),
+            "{:?}",
+            out.message_keys
+        );
+    }
+
+    #[test]
+    fn a_join_delete_renders_its_targets_and_joins() {
+        // demo `deleteJoinExt`, all three target shapes: no delete call
+        // (main alias only), explicit classes (`AddressDO.class` resolves to
+        // its own default alias — the join's explicit `addr` stays on the
+        // FROM side, exactly as the reference documents) and `deleteAll()`.
+        let main_only = render(
+            r#"JoinWrappers.delete(UserDO.class)
+                .innerJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(AddressDO::getStatus, 0)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(
+            main_only.sql.as_deref().expect("the chain renders"),
+            "DELETE t FROM `user` t \
+             INNER JOIN user_address addressDO ON addressDO.user_id = t.id \
+             WHERE t.status = 0"
+        );
+
+        let explicit = render(
+            r#"JoinWrappers.delete(UserDO.class)
+                .delete(UserDO.class, AddressDO.class)
+                .innerJoin(AddressDO.class, "addr", AddressDO::getUserId, UserDO::getId)
+                .isNull(UserDO::getHeadImg)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(
+            explicit.sql.as_deref().expect("the chain renders"),
+            "DELETE t, addressDO FROM `user` t \
+             INNER JOIN user_address addr ON addr.user_id = t.id \
+             WHERE t.head_img IS NULL"
+        );
+
+        let all = render(
+            r#"JoinWrappers.delete(UserDO.class)
+                .deleteAll()
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(UserDO::getId, 1001)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(
+            all.sql.as_deref().expect("the chain renders"),
+            "DELETE t, addressDO FROM `user` t \
+             LEFT JOIN user_address addressDO ON addressDO.user_id = t.id \
+             WHERE t.id = 1001"
+        );
+    }
+
+    #[test]
+    fn a_subquery_condition_with_runtime_values_embeds_them_in_order() {
+        // The rule the previous version refused on: a sub-select whose own
+        // conditions carry runtime values renders its `?`s in place, and the
+        // parameter sources ride along in statement order. A sub-select with
+        // a *dropped* gap would still refuse (the sub-render stays partial
+        // with no parameters to embed).
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .in(UserDO::getId, AddressDO.class, sub -> sub
+                    .select(AddressDO::getUserId)
+                    .eq(AddressDO::getStatus, minAge))
+                .exists(AreaDO.class, sub -> sub
+                    .select(AreaDO::getId)
+                    .eq(AreaDO::getProvince, "浙江省"))
+                .eq(UserDO::getSex, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Exact, "{out:?}");
+        let sql = out.sql.as_deref().expect("the chain renders");
+        assert!(
+            sql.contains("t.id IN (SELECT user_id FROM user_address WHERE status = ?)"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("EXISTS (SELECT id FROM area WHERE province = '浙江省')"),
+            "{sql}"
+        );
+        assert_eq!(out.params, vec!["minAge"], "{:?}", out.params);
+    }
+
+    #[test]
+    fn a_subquery_with_a_dropped_gap_still_refuses() {
+        // `apply` narrows the sub-select with a fragment this renderer cannot
+        // expand; the sub-render comes back partial with no parameter to
+        // embed, so embedding it would read as a complete sub-select.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .in(UserDO::getId, AddressDO.class, sub -> sub
+                    .select(AddressDO::getUserId)
+                    .apply("status > 0"))
+                .eq(UserDO::getSex, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Unresolved, "{out:?}");
+        assert_eq!(out.sql, None);
     }
 
     #[test]
