@@ -146,15 +146,16 @@ pub struct SettingDef {
 ///   channel is driven by `capture-start` instead) and `log.displayMask`
 ///   (no display/export masking yet).
 /// - MCP Tools: `mcp.enabled`, `mcp.disabledTools`, `mcp.mask`.
-/// - About: `about.updateChannel`, `about.buildNumber` (read-only) and
-///   `about.cacheAction` (explanatory text only).
+/// - About: `about.buildNumber` (a read-only identity row; the reference's
+///   update channel is not shipped and its two buttons are the `cache-clear`
+///   and `build-info` settings-page actions).
 ///
 /// Wired by this lane through `core::log::ParseOptions` (read by the capture
 /// bridge and the log commands): `log.prefix`, `log.paramPrefix`,
 /// `log.mixedPrefix`, `log.filterKeywords`, `log.timePrefix`,
 /// `log.hibernateEnabled`, `log.hibernateSqlPrefix`, `log.hibernateParamPrefix`
 /// and `log.jdbcEnabled`.
-pub static DEFINITIONS: [SettingDef; 145] = [
+pub static DEFINITIONS: [SettingDef; 143] = [
     // Preview -------------------------------------------------------------
     // The reference's preview rows in its page order; `preview.presentation`
     // (lane L48) closes the group as this port's extra. The dialog is the
@@ -1301,30 +1302,22 @@ pub static DEFINITIONS: [SettingDef; 145] = [
         needs_restart: false,
     },
     // About page, L-SettingsParity ----------------------------------------
-    // The build number and the cache cleanup row are read-only: the platform
-    // has no settings-page action, so the second is explanatory text only.
-    SettingDef {
-        key: "about.updateChannel",
-        title: "更新通道",
-        group: "About",
-        kind: Kind::Enum(&["marketplace", "gitee"]),
-        default: DefaultValue::Str("marketplace"),
-        needs_restart: false,
-    },
+    // One read-only identity row: the plugin version plus the digest of the
+    // pinned engine jar (the two committed facts that identify a build). The
+    // reference's update channel is not shipped here — the schema has no
+    // disabled control and a live dropdown would lie, so the row is gone and
+    // the description says the channel is not open yet. The page's two
+    // buttons (clear the runtime caches, read the per-build MPV-Build stamp)
+    // are settings-page actions running the `cache-clear` and `build-info`
+    // commands, not settings.
     SettingDef {
         key: "about.buildNumber",
-        title: "内部构建号",
+        title: "内部构建号 (MPV-Build)",
         group: "About",
         kind: Kind::String,
-        default: DefaultValue::Str(""),
-        needs_restart: false,
-    },
-    SettingDef {
-        key: "about.cacheAction",
-        title: "插件缓存清理",
-        group: "About",
-        kind: Kind::String,
-        default: DefaultValue::Str(""),
+        default: DefaultValue::Str(
+            "0.1.0 · engine 0.1.0 · sha256 b9af1046713a62971e868c2a554d135db602201e0fbc01d51a24dd16446c1b2e",
+        ),
         needs_restart: false,
     },
     // Engine --------------------------------------------------------------
@@ -1578,6 +1571,24 @@ mod tests {
                 assert!(catalog.contains_key(*group), "{name} misses group {group}");
             }
         }
+    }
+
+    #[test]
+    fn the_build_number_default_carries_the_pinned_engine_digest() {
+        // The About row's identity is "plugin version + pinned engine jar
+        // digest". The digest is a committed fact (engine/ENGINE_VERSION.sha256);
+        // this test fails when the schema default and the pin drift apart.
+        let def = definition("about.buildNumber").expect("about.buildNumber");
+        let DefaultValue::Str(value) = def.default else {
+            panic!("about.buildNumber must default to a string")
+        };
+        let digest = include_str!("../engine/ENGINE_VERSION.sha256")
+            .split_whitespace()
+            .next()
+            .expect("the engine pin file records a digest");
+        assert!(value.contains(digest), "{value} misses the engine digest");
+        let version = env!("CARGO_PKG_VERSION");
+        assert!(value.contains(version), "{value} misses the plugin version");
     }
 
     #[test]

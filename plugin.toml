@@ -112,6 +112,25 @@ id = "index-stats"
 title = "Index Stats"
 category = "MyBatis SQL Visualizer"
 
+# About-page actions (the reference's About page closes with two buttons).
+# `cache-clear` empties the runtime indexes — the process-wide Java/XML method
+# and statement indexes and their cost counters — plus the pending
+# capture-start slot. Captured SQL files, the log panel's contents and SQL
+# history are user data and are not touched (the reference's boundary: caches
+# only, never history).
+[[contributes.commands]]
+id = "cache-clear"
+title = "Clear caches"
+category = "MyBatis SQL Visualizer"
+
+# Prints the per-build MPV-Build stamp build.rs baked into the wasm (the same
+# kind of number the reference shows on its About page), so same-day rebuilds
+# of one version can be told apart in bug reports.
+[[contributes.commands]]
+id = "build-info"
+title = "Build number"
+category = "MyBatis SQL Visualizer"
+
 # SQL preview (the plugin's main action): `<mapper.xml>#<id>`, a mapper file, a
 # bare path, inline SQL, or — with no argument — the current editor's selection or
 # whole document (`editor.read`, optional). Opens the preview tab on the right.
@@ -282,6 +301,15 @@ schema = "settings/mcp.json"
 id = "about"
 title = "About"
 schema = "settings/about.json"
+# The reference's About page closes with two buttons; the platform renders
+# these declarations as page actions (the command ids are declared above).
+# The reference's update channel has no equivalent here: the schema has no
+# disabled control, so the channel rows stay out of the page entirely and the
+# build-number description says the channel is not open yet.
+actions = [
+    { title = "Clear caches", command = "cache-clear" },
+    { title = "Build number", command = "build-info" },
+]
 
 [[contributes.settings.pages]]
 id = "engine"

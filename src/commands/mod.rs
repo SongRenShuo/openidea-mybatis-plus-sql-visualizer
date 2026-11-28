@@ -8,6 +8,8 @@
 //! one pure entry point in [`crate::core`], format the result into the shared
 //! Output channel. The channel lives here so all commands write to the same tab.
 
+pub mod build_info;
+pub mod cache_clear;
 pub mod capture_open_log;
 pub mod capture_poll;
 pub mod capture_start;

@@ -63,6 +63,8 @@ impl Plugin for Main {
             commands::preview_sql::ID => commands::preview_sql::run(ctx, arg),
             commands::preview_sql_diff::ID => commands::preview_sql_diff::run(ctx, arg),
             commands::index_stats::ID => commands::index_stats::run(ctx, arg),
+            commands::cache_clear::ID => commands::cache_clear::run(ctx, arg),
+            commands::build_info::ID => commands::build_info::run(ctx, arg),
             _ => Err(Error::NotFound(format!("command {id}"))),
         }
     }

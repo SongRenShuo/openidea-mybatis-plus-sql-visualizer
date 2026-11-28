@@ -814,8 +814,10 @@ pub fn now_ms() -> u64 {
 }
 
 /// `YYYY-MM-DD HH:MM:SS.mmm` UTC for an epoch timestamp. Logs rarely carry a
-/// zone; the panel shows the raw wall clock rather than guessing one.
-pub(super) fn format_epoch_ms(ms: i64) -> String {
+/// zone; the panel shows the raw wall clock rather than guessing one. The
+/// `build-info` command renders its stamp with the same helper, so both show
+/// one clock.
+pub(crate) fn format_epoch_ms(ms: i64) -> String {
     let seconds = ms.div_euclid(1000);
     let millis = ms.rem_euclid(1000);
     let days = seconds.div_euclid(86_400);
