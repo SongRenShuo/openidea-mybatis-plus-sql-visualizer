@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::{TOOLS, call_tool};
 
-const PLUGIN_ID: &str = "songrenshuo_mybatis_plus_sql_visualizer";
+const PLUGIN_ID: &str = "songrenshuo_mybatis_sql_visualizer";
 
 const SCHEMAS: &[&str] = &[
     include_str!("schemas/sqlv_render_sql.schema.json"),
