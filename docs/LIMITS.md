@@ -66,7 +66,9 @@
    `selectAll`/`select`/`selectAs`/聚合族/`selectIgnore`、`groupBy`/`having`、
    `in`/`exists` 子查询均已渲染；ON 与条件列按**列自己的实体类**定别名（原版 A47 语义），
    联表实体的表名与列从工程索引读实体类得到。副表实体不在索引里时该链 `unresolved`
-   （不猜表名）。仍未做（`unresolved`，不出 SQL）：`selectFunc`/`selectSub`/
+   （不猜表名）。列别名按原版分位：ON 侧按列自己的实体类（A47），条件/ORDER BY/GROUP BY
+   一律主表别名 `t`（`columnPrefix`），SELECT 列按列自己的实体类查不到回落主表，
+   `selectAll(Class)` 永远展开主表列（原版 `parseSelectAll` 语义）。仍未做（`unresolved`，不出 SQL）：`selectFunc`/`selectSub`/
    `selectCollection`/`selectAssociation`/`from(子查询)`/`around`/子表 MConsumer
    子查询 join/联表 UPDATE 与 DELETE；`exists` 的 lambda 子查询内含运行期参数时整链
    `unresolved`（参数顺序文本层排不准）。逐形态清单见 `docs/registration/L35a.md` §15。

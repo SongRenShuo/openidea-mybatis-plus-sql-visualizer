@@ -219,6 +219,9 @@ pub struct WrapperChain {
     pub select_tables: Vec<String>,
     /// Columns `selectIgnore` dropped from the expanded list.
     pub select_ignored: Vec<String>,
+    /// The column-name prefix `selectAll(X.class, "p")` puts before every
+    /// expanded column (`p` + column), the reference's `parseSelectAll` prefix.
+    pub select_prefix: Option<String>,
     /// The explicit SELECT list. Empty means "every column of the queried
     /// table(s)" — expanded at render time, the way the reference does.
     pub select: Vec<SelectColumn>,
@@ -580,7 +583,7 @@ struct Ctx<'a> {
 ///
 /// So this set is "loses structure", not "unsupported": such a chain is
 /// [`Confidence::Unresolved`] and ships no SQL, exactly like an unmapped field.
-const STRUCTURAL_METHODS: [&str; 10] = [
+const STRUCTURAL_METHODS: [&str; 11] = [
     "selectFunc",
     "selectSub",
     "selectCollection",
@@ -591,6 +594,7 @@ const STRUCTURAL_METHODS: [&str; 10] = [
     "selectAvg",
     "from",
     "around",
+    "join",
 ];
 
 /// Whether a call builds a FROM-side join clause.
@@ -1187,29 +1191,18 @@ fn parse_on_lambda(body: &str, ctx: &mut Ctx, chain: &mut WrapperChain) -> Vec<C
 /// statement returns; `selectIgnore` drops named columns from that expansion.
 fn parse_select(name: &str, args: &[String], ctx: &mut Ctx, chain: &mut WrapperChain) {
     match name {
-        "selectAll" => match args.first() {
-            None => chain.select_tables.push(String::new()),
-            Some(arg) => match class_literal(arg) {
-                Some(class) => {
-                    if ctx.columns.find(&class).is_none() {
-                        ctx.unresolved = true;
-                        push_key(ctx, "wrapper.join_table_unknown");
-                        ctx.notes.push(format!(
-                            "`selectAll({class}.class)` names an entity that is not in the projection"
-                        ));
-                        ctx.partial = false;
-                    }
-                    chain.select_tables.push(class);
-                }
-                None => {
-                    structural(
-                        ctx,
-                        format!("`selectAll({arg})` is not an entity class this renderer reads"),
-                    );
-                    chain.unsupported.push("selectAll".to_string());
-                }
-            },
-        },
+        "selectAll" => {
+            // The reference expands the MAIN table's columns for every
+            // `selectAll` call — `parseSelectAll` uses `table.allColumnNames`
+            // and `mainAlias` regardless of the class argument — and treats the
+            // second string argument as a column-name prefix. Same here: the
+            // class argument is accepted and ignored, so `selectAll(Main.class)`
+            // and `selectAll(Other.class)` both mean "all main columns".
+            if let Some(prefix) = args.get(1).and_then(|a| string_literal(a)) {
+                chain.select_prefix = Some(prefix);
+            }
+            chain.select_tables.push(String::new());
+        }
         "selectIgnore" => {
             for arg in args {
                 if let Some(column) = string_literal(arg) {
@@ -1677,11 +1670,12 @@ fn resolve_column(raw: &str, ctx: &mut Ctx) -> Option<String> {
     if let Some((recv, getter)) = parse_field_ref(raw) {
         let field = field_from_getter(&getter);
         if ctx.mpj {
-            // MPJ: the column belongs to whichever entity the receiver names —
-            // the main table (`t`) or a joined one (`addressDO`) — and renders
-            // qualified, the way MPJ itself emits it. An entity that never
-            // joined (and is not the main one) is a real error, not a
-            // degradation: there is no table its columns could belong to.
+            // MPJ condition columns take the MAIN alias unconditionally — the
+            // reference's `QueryWrapperParser` prefixes every condition column
+            // with `columnPrefix` (the main alias `t`) whatever entity the
+            // receiver names. The column name itself must still resolve in the
+            // main entity or one of the joined ones; a receiver that is neither
+            // is a real error, not a degradation.
             let Some(entity) = ctx.columns.find(&recv) else {
                 ctx.unresolved = true;
                 push_key(ctx, "wrapper.join_table_unknown");
@@ -1692,7 +1686,16 @@ fn resolve_column(raw: &str, ctx: &mut Ctx) -> Option<String> {
                 return None;
             };
             let column = entity.column_for(&field)?;
-            return Some(format!("{}.{}", alias_for_class(ctx, &recv), column));
+            // Inside an ON lambda the column takes its OWN entity's alias (the
+            // reference's A47 rule — `ON t.user_id = t.id` is the very defect
+            // A47 fixed); everywhere else the reference prefixes condition
+            // columns with the main alias unconditionally.
+            let alias = if ctx.on_mode {
+                alias_for_class(ctx, &recv)
+            } else {
+                ctx.main_alias.clone()
+            };
+            return Some(format!("{alias}.{column}"));
         }
         if !ctx.columns.class_name.is_empty() && recv != ctx.columns.class_name {
             ctx.partial = true;
@@ -1821,11 +1824,15 @@ fn render_select_list(chain: &WrapperChain, columns: &EntityColumns, dialect: &D
         let Some((entity, alias)) = expand_select_table(table, chain, columns) else {
             continue;
         };
+        let prefix = chain.select_prefix.as_deref().unwrap_or("");
         for (_, column, _) in &entity.columns {
             if chain.select_ignored.iter().any(|ignored| ignored == column) {
                 continue;
             }
-            items.push(render_column_name(&format!("{alias}.{column}"), dialect));
+            items.push(render_column_name(
+                &format!("{alias}.{prefix}{column}"),
+                dialect,
+            ));
         }
     }
     items.extend(
@@ -2710,6 +2717,77 @@ mod tests {
             "{:?}",
             out.message_keys
         );
+    }
+
+    #[test]
+    fn condition_columns_take_the_main_alias_even_for_joined_entities() {
+        // The reference's `QueryWrapperParser` prefixes every condition column
+        // with `columnPrefix` (the main alias) whatever entity the receiver
+        // names — unlike the ON sides, which follow A47. Demo `updateJoinExt`
+        // has the shape: `.innerJoin(AddressDO.class, …).eq(AddressDO::getStatus, 1)`.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(AddressDO::getStatus, 1)
+                .orderByAsc(AddressDO::getTel)"#,
+            &user_cols(),
+            mysql(),
+        );
+        let sql = out.sql.expect("the chain renders");
+        assert!(sql.contains("WHERE t.status = 1"), "{sql}");
+        assert!(sql.contains("ORDER BY t.tel ASC"), "{sql}");
+        // The ON sides still follow their own entities.
+        assert!(sql.contains("ON addressDO.user_id = t.id"), "{sql}");
+    }
+
+    #[test]
+    fn select_all_expands_the_main_table_regardless_of_the_class_argument() {
+        // The reference's `parseSelectAll` uses `table.allColumnNames` and
+        // `mainAlias` whatever entity the call names — `selectAll(Other.class)`
+        // still lists the main table's columns. Ported from
+        // `MpjLambdaConverter.parseSelectAll`.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(AddressDO.class)
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        let sql = out.sql.expect("the chain renders");
+        assert!(
+            sql.starts_with("SELECT t.id, t.name, t.sex, t.age, t.head_img FROM"),
+            "{sql}"
+        );
+        // And the prefix form (`selectAll(X.class, "p")` → `p + column`).
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class, "u.")
+                .leftJoin(AddressDO.class, AddressDO::getUserId, UserDO::getId)
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        let sql = out.sql.expect("the chain renders");
+        assert!(sql.contains("SELECT t.u.id, t.u.name,"), "{sql}");
+    }
+
+    #[test]
+    fn a_custom_keyword_join_is_structural_not_partial() {
+        // `join("FULL JOIN", …)` cannot be dropped from the FROM clause: a
+        // single-table statement would answer a different question, so the
+        // chain stays unresolved rather than partial-with-SQL.
+        let out = render(
+            r#"JoinWrappers.lambda(UserDO.class)
+                .selectAll(UserDO.class)
+                .join("FULL JOIN", "user_address addr on t.id = addr.user_id")
+                .eq(UserDO::getId, 1)"#,
+            &user_cols(),
+            mysql(),
+        );
+        assert_eq!(out.confidence, Confidence::Unresolved);
+        assert_eq!(out.sql, None);
     }
 
     #[test]
