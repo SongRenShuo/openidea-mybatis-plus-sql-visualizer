@@ -2,6 +2,6 @@ repository = "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer
 suggest = ["pom.xml", "build.gradle.kts"]
 
 [[versions]]
-version = "0.1.0"
-package = "https://github.com/<owner>/openidea-mybatis-plus-sql-visualizer/releases/download/v0.1.0/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin"
-sha256 = "6bcbc8450fe1eec0754a4cafd588d534c20130e4e5fd2233f4106ceb2be660ad"
+version = "2026.11.29"
+package = "https://github.com/<owner>/openidea-mybatis-plus-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
+sha256 = "acdec26f5ed0a31e9295a8ee13886da341e38de95d7fe6f098c48b5a58e6f4c8"

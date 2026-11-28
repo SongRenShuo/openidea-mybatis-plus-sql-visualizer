@@ -6,14 +6,14 @@
 跑 `openidea-plugin check` 并验签。
 
 **2026-11-26 用户决定：先自行验收，验收通过后再提 PR。** 在此之前不建 tag、不发 Release、
-不提 PR。本地已就绪：发布者密钥（仓库外）、签名包（sha256 `6bcbc845…`，check 通过）、
+不提 PR。本地已就绪：发布者密钥（仓库外）、签名包（sha256 `acdec26f…`，check 通过）、
 `upstream/` 两份 TOML（公钥与 sha256 已填，仅缺 package URL）。
 
 可直接使用的模板在 [`upstream/`](upstream/README.md)（两份 TOML 的精确形状）。
 
 ## 前置条件（缺一不可）
 
-1. **已发布的签名包**：`dist/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin`
+1. **已发布的签名包**：`songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin`（仓库根目录，非 `dist/`）
    及其 `.sha256`，由 `scripts/release.sh` 产出，并已上传到 GitHub Release / Gitee 镜像
    （见 `market/README.md` 与 `.github/workflows/release.yml`）。
 2. **发布者密钥已进索引**：`scripts/build-index.sh` 用 `MPSV_KEY_FILE` 生成 `market/index.json`，
@@ -33,8 +33,8 @@
 ## 操作步骤（需用户授权后执行）
 
 ```sh
-# 1) 确认包与哈希（本地已有 dist/）
-awk '{print $1}' dist/*.sha256
+# 1) 确认包与哈希（release-smoke.sh 产出的包在仓库根目录）
+awk '{print $1}' *.oiplugin.sha256 2>/dev/null || sha256sum *.oiplugin
 
 # 2) 生成/更新自建索引（已含官方索引合并用法）
 MPSV_KEY_FILE=$HOME/mpsv-publisher.key \
@@ -46,7 +46,7 @@ bash scripts/build-index.sh
 #    （仓库地址与目录以上游 README 为准；本仓不擅自 fork/push）
 
 # 4) 合并后回读：IDE 设置 › 插件 › 市场，搜索 "MyBatis SQL Visualizer"，
-#    安装 → 版本号与 dist/ 的 sha256 一致 → 升级路径再用 0.1.1 验一次
+#    安装 → 版本号与 dist/ 的 sha256 一致 → 升级路径再用下一个日期版验一次
 ```
 
 ## 验收标准（与 TASKS 一致）

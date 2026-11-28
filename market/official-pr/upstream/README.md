@@ -22,8 +22,8 @@ repository = "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer
 suggest = ["pom.xml", "build.gradle.kts"]
 
 [[versions]]
-version = "0.1.0"
-package = "https://github.com/<owner>/openidea-mybatis-plus-sql-visualizer/releases/download/v0.1.0/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin"
+version = "2026.11.29"
+package = "https://github.com/<owner>/openidea-mybatis-plus-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
 sha256 = "<sha256 of that package>"
 ```
 
