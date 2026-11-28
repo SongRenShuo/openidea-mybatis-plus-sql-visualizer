@@ -1,15 +1,17 @@
 name: release
 
-# Tag-driven only: a `v*` tag is the single trigger, so a stray push to a branch
-# can never ship a package. workflow_dispatch re-publishes an existing tag
-# (assets are replaced, the tag itself is not moved).
+# Tag-driven only: a version tag is the single trigger, so a stray push to a
+# branch can never ship a package. The tag is the manifest's version verbatim
+# and carries no `v` prefix (`2026.11.28`), as the IntelliJ edition tags its
+# releases; `[0-9]*` is what matches that shape. workflow_dispatch re-publishes
+# an existing tag (assets are replaced, the tag itself is not moved).
 on:
   push:
-    tags: ['v[0-9]*']
+    tags: ['[0-9]*']
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to (re)publish, e.g. v0.1.0'
+        description: 'Existing tag to (re)publish, e.g. 2026.11.28'
         required: true
         type: string
 
@@ -54,8 +56,9 @@ jobs:
           openidea-plugin --version | tee /tmp/cli-version.txt
           grep -F "0.1.55" /tmp/cli-version.txt
 
-      # The tag is the release version; a mismatch would publish 0.1.0 under the
-      # name v0.2.0 and make every later update decision wrong.
+      # The tag is the release version verbatim (both are `2026.11.28`, no `v`):
+      # a mismatch would publish one version under another's name and make every
+      # later update decision wrong.
       - name: Tag must match plugin.toml version
         id: meta
         run: |
@@ -75,7 +78,7 @@ jobs:
           }
           plugin_id="$(top_level id)"
           version="$(top_level version)"
-          if [ "v$version" != "$tag" ]; then
+          if [ "$version" != "$tag" ]; then
             echo "::error::tag $tag does not match plugin.toml version $version"
             exit 1
           fi
@@ -152,7 +155,7 @@ jobs:
           notes="$RUNNER_TEMP/notes.md"
           # No regex for the bracket in "## [x.y.z]": awk's `\[` escape is not
           # portable (gawk mangles it), so match by index() instead.
-          awk -v ver="${TAG#v}" '
+          awk -v ver="$TAG" '
             BEGIN { want = "## [" ver "]"; p = 0 }
             {
               if (p && substr($0, 1, 4) == "## [") exit

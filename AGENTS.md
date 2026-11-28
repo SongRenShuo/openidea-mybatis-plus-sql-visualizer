@@ -17,6 +17,7 @@
 | SDK | `openidea-plugin = { git = "...", tag = "v0.1.55" }`（插件 API 仍 1.18）；脚手架用 0.1.51 的 CLI 生成 |
 | Rust | 1.98.1（`rust-toolchain.toml`），target `wasm32-wasip2` |
 | Node | 22.22.3（`.nvmdrc`，NVM Desktop 目录级切换） |
+| 版本号 | `YYYY.M.D` 日期制（与原版仓一致），tag 不带 `v`；规则见 `docs/规范/版本号规范-说明文档.md` |
 
 ## 门禁（本地定向，全量交 CI）
 
