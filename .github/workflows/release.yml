@@ -34,6 +34,10 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       package: ${{ steps.meta.outputs.package }}
       sha256: ${{ steps.pack.outputs.sha256 }}
+      # Declared here or `needs.package.outputs.prerelease` is empty downstream:
+      # a step output only crosses jobs through this block, and an empty value
+      # silently means "not a prerelease".
+      prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -230,6 +234,13 @@ jobs:
         run: |
           set -euo pipefail
           api="https://gitee.com/api/v5/repos/${OWNER}/${REPO}"
+          # `prerelease=` with an empty value is `{"messages":["prerelease is
+          # invalid"]}` — 400, measured. So the flag is only sent when the value
+          # actually carries a boolean (Gitee's own default is false).
+          pre_args=()
+          if [ -n "${PRERELEASE:-}" ]; then
+            pre_args+=(--data-urlencode "prerelease=${PRERELEASE}")
+          fi
           release_id="$(curl -fsS --retry 3 "$api/releases?access_token=${GITEE_TOKEN}&per_page=100" \
             | jq -r --arg t "$TAG" '[.[] | select(.tag_name == $t) | .id][0] // empty')"
           if [ -n "$release_id" ] && [ "$release_id" = "null" ]; then
@@ -246,8 +257,8 @@ jobs:
               --data-urlencode "tag_name=${TAG}" \
               --data-urlencode "target_commitish=${GITHUB_REF_NAME:-master}" \
               --data-urlencode "name=${TAG}" \
-              --data-urlencode "prerelease=${PRERELEASE}" \
-              --data-urlencode "body=See the GitHub release for notes.")"
+              --data-urlencode "body=See the GitHub release for notes." \
+              "${pre_args[@]}")"
             release_id="$(printf '%s' "$created" | jq -r '.id // empty')"
             # A failed create returns `{"messages":[…]}` with no id: say what
             # Gitee said instead of sending `null` to the upload endpoint (which
@@ -267,7 +278,7 @@ jobs:
             --data-urlencode "access_token=${GITEE_TOKEN}" \
             --data-urlencode "tag_name=${TAG}" \
             --data-urlencode "name=${TAG}" \
-            --data-urlencode "prerelease=${PRERELEASE}" > /dev/null
+            "${pre_args[@]}" > /dev/null
 
           for f in dist/*.oiplugin dist/*.sha256; do
             name="$(basename "$f")"
