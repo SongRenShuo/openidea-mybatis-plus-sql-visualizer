@@ -84,6 +84,16 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "package=$plugin_id-$version.oiplugin" >> "$GITHUB_OUTPUT"
+          # A `-beta.N` version is an internal test build (docs/规范/版本号规范-
+          # 说明文档.md §内测版本号). The IDE only compares semver, so this marks
+          # the release page, not the install path: `2026.11.30-beta.1` still
+          # sorts above `2026.11.29`, and below a `2026.11.30` final, so a user
+          # on the earlier final is offered the beta and a user on the beta is
+          # offered the final when it lands.
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       # The key arrives base64-encoded so a trailing newline or CRLF in the
       # secret cannot corrupt it. It lives in $RUNNER_TEMP and is removed in an
@@ -150,6 +160,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.package.outputs.tag }}
+          PRERELEASE: ${{ needs.package.outputs.prerelease }}
         run: |
           set -euo pipefail
           notes="$RUNNER_TEMP/notes.md"
@@ -164,10 +175,19 @@ jobs:
             }
           ' CHANGELOG.md > "$notes"
           [ -s "$notes" ] || printf 'See CHANGELOG.md.\n' > "$notes"
+          # `--prerelease` on create only; `gh release edit` it on a re-run, so a
+          # `-beta.N` published without the flag gets corrected rather than kept.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/*.oiplugin dist/*.sha256 --clobber
+            if [ "$PRERELEASE" = "true" ]; then
+              gh release edit "$TAG" --prerelease
+            else
+              gh release edit "$TAG" --prerelease=false
+            fi
           else
-            gh release create "$TAG" --title "$TAG" --notes-file "$notes" \
+            extra=()
+            [ "$PRERELEASE" = "true" ] && extra+=(--prerelease)
+            gh release create "$TAG" --title "$TAG" --notes-file "$notes" "${extra[@]}" \
               dist/*.oiplugin dist/*.sha256
           fi
 
@@ -204,6 +224,7 @@ jobs:
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           TAG: ${{ needs.package.outputs.tag }}
+          PRERELEASE: ${{ needs.package.outputs.prerelease }}
           OWNER: ${{ vars.GITEE_OWNER }}
           REPO: ${{ vars.GITEE_REPO }}
         run: |
@@ -217,12 +238,15 @@ jobs:
           if [ -z "$release_id" ]; then
             # Gitee requires `target_commitish` on create (GitHub does not); the
             # tag is what the mirror publishes, so the branch behind it is enough.
+            # `prerelease` marks a `-beta.N` build on the mirror's page too, so
+            # the two channels describe the same thing.
             created="$(curl -fsS --retry 3 -X POST "$api/releases" \
               -H "Content-Type: application/x-www-form-urlencoded" \
               --data-urlencode "access_token=${GITEE_TOKEN}" \
               --data-urlencode "tag_name=${TAG}" \
               --data-urlencode "target_commitish=${GITHUB_REF_NAME:-master}" \
               --data-urlencode "name=${TAG}" \
+              --data-urlencode "prerelease=${PRERELEASE}" \
               --data-urlencode "body=See the GitHub release for notes.")"
             release_id="$(printf '%s' "$created" | jq -r '.id // empty')"
             # A failed create returns `{"messages":[…]}` with no id: say what
@@ -234,6 +258,16 @@ jobs:
             fi
           fi
           [ -n "$release_id" ] || { echo "::error::no Gitee release id"; exit 1; }
+
+          # A re-run on an existing release keeps its body, so the flag is patched
+          # by id (PATCH is a whole-record replace: `tag_name` and `name` go with
+          # it, or Gitee clears them).
+          curl -fsS --retry 3 -X PATCH "$api/releases/${release_id}" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "access_token=${GITEE_TOKEN}" \
+            --data-urlencode "tag_name=${TAG}" \
+            --data-urlencode "name=${TAG}" \
+            --data-urlencode "prerelease=${PRERELEASE}" > /dev/null
 
           for f in dist/*.oiplugin dist/*.sha256; do
             name="$(basename "$f")"

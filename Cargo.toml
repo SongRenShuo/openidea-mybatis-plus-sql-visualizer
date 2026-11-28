@@ -1,6 +1,6 @@
 [package]
 name = "openidea-plugin-mybatis-plus-sql-visualizer"
-version = "2026.11.29"
+version = "2026.11.30-beta.1"
 edition = "2024"
 publish = false
 

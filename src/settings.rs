@@ -1316,7 +1316,7 @@ pub static DEFINITIONS: [SettingDef; 143] = [
         group: "About",
         kind: Kind::String,
         default: DefaultValue::Str(
-            "2026.11.29 · engine 0.1.0 · sha256 b9af1046713a62971e868c2a554d135db602201e0fbc01d51a24dd16446c1b2e",
+            "2026.11.30-beta.1 · engine 0.1.0 · sha256 b9af1046713a62971e868c2a554d135db602201e0fbc01d51a24dd16446c1b2e",
         ),
         needs_restart: false,
     },
