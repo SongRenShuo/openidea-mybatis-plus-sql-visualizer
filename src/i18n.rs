@@ -1029,11 +1029,28 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ),
     ("view.logs.focus.template_prefix", "Template", "模板"),
     ("view.logs.button.community", "Community", "交流群"),
-    ("view.logs.community.title", "Community", "交流群"),
+    ("view.logs.community.title", "Community", "微信交流"),
+    // The community dialog's two QR cards, the reference CommunityDialog's
+    // own wording (its `log.community.*` bundle keys).
     (
-        "view.logs.community.guide",
-        "The community group and the author's contact are listed on the project page.",
-        "交流群与作者联系方式见项目主页。",
+        "view.logs.community.author",
+        "Author's WeChat",
+        "作者微信",
+    ),
+    (
+        "view.logs.community.author_desc",
+        "Scan to add the author and discuss using or developing the plugin. Mention \"SQL Visualizer\" in your friend request.",
+        "扫码添加作者为朋友，欢迎交流插件使用与开发话题；加好友时请备注「SQL Visualizer」。",
+    ),
+    (
+        "view.logs.community.group",
+        "Community Group",
+        "交流群",
+    ),
+    (
+        "view.logs.community.group_desc",
+        "Scan to join the SQL Visualizer group. If the group QR code has expired, add the author's WeChat instead.",
+        "扫码加入 SQL Visualizer 交流群；群码失效时可添加作者微信。",
     ),
     // In-panel sheets (L2): the settings gear, the community entry and the
     // help entry open an overlay inside the log panel instead of only writing
@@ -1082,11 +1099,6 @@ pub const TABLE: &[(&str, &str, &str)] = &[
     ("view.logs.crud.bar", "Left bar", "左侧色条"),
     ("view.logs.crud.background", "Row background", "整行淡背景"),
     ("view.logs.crud.off", "Off", "关闭"),
-    (
-        "view.logs.community.qr_placeholder",
-        "QR code placeholder \u{2014} the group QR is published on the project page.",
-        "二维码占位 \u{2014} 交流群二维码见项目主页。",
-    ),
     // List badges (L2): the reference prints `×N 同结构 N 条` and `疑似 N+1`.
     (
         "view.logs.badge.group",

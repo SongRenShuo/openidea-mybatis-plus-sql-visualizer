@@ -1,7 +1,7 @@
 id = "songrenshuo.mybatis-plus-sql-visualizer"
 name = "MyBatis SQL Visualizer"
 version = "0.1.0"
-description = "Renders MyBatis mapper XML, annotation SQL, iBatis 2.x sqlMap, MyBatis-Plus / MPJ wrapper chains (joins, join updates and deletes, subqueries) and SQL logs into the executable SQL the database will receive, with real parameters filled in, and checks every statement before it runs: dialect quoting, unsafe writes, 21 performance rules. 服务未启，SQL 先知。Every result carries an exact / partial / unresolved confidence — unresolved never invents SQL — and 12 read-only MCP tools expose the same engine to AI agents."
+description = "把 MyBatis 的 mapper XML、注解 SQL、iBatis 2.x sqlMap、MyBatis-Plus / MPJ 的 Wrapper 链（联表、联表更新与删除、子查询）以及 SQL 日志还原成数据库真正执行的 SQL，真实参数回填；执行前逐条检查：方言引号、不安全写法、21 条性能规则。服务未启，SQL 先知。每条结果都带 exact / partial / unresolved 置信度——unresolved 不出 SQL，绝不臆造；另有 12 个只读 MCP 工具把同一引擎交给 AI 智能体。交流群与作者微信二维码：打开 SQL 日志面板，点击工具栏的对话气泡图标。"
 authors = ["songrenshuo"]
 homepage = "https://gitee.com/songrenshuo/openidea-mybatis-plus-sql-visualizer"
 license = "Apache-2.0"

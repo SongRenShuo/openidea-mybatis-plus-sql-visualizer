@@ -480,8 +480,10 @@ fn labels_sheets() -> Value {
         "helpScroll": t("view.logs.help.scroll"),
         "helpSort": t("view.logs.help.sort"),
         "helpBlocked": t("view.logs.help.blocked"),
-        "communityQrPlaceholder": t("view.logs.community.qr_placeholder"),
-        "communityGuide": t("view.logs.community.guide"),
+        "communityAuthor": t("view.logs.community.author"),
+        "communityAuthorDesc": t("view.logs.community.author_desc"),
+        "communityGroup": t("view.logs.community.group"),
+        "communityGroupDesc": t("view.logs.community.group_desc"),
     })
 }
 
@@ -1322,8 +1324,10 @@ mod tests {
             "helpScroll",
             "helpSort",
             "helpBlocked",
-            "communityQrPlaceholder",
-            "communityGuide",
+            "communityAuthor",
+            "communityAuthorDesc",
+            "communityGroup",
+            "communityGroupDesc",
             "groupBadge",
         ] {
             assert!(labels.get(key).is_some(), "missing label {key}");
@@ -1374,7 +1378,9 @@ mod tests {
             "crudStyleLabel(state.crudStyle || 'bar')",
             "L.settingsPathHint",
             "L.helpMenu",
-            "L.communityQrPlaceholder",
+            "L.communityAuthor",
+            "AUTHOR_QR_SRC",
+            "GROUP_QR_SRC",
             "while (body.firstChild) { body.removeChild(body.firstChild); }",
         ] {
             assert!(page.contains(needle), "missing sheet wiring {needle}");
@@ -1397,7 +1403,8 @@ mod tests {
         for key in [
             "settingsDisplayMode",
             "settingsPathHint",
-            "communityQrPlaceholder",
+            "communityAuthor",
+            "communityGroupDesc",
         ] {
             assert!(
                 labels[key].as_str().is_some_and(|text| !text.is_empty()),
@@ -2405,10 +2412,10 @@ mod tests {
         assert!(page.contains("item.setAttribute('data-sort', option.token)"));
         assert!(page.contains("post({ op: 'sort', sort: sortMode })"));
         assert!(page.contains("L.sortLabel"));
-        // The button names the current mode (L2), so the order is readable
-        // without opening the popup; the popup still carries the check mark.
-        assert!(page.contains("id=\"sortBtnText\""));
-        assert!(page.contains("setText($('sortBtnText'), sortOptionLabel(sorted));"));
+        // Icon-only (the reference's toolbar): no visible label next to the
+        // icon; the menu carries the check mark and the tooltip names the
+        // active option.
+        assert!(!page.contains("sortBtnText"));
         // The eye-off toolbar action opens the suppression manager (lane E) —
         // it used to drop a muted-methods popup, replaced by the dialog.
         assert!(page.contains("id=\"blockedBtn\""));
