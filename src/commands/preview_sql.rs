@@ -1096,7 +1096,13 @@ fn reason_lines(out: &RenderOutput) -> Vec<String> {
     let mut lines: Vec<String> = out
         .notes
         .iter()
-        .map(|note| format!("[{}] {}", note.message_key, note.detail))
+        .map(|note| {
+            format!(
+                "[{}] {}",
+                note.message_key,
+                crate::i18n::reason_body(&note.message_key, &note.detail)
+            )
+        })
         .collect();
     for key in &out.message_keys {
         if !out.notes.iter().any(|note| &note.message_key == key) {

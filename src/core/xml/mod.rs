@@ -76,9 +76,10 @@ pub struct RenderOutput {
 
 impl RenderOutput {
     /// One `[key] detail` line per note, plus a bare `[key]` for a key with no
-    /// note — the preview's "why is this partial/unresolved" text. Lives here
-    /// so every caller (the command, the workbench, the wrapper re-render)
-    /// words it the same way.
+    /// note — the raw, unlocalised shape. Lives here so every caller words the
+    /// *structure* the same way; the UI copies (workbench, hover, preview)
+    /// localise the text through `i18n::reason_body`, which this core module
+    /// cannot reach (integration tests compile it standalone via `#[path]`).
     pub fn reason_lines(&self) -> Vec<String> {
         let mut lines: Vec<String> = self
             .notes

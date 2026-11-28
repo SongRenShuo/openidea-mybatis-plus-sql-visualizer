@@ -1747,6 +1747,26 @@ pub fn t(key: &str) -> String {
     t_in(&host::locale(), key)
 }
 
+/// True when the IDE's UI language is Chinese. Render reasons carry both a
+/// translated line (the `message_key`'s text) and the renderer's English
+/// context sentence; the UI keeps the stable `[key]` prefix either way, so
+/// only this helper decides how much of each shows.
+pub fn is_chinese() -> bool {
+    host::locale().to_ascii_lowercase().starts_with("zh")
+}
+
+/// The text after `[key] ` in a render-reason line: the key's translated
+/// sentence with the renderer's English context sentence in parentheses
+/// (that sentence carries the concrete method/field/entity names), or the
+/// English sentence as-is in an English IDE.
+pub fn reason_body(key: &str, detail: &str) -> String {
+    if is_chinese() {
+        format!("{}（{}）", t(key), detail)
+    } else {
+        detail.to_string()
+    }
+}
+
 /// The same lookup for an explicit locale tag (pure; used by tests).
 pub fn t_in(locale: &str, key: &str) -> String {
     let chinese = locale.to_ascii_lowercase().starts_with("zh");

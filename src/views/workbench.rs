@@ -920,11 +920,18 @@ fn param_text(value: &Value) -> String {
 }
 
 /// `[key] detail` lines from a render's notes, plus any key that has no note.
+/// The text after the key follows the IDE language (`i18n::reason_body`).
 fn reason_lines(out: &RenderOutput) -> Vec<String> {
     let mut lines: Vec<String> = out
         .notes
         .iter()
-        .map(|note| format!("[{}] {}", note.message_key, note.detail))
+        .map(|note| {
+            format!(
+                "[{}] {}",
+                note.message_key,
+                crate::i18n::reason_body(&note.message_key, &note.detail)
+            )
+        })
         .collect();
     for key in &out.message_keys {
         if !out.notes.iter().any(|note| &note.message_key == key) {
@@ -4461,6 +4468,8 @@ mod tests {
     #[test]
     fn an_unresolved_wrapper_keeps_the_kind_and_ships_no_sql() {
         // No table, no statement: the render is unresolved and says why.
+        // The reason text now reads the IDE language, so the host must exist.
+        let (host, _guard) = test_host();
         let columns = wrapper::EntityColumns::default();
         let model = wrapper_model(WRAPPER_CHAIN, &columns, false, "MySQL", &Default::default());
         assert_eq!(model.kind, KIND_WRAPPER);
@@ -4472,6 +4481,23 @@ mod tests {
             "{}",
             model.reason
         );
+        // A Chinese IDE reads the key's translated text (the English context
+        // sentence stays as a parenthetical; the `[key]` prefix is stable).
+        host.set_locale("zh-CN");
+        let model = wrapper_model(WRAPPER_CHAIN, &columns, false, "MySQL", &Default::default());
+        assert!(
+            model
+                .reason
+                .contains("[wrapper.render.note] 包装器渲染说明（"),
+            "{}",
+            model.reason
+        );
+        assert!(
+            model.reason.contains("[wrapper.table_unknown]"),
+            "{}",
+            model.reason
+        );
+        host.set_locale("en");
     }
 
     #[test]

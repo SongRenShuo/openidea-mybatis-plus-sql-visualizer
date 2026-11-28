@@ -353,19 +353,29 @@ fn key_spans(out: &RenderOutput) -> Vec<String> {
         .collect()
 }
 
-/// `[message_key] detail` lines, plus any key that has no note. The detail is
-/// wrapped in an inline code span so markdown characters in an expression or an
-/// id cannot restyle the card.
+/// `[message_key] detail` lines, plus any key that has no note. The text
+/// after the key follows the IDE language (`i18n::reason_body`); the English
+/// context sentence stays wrapped in an inline code span so markdown
+/// characters in an expression or an id cannot restyle the card.
 fn reason_lines(out: &RenderOutput) -> Vec<String> {
     let mut lines: Vec<String> = out
         .notes
         .iter()
         .map(|note| {
-            let detail = inline_code(&note.detail);
-            if detail.is_empty() {
-                format!("[{}]", note.message_key)
+            if crate::i18n::is_chinese() {
+                format!(
+                    "[{}] {}（{}）",
+                    note.message_key,
+                    crate::i18n::t(&note.message_key),
+                    inline_code(&note.detail)
+                )
             } else {
-                format!("[{}] {}", note.message_key, detail)
+                let detail = inline_code(&note.detail);
+                if detail.is_empty() {
+                    format!("[{}]", note.message_key)
+                } else {
+                    format!("[{}] {}", note.message_key, detail)
+                }
             }
         })
         .collect();
