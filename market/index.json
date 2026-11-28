@@ -3,7 +3,7 @@
   "publishers": [
     {
       "id": "songrenshuo",
-      "name": "MyBatis SQL Visualizer",
+      "name": "SongRenShuo",
       "keys": [
         {
           "key": "8drSIdqiKMSfYJ/LXpCgRAMXtvdB+cDg95qJ8xGFIzg=",
@@ -762,7 +762,7 @@
         "songrenshuo"
       ],
       "publisher": "songrenshuo",
-      "download": "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin",
+      "download": "https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin",
       "digest": "3669fb85a7e6fab0b915bdd7bee979cf088c04541d92db4006c24706b2a9ac4d",
       "capabilities": [
         "project.read",
