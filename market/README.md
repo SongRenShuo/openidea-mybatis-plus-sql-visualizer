@@ -112,9 +112,56 @@ https://gitee.com/songrenshuo/openidea-mybatis-sql-visualizer/raw/master/market/
 `download` 指向 Gitee 发行版而非 GitHub：国内拉 GitHub 附件经常失败，这正是
 自建索引的意义所在。
 
-**每次发版都要重生成**：`scripts/build-index.sh` 生成自己的部分，再
-`openidea-plugin merge` 并入官方索引，覆盖 `market/index.json` 后提交。
-完整命令见 `.agents/skills/openidea-release-workflow/SKILL.md`。
+## 这份索引怎么保持新鲜
+
+`market/index.json` 是**官方索引的合并快照**，不是只列本插件的索引。IDE 只有一个
+市场地址（`crates/ide-host/src/plugins/market.rs` 的 `market_url()`：用户填的值
+**替换**默认值，不是追加），所以填了自建地址就等于换掉了官方那份——官方后来新增的
+插件，除非我们跟着同步，否则永远看不到。
+
+`.github/workflows/market-refresh.yml` 每天 03:17 UTC 跑一次：
+
+1. 拉官方索引
+   `https://github.com/l0ng-ai/openidea/releases/latest/download/plugins-index.json`；
+2. `scripts/refresh-market.py` 调
+   `openidea-plugin merge <我们的> <官方> --keep songrenshuo --out <我们的>`，
+   我们的条目（Gitee 下载地址、homepage）原样保留，其余发布者与插件整体取官方最新；
+3. 校验通过才写盘，内容真变了才提交，不变就不产生提交。
+
+所以最坏情况是落后一天。**这一条不依赖签名私钥**：merge 只是重新发布索引条目，
+不签名任何包。
+
+守卫都在 `scripts/refresh-market.py` 里，不是内联在 YAML 中——内联的 Python 块
+放在 `run: |` 里跑不出本地，而这些守卫正是这个作业的全部价值。脚本的正面与反面
+用例在 `scripts/refresh-market.test.sh`（干净输入必须过，每一种坏输入必须红）：
+
+| 守卫 | 挡的是 |
+| --- | --- |
+| 官方索引形态（`format`、插件数下限、发布者非空） | 抓取失败拿到错误页/被截断的文件，merge 后市场只剩几个插件 |
+| merge 后仍有 `songrenshuo` 发布者与插件 | `--keep` 失效，市场里本插件直接消失 |
+| 我们那条与合并前逐字段相同 | merge 用官方里的旧副本替换掉我们，下载地址被改回 GitHub |
+| 我们那条的 `download` 含 `gitee.com` | 自建索引的意义（国内可拉）没了 |
+| 官方那一半与刚拉的一致 | merge 没按约定整体替换 |
+| 全部通过才写盘 | 半校验的索引落盘，下一次运行会以它为基底继续合并 |
+
+本地跑一遍（不需要联网、不需要密钥）：
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+python scripts/refresh-market.py --official /tmp/plugins-index.json --check-only
+bash scripts/refresh-market.test.sh
+```
+
+**提 PR 被官方收录之后**：`--keep` 仍会保留我们这条，但两边同时列同一个发布者时
+CLI 会拒绝（`may not list publisher "songrenshuo"`）。脚本检测到官方索引里已出现
+该发布者时，会把它从官方那一半剪掉再合并，并打印一句提示——流程继续能用，不会红。
+真到了那天，把市场地址改回官方默认地址即可，这个 workflow 变成无害的空转
+（`--keep` 保住的仍是我们自己的条目），可以随时删。
+
+**每次发版都要重生成自己的部分**：`scripts/build-index.sh` 用签名私钥生成自己的
+条目（这一步必须本地做，私钥不入库），把结果并入 `market/index.json` 后提交；
+官方那一半由 `market-refresh.yml` 每天自动跟上，不用手工管。完整命令见
+`.agents/skills/openidea-release-workflow/SKILL.md`。
 
 ## 更新语义
 

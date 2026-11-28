@@ -146,6 +146,39 @@ sha256 = "<CI 那轮的实际值>"
 **索引允许多版本混列**（`crates/ide-extension/src/package.rs` 的 `offered()` 按 id 分组用 semver 选最新），
 所以旧条目不必删；但**删了 tag 就必须删条目**——指向已删包的条目会让下载 404。
 
+**条目 id 必须等于包内 id**：宿主装包时比对「包内 manifest.id = 索引条目 id」
+（`crates/ide-host/src/plugins/market.rs` 的 `verify_market_package`），不等就报
+`the download does not match the marketplace's entry`；登记仓 CI 同样比对。改过插件
+id 之后，旧包的条目不能留。
+
+### 索引的另一半是自动的
+
+`market/index.json` 不只有本插件：它是官方索引的合并快照（IDE 只有一个市场地址，
+用户填自建地址就替换掉官方那份）。官方那一半由 `.github/workflows/market-refresh.yml`
+**每日自动合并**（03:17 UTC + 手动触发），发版时**不用**手工同步官方插件列表。
+
+发版时要手工做的只有自己那一条：`scripts/build-index.sh` 用签名私钥重建，它需要新包的
+`download` 与 `digest`，而 `digest` 只能从包里算——这一步必须在 CI 出包之后本地做，
+私钥不经过 CI。
+
+界线：**自己的条目 = 发版动作，官方那一半 = 每日自动**，两者由同一次 merge 落到同一个
+文件，但只有前者需要人。守卫与本地自测见 `scripts/refresh-market.py` 的注释和
+`scripts/refresh-market.test.sh`。
+
+### 提 PR 被官方收录之后
+
+`docs/registry/` 的 PR 合流后，官方索引里就有了 `songrenshuo` 与该插件，自建索引不再是
+安装签名包的唯一途径：
+
+- `market-refresh.yml` 仍能跑。两边同时列同一个发布者时 CLI 会拒绝
+  （`may not list publisher "songrenshuo"`），`scripts/refresh-market.py` 会把官方那半里的
+  我们剪掉再合并并打印提示，不会因此变红。
+- 那时可以把市场地址改回官方默认（或清空用户填的值），这个 workflow 就成了无害的空转，
+  可以删。
+- 保留自建索引仍有一个理由：国内直连 GitHub raw 不稳，而自建条目的 `download` 指向
+  Gitee 发行版。留不留是用户的选择，不是流程要求。
+
+
 ## 8 已踩过的坑
 
 | 坑 | 事实 |
