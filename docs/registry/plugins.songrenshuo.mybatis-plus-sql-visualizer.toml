@@ -2,8 +2,17 @@ repository = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualize
 suggest = ["pom.xml"]
 
 # 版本发版后回填：sha256 由 scripts/release-smoke.sh 第 6 步输出，包附件挂
-# GitHub Release v<version>（songrenshuo.mybatis-plus-sql-visualizer-<version>.oiplugin）。
+# GitHub Release <version>（songrenshuo.mybatis-plus-sql-visualizer-<version>.oiplugin）。
+# tag 即版本号原文，不带 `v` 前缀（2026-11-28 起，见 docs/规范/版本号规范-说明文档.md）；
+# 0.1.0 那条是切换前的历史形态，原样保留——已装用户回滚要用它，
+# 且索引按 id 分组选最新版，新旧混列由 semver 判大小，不会互相顶掉。
 [[versions]]
 version = "0.1.0"
 package = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/releases/download/v0.1.0/songrenshuo.mybatis-plus-sql-visualizer-0.1.0.oiplugin"
 sha256 = "158e8d4737c48b95aa90761dc82fa2c05a41158ac3453737f836835a6ab94ab2"
+
+# 2026.11.28 起：新条目照下面三行加在末尾，tag 段不带 `v`。
+# [[versions]]
+# version = "2026.11.28"
+# package = "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/releases/download/2026.11.28/songrenshuo.mybatis-plus-sql-visualizer-2026.11.28.oiplugin"
+# sha256 = "<发版时 release-smoke.sh 第 6 步的输出>"

@@ -102,8 +102,11 @@ used.
 
 ## Cutting a release
 
-1. Bump `version` in `plugin.toml`; add the entry to `CHANGELOG.md` — the
-   `.oiplugin` change notes are generated from it. Both go through the normal
+1. Bump `version` in `plugin.toml` **and** `Cargo.toml` — both must match exactly
+   and follow the `YYYY.M.D` date scheme (`docs/规范/版本号规范-说明文档.md`);
+   `scripts/check-version-format.sh` is the gate, and the release tag is that
+   same string with no `v` prefix. Add the entry to `CHANGELOG.md` — the
+   `.oiplugin` change notes are generated from it. All go through the normal
    review and CI gate first.
 2. Run:
 

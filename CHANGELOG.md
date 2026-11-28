@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 版本号改成日期制 `YYYY.M.D`（与原版 IntelliJ 版一致），发行标签同步改成不带 `v` 前缀的版本号原文；已装旧版的用户照常收到升级提示。
+
 ### 新增
 
 - 16 个命令：渲染 mapper XML、校验 SQL、性能建议、生成 CRUD、回滚计划、渲染 SQL 日志、捕获启停与状态、打开日志、索引统计，以及**预览 SQL**（`<mapper.xml>#<语句>` / 路径 / 行内 SQL / 当前编辑器 / 注解 SQL 的 `<Mapper.java>#<方法>` / iBatis 2 的 `<sqlMap.xml>#<id>` / MyBatis-Plus Wrapper 链）与**差异预览**（原文↔SQL，可在窗口中打开）。
