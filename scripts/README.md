@@ -152,7 +152,7 @@ sha256sum <github-asset> <gitee-asset>
 ```sh
 export MPSV_KEY_FILE="$HOME/mpsv-publisher.key"
 export MPSV_PUBLISHER=songrenshuo
-export MPSV_DOWNLOAD_BASE="https://github.com/<owner>/<repo>/releases/download/2026.11.28"
+export MPSV_DOWNLOAD_BASE="https://github.com/<owner>/<repo>/releases/download/2026.11.29"
 scripts/build-index.sh
 ```
 

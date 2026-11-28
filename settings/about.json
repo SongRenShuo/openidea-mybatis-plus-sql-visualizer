@@ -4,7 +4,7 @@
       "type": "string",
       "title": "内部构建号 (MPV-Build)",
       "group": "About",
-      "default": "2026.11.28 · engine 0.1.0 · sha256 b9af1046713a62971e868c2a554d135db602201e0fbc01d51a24dd16446c1b2e",
+      "default": "2026.11.29 · engine 0.1.0 · sha256 b9af1046713a62971e868c2a554d135db602201e0fbc01d51a24dd16446c1b2e",
       "description": "只读标识，反馈问题时用于定位版本：插件版本 + 锁定的引擎 jar 摘要（engine/ENGINE_VERSION.sha256）。逐次构建唯一的 MPV-Build 号用下方「构建号」按钮输出到 Output 面板。版本更新走应用市场推送，Gitee 更新通道暂未开放。"
     }
   }
