@@ -22,7 +22,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  CLI_TAG: v0.1.54
+  CLI_TAG: v0.1.55
 
 jobs:
   static:
@@ -89,7 +89,7 @@ jobs:
           gunzip -c /tmp/openidea-plugin.gz > /usr/local/bin/openidea-plugin
           chmod +x /usr/local/bin/openidea-plugin
           openidea-plugin --version | tee /tmp/cli-version.txt
-          grep -F "0.1.54" /tmp/cli-version.txt
+          grep -F "0.1.55" /tmp/cli-version.txt
 
       - name: Build component
         run: openidea-plugin build
