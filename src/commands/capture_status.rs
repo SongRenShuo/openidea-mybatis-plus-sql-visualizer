@@ -15,7 +15,7 @@ pub const ID: &str = "capture-status";
 
 /// Dispatch entry.
 pub fn run(_ctx: &Invocation, _arg: Option<&str>) -> Result<Option<String>, Error> {
-    common::emit(&status_text(&bridge::Stats::current()))?;
+    common::emit_showing(&status_text(&bridge::Stats::current()))?;
     Ok(None)
 }
 

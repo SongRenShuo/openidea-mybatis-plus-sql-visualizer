@@ -40,7 +40,7 @@ pub fn run(_ctx: &Invocation, _arg: Option<&str>) -> Result<Option<String>, Erro
         out,
         "-- cache-clear: captured SQL files, the log panel contents and SQL history are user data and were not touched"
     );
-    common::emit(&out)?;
+    common::emit_showing(&out)?;
     Ok(None)
 }
 

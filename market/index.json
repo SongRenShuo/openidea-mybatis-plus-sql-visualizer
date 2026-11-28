@@ -782,7 +782,7 @@
         "light": "<svg width=\"40\" height=\"40\" viewBox=\"0 0 40 40\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n    <rect x=\"1\" y=\"1\" width=\"38\" height=\"38\" rx=\"9\" fill=\"#FFFFFF\" stroke=\"#D8DEE8\" stroke-width=\"1.5\"/>\n    <circle cx=\"28.5\" cy=\"27.5\" r=\"6.75\" fill=\"#E4F3FF\"/>\n    <path d=\"M14.25 14.5 L9.25 20 L14.25 25.5\" stroke=\"#1E9FFF\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n    <line x1=\"18\" y1=\"26\" x2=\"22\" y2=\"14\" stroke=\"#1E9FFF\" stroke-width=\"3\" stroke-linecap=\"round\"/>\n    <path d=\"M25.75 14.5 L30.75 20 L25.75 25.5\" stroke=\"#1E9FFF\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n    <circle cx=\"28.5\" cy=\"27.5\" r=\"6.75\" fill=\"none\" stroke=\"#0B6BCB\" stroke-width=\"2.6\"/>\n    <line x1=\"33.3\" y1=\"32.3\" x2=\"35.5\" y2=\"34.5\" stroke=\"#0B6BCB\" stroke-width=\"2.6\" stroke-linecap=\"round\"/>\n</svg>",
         "dark": null
       },
-      "homepage": "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer",
+      "homepage": "https://github.com/SongRenShuo/openidea-mybatis-sql-visualizer",
       "notes": "2026.11.29 — 首个 OpenIDEA 版：mapper XML / 注解 / iBatis / Wrapper 链静态还原 SQL，参数自动回填\n2026.11.29 — MyBatis-Plus 与 MPJ 全形态：联表、联表更新与删除、子查询\n2026.11.29 — SQL 日志五页签：增强捕获、四族日志粘贴还原、聚类去重、慢查询、N+1\n2026.11.29 — 检查面：方言写法、无界写操作、性能规则、回滚计划\n2026.11.29 — 12 个只读 MCP 工具；Gutter 预览图标与 Mapper↔XML 导航\n2026.11.29 — 权限可随时补授，缺失时各功能降级并在界面说明",
       "downloads": null,
       "featured": false,

@@ -28,7 +28,7 @@ pub fn run(_ctx: &Invocation, _arg: Option<&str>) -> Result<Option<String>, Erro
         out,
         "-- report this number when filing an issue so same-day rebuilds can be told apart"
     );
-    common::emit(&out)?;
+    common::emit_showing(&out)?;
     Ok(None)
 }
 

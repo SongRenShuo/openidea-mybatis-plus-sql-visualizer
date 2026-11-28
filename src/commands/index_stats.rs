@@ -17,7 +17,7 @@ pub const ID: &str = "index-stats";
 
 /// Dispatch entry.
 pub fn run(_ctx: &Invocation, _arg: Option<&str>) -> Result<Option<String>, Error> {
-    common::emit(&report(&indexer::index_stats()))?;
+    common::emit_showing(&report(&indexer::index_stats()))?;
     Ok(None)
 }
 

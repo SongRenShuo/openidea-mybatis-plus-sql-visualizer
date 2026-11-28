@@ -2,11 +2,11 @@
 
 状态：Draft
 目标版本：1.15 之后的下一个 minor（接口草案按 `@1.16.0` 写，实际版本由上游排期决定）
-提出方：OpenIDEA 端口（openidea-mybatis-plus-sql-visualizer），非上游仓库提交
+提出方：OpenIDEA 端口（openidea-mybatis-sql-visualizer），非上游仓库提交
 
 > 证据基线：上游 checkout `30e72ffa5`（tag `v0.1.51`，SDK `openidea-plugin` 0.1.51）。
 > 下文 `wit/…`、`crates/…`、`plugins/README.md` 均相对该 checkout；行号在该提交上核对，
-> 升级 SDK 后需复核。本仓路径相对 openidea-mybatis-plus-sql-visualizer。
+> 升级 SDK 后需复核。本仓路径相对 openidea-mybatis-sql-visualizer。
 
 ## 问题
 

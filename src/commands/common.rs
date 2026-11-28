@@ -64,10 +64,27 @@ pub fn missing_arg(usage: &str) -> CliError {
     CliError::new(KEY_MISSING_ARG, format!("usage: {usage}"))
 }
 
-/// Write `text` to the command channel, replacing whatever was there.
+/// Write `text` to the command channel, replacing whatever was there, without
+/// bringing the Output tab forward.
+///
+/// The rendering and checking commands already show their result where the user
+/// is looking (the preview panel, the tool window); opening a second tab beside
+/// the editor and moving the focus there for every command is noise, and the
+/// IntelliJ edition has no such tab at all. Anything worth interrupting for uses
+/// [`emit_showing`].
 pub fn emit(text: &str) -> Result<(), Error> {
     host::output_clear(CHANNEL)?;
     host::output_append(CHANNEL, &capped(text))?;
+    Ok(())
+}
+
+/// [`emit`], and bring the Output tab forward.
+///
+/// For the diagnostic commands the user runs on purpose to read something that
+/// has no other surface — the build number, the index stats, a cache clear's
+/// confirmation.
+pub fn emit_showing(text: &str) -> Result<(), Error> {
+    emit(text)?;
     host::output_reveal(CHANNEL)?;
     Ok(())
 }
@@ -155,9 +172,12 @@ pub fn finding_summary_line(text: &mut String, summary: &FindingSummary) {
 }
 
 /// Emit a readable error block and return it as the command's error.
+///
+/// A failure does bring the Output tab forward: unlike a result, there is no
+/// other surface for it, and a command that fails silently looks broken.
 pub fn report(key: &str, detail: &str) -> Result<Option<String>, Error> {
     let text = format!("-- error [{key}]: {detail}\n");
-    emit(&text)?;
+    emit_showing(&text)?;
     Err(Error::Failed(format!("{key}: {detail}")))
 }
 
