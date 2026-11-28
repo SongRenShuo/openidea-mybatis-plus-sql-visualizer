@@ -34,7 +34,7 @@ digest 相同），改 `plugin.toml` 才会变。**镜像之间比一致性要�
 ```sh
 export MPSV_KEY_FILE="$HOME/mpsv-publisher.key"
 export MPSV_PUBLISHER=songrenshuo
-export MPSV_DOWNLOAD_BASE="https://github.com/<owner>/<repo>/releases/download/v0.1.0"
+export MPSV_DOWNLOAD_BASE="https://github.com/<owner>/<repo>/releases/download/2026.11.28"
 scripts/build-index.sh
 ```
 

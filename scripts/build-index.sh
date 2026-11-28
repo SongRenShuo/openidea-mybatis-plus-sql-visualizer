@@ -8,7 +8,7 @@
 #                        in the index it writes.
 #   MPSV_PUBLISHER       publisher id (required) — the prefix of the plugin id.
 #   MPSV_DOWNLOAD_BASE   URL prefix the packages are served from (required),
-#                        e.g. https://github.com/<owner>/<repo>/releases/download/v0.1.0
+#                        e.g. https://github.com/<owner>/<repo>/releases/download/2026.11.28
 #   MPSV_NAME            publisher display name. Default: plugin.toml `name`.
 #   MPSV_DIST_DIR        directory holding the .oiplugin files. Default: dist
 #   MPSV_INDEX_OUT       where index.json is written. Default: market/index.json
@@ -59,7 +59,7 @@ command -v openidea-plugin >/dev/null 2>&1 ||
 [[ -n "${MPSV_DOWNLOAD_BASE:-}" ]] ||
   die "MPSV_DOWNLOAD_BASE is not set — the index needs an absolute URL prefix
   the packages are served from, e.g.
-      export MPSV_DOWNLOAD_BASE=https://github.com/<owner>/<repo>/releases/download/v0.1.0"
+      export MPSV_DOWNLOAD_BASE=https://github.com/<owner>/<repo>/releases/download/2026.11.28"
 
 publisher="$MPSV_PUBLISHER"
 name="${MPSV_NAME:-$(toml_top_level name)}"
