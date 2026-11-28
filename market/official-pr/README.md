@@ -33,8 +33,8 @@
 ## 操作步骤（需用户授权后执行）
 
 ```sh
-# 1) 确认包与哈希（release-smoke.sh 产出的包在仓库根目录）
-awk '{print $1}' *.oiplugin.sha256 2>/dev/null || sha256sum *.oiplugin
+# 1) 确认包与哈希：包由 CI 的 release.yml 产出，从 Release 附件下载
+gh release download <version> --pattern '*.oiplugin*' --dir dist
 
 # 2) 生成/更新自建索引（已含官方索引合并用法）
 MPSV_KEY_FILE=$HOME/mpsv-publisher.key \

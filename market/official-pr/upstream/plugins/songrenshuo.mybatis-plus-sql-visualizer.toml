@@ -4,4 +4,4 @@ suggest = ["pom.xml", "build.gradle.kts"]
 [[versions]]
 version = "2026.11.29"
 package = "https://github.com/<owner>/openidea-mybatis-plus-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin"
-sha256 = "681a61aceb9456814787cb69c0bb47d906671fb7cfc5b48131247e914a080379"
+sha256 = "241b0a2ba7e14b634d02c6b4828d549f217724147f6b79ff15b0169ba5727715"

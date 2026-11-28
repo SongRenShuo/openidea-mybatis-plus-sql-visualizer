@@ -22,5 +22,5 @@
 
 ## 相关流程
 
-- 发版：`scripts/release-smoke.sh`（冒烟）→ 签名 pack → GitHub Release 附件 + SHA-256 → 登记 PR（`docs/registry/` 草稿，提 PR 需用户确认）。
+- 发版：`scripts/release-smoke.sh` 本地自验（不产出包）→ tag → CI 的 `release.yml` 构建签名并双端上传 → 回填 CI 那一轮的 SHA-256 → 登记 PR（`docs/registry/` 草稿，提 PR 需用户确认）。
 - 平台文档：`docs/zh/plugins/publishing/packaging.mdx`（签名）、`policy.mdx`（审核规则）。

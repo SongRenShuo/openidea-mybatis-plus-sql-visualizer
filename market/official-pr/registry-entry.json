@@ -6,7 +6,7 @@
   "authors": ["songrenshuo"],
   "publisher": "songrenshuo",
   "download": "https://github.com/SongRenShuo/openidea-mybatis-plus-sql-visualizer/releases/download/2026.11.29/songrenshuo.mybatis-plus-sql-visualizer-2026.11.29.oiplugin",
-  "digest": "681a61aceb9456814787cb69c0bb47d906671fb7cfc5b48131247e914a080379",
+  "digest": "241b0a2ba7e14b634d02c6b4828d549f217724147f6b79ff15b0169ba5727715",
   "capabilities": ["project.read", "events", "clipboard", "process:java", "net:127.0.0.1"],
   "engine": "^1.15",
   "categories": ["tools"],
