@@ -861,6 +861,10 @@ mod tests {
         // conversion must keep it structured so `capture-start` can tell
         // "stop waiting" from "the application is not up yet".
         let host = MockHost::install().with_capabilities(&["project.read", "events"]);
+        // `connect` reads the process-wide session slot: without this guard a
+        // parallel test's live session turns the dial into AlreadyConnected
+        // before the mock's capability check ever runs (CI, full test run).
+        let _guard = guard();
         let project = project(&host);
         let error = connect(&project, &test_url(17890)).expect_err("denied without the net grant");
         assert_eq!(error.message_key(), KEY_DENIED, "{error:?}");
