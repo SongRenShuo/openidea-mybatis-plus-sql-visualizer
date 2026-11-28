@@ -584,7 +584,36 @@ enum Projection {
 fn wrapper_input(ctx: &Invocation, text: &str, source: Option<String>) -> Input {
     let class = sources::wrapper_entity_class(text);
     let projection = match class.as_deref() {
-        Some(class) => entity_projection(ctx, class),
+        Some(class) => match entity_projection(ctx, class) {
+            Projection::Read {
+                columns,
+                fully_declared,
+            } => {
+                // MPJ: every entity the chain joins needs its own projection —
+                // the renderer maps `Car::getDeviceId` against it and takes its
+                // table name for the join clause. A class the project cannot
+                // resolve is simply absent from the list; the renderer then
+                // refuses with the class named, rather than guessing a table.
+                let mut columns = columns;
+                for joined in sources::wrapper_join_classes(text) {
+                    if joined == class || columns.find(&joined).is_some() {
+                        continue;
+                    }
+                    if let Projection::Read {
+                        columns: joined_columns,
+                        ..
+                    } = entity_projection_single(ctx, &joined)
+                    {
+                        columns = columns.with_related(joined_columns);
+                    }
+                }
+                Projection::Read {
+                    fully_declared,
+                    columns,
+                }
+            }
+            other => other,
+        },
         // No class in the source: the renderer reports that itself.
         None => Projection::Unknown,
     };
@@ -598,6 +627,24 @@ fn wrapper_input(ctx: &Invocation, text: &str, source: Option<String>) -> Input 
 
 /// The field/column projection of `class`, read from its source in the project.
 fn entity_projection(ctx: &Invocation, class: &str) -> Projection {
+    let Some(path) = resolve_class_path(ctx, class) else {
+        return Projection::Unknown;
+    };
+    let Ok(java) = common::read_file(ctx, &path) else {
+        return Projection::Unreadable;
+    };
+    let model = entity::parse_entity(class, &java);
+    if model.columns.is_empty() {
+        return Projection::NoColumns;
+    }
+    Projection::Read {
+        fully_declared: model.fully_declared(),
+        columns: model.columns(),
+    }
+}
+
+/// One entity's projection, without the join fan-out (which would recurse).
+fn entity_projection_single(ctx: &Invocation, class: &str) -> Projection {
     let Some(path) = resolve_class_path(ctx, class) else {
         return Projection::Unknown;
     };

@@ -1434,6 +1434,16 @@ pub const TABLE: &[(&str, &str, &str)] = &[
         "该链用本版不渲染的方法构造联表或查询列，因此不输出 SQL",
     ),
     (
+        "wrapper.raw_fragment",
+        "A raw SQL fragment from the chain is rendered verbatim",
+        "链中的 SQL 片段按原文渲染",
+    ),
+    (
+        "wrapper.join_table_unknown",
+        "A joined entity's table is not in the projection",
+        "联表实体的表名不在投影里",
+    ),
+    (
         "wrapper.between_arity",
         "between() needs exactly two values",
         "between() 需要两个值",

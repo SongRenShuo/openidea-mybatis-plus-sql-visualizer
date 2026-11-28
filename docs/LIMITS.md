@@ -61,14 +61,15 @@
 下面这些不是平台做不到，而是本版刻意缩小了口径；每条都写清替代做法，避免把「能做」误读成「全做」。
 1. **渲染不读选区**：`render-xml` 的输入是工程内 mapper 文件路径（可带 `#namespace.id`），
    不申请 `editor.read`，所以不读光标位置或选区；需要预览某条语句时用路径 + 语句 id。
-2. **MPJ 联表（`MPJLambdaWrapper` / `JoinWrappers`）不渲染**：`leftJoin`/`innerJoin`/
-   `rightJoin`/`fullJoin` 与 `selectAll`/`selectAs`/`selectCollection` 这类**决定行
-   形状与列清单**的方法超出本版单表能力。这类链的渲染结果是 `unresolved`：**不输出
-   SQL**，只列原因（`wrapper.structural_method`）。这一点与「条件方法不支持」分档
-   不同——`.apply(...)` 只是少一个过滤条件，仍是 `partial` 并给出 SQL；丢掉 JOIN 则
-   会让 `SELECT * FROM 主表` 变成一条根本不是原查询的语句，宁可不出。
-   需要联表 SQL 时请用日志/历史里的真实语句（`sqlv_render_logs`、`sqlv_history_search`），
-   或把等价 SQL 直接粘到预览输入框。
+2. **MPJ 联表已支持（2026-11-28）**：`leftJoin`/`innerJoin`/`rightJoin`/`fullJoin`
+   的三参 / 四参别名 / 五参右别名 / lambda ON / `ext` 追加、raw join 片段、
+   `selectAll`/`select`/`selectAs`/聚合族/`selectIgnore`、`groupBy`/`having`、
+   `in`/`exists` 子查询均已渲染；ON 与条件列按**列自己的实体类**定别名（原版 A47 语义），
+   联表实体的表名与列从工程索引读实体类得到。副表实体不在索引里时该链 `unresolved`
+   （不猜表名）。仍未做（`unresolved`，不出 SQL）：`selectFunc`/`selectSub`/
+   `selectCollection`/`selectAssociation`/`from(子查询)`/`around`/子表 MConsumer
+   子查询 join/联表 UPDATE 与 DELETE；`exists` 的 lambda 子查询内含运行期参数时整链
+   `unresolved`（参数顺序文本层排不准）。逐形态清单见 `docs/registration/L35a.md` §15。
 3. **Wrapper 渲染在 wasm 侧**：引擎 jar 的 `render` 只覆盖日志/检查/性能三类；
    `LambdaQueryWrapper` 文本→链由 `src/analyze` 解析（无 PSI 的类型推断），
    `unresolved` 时只给原因，不出 Java 代码。

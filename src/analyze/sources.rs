@@ -238,6 +238,65 @@ fn has_call(text: &str) -> bool {
 // Wrapper
 // ---------------------------------------------------------------------------
 
+/// Every entity class the chain names with `.class`, in first-appearance
+/// order: the join targets and `selectAll(X.class)` tables an MPJ chain
+/// references. The command layer resolves each one into a projection; the
+/// renderer then maps a lambda column by the entity its receiver names.
+///
+/// A `.class` inside a string or comment does not count — the scan skips both,
+/// the way `wrapper_chain_at` reads statements.
+pub fn wrapper_join_classes(java: &str) -> Vec<String> {
+    let bytes = java.as_bytes();
+    let mut out: Vec<String> = Vec::new();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' | b'\'' => index = skip_quoted(bytes, index, bytes[index]),
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index += 2;
+                while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
+                {
+                    index += 1;
+                }
+                index = (index + 2).min(bytes.len());
+            }
+            _ => {
+                // An identifier run followed by `.class`.
+                if (bytes[index].is_ascii_alphabetic() || bytes[index] == b'_')
+                    && (index == 0
+                        || !(bytes[index - 1].is_ascii_alphanumeric()
+                            || bytes[index - 1] == b'_'
+                            || bytes[index - 1] == b'$'))
+                {
+                    let mut end = index;
+                    while end < bytes.len()
+                        && (bytes[end].is_ascii_alphanumeric()
+                            || bytes[end] == b'_'
+                            || bytes[end] == b'$')
+                    {
+                        end += 1;
+                    }
+                    if java[end..].starts_with(".class") {
+                        let class = &java[index..end];
+                        if !out.iter().any(|known| known == class) {
+                            out.push(class.to_string());
+                        }
+                    }
+                    index = end;
+                    continue;
+                }
+                index += 1;
+            }
+        }
+    }
+    out
+}
+
 /// The wrapper chain that contains `caret` in a Java document.
 ///
 /// The IntelliJ edition answers this with PSI (`WrapperLocator` walks the tree
